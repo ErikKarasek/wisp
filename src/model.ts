@@ -395,6 +395,7 @@ function routineItem(r: Obj, agents: Obj[], groupId: string, now: number): Item 
     state,
     chip: state === "sleep" ? "čeká" : undefined,
     bubble,
+    ...(agent ? { engine: agent.adapterType === "codex_local" ? ("ChatGPT" as const) : ("Claude" as const) } : {}),
     character: characterFor(`routine:${r.title}`),
     facts: [
       ["Kdo", agent?.name ?? "–"],

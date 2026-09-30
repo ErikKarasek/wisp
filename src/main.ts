@@ -211,6 +211,9 @@ function matches(item: Item) {
       return item.state === "run";
     case "sleep":
       return item.state === "sleep";
+    case "engine:ChatGPT":
+    case "engine:Claude":
+      return item.engine === filter.slice(7);
     default:
       return item.group === filter;
   }
@@ -320,6 +323,11 @@ function renderSide() {
     ["sleep", "Spí", n((i) => i.state === "sleep")],
   ];
   const where: [string, string, number | null][] = groups.map((g) => [g.id, groupLabel(g), g.items.length]);
+  // Agents and their routines, by the subscription they run on.
+  for (const engine of ["ChatGPT", "Claude"] as const) {
+    const count = n((i) => i.engine === engine);
+    if (count) where.push([`engine:${engine}`, engine, count]);
+  }
   const btn = ([id, label, count]: [string, string, number | null]) =>
     `<button data-f="${esc(id)}" class="${filter === id ? "on" : ""}">${esc(label)}${count == null ? "" : `<span>${count}</span>`}</button>`;
 
