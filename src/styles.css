@@ -393,3 +393,8 @@ button { font: inherit; color: inherit; }
 .pr-body .diff .hunk { color: #8b9cff; }
 .empty-state { display: grid; gap: 4px; padding: 30px 0; color: var(--muted); font-size: 13px; }
 .empty-state b { color: var(--text); font-size: 15px; }
+
+/* Which subscription an agent runs on. */
+.card .when .eng { font-weight: 600; font-size: 10.5px; margin-right: 6px; padding: 1px 5px; border-radius: 4px; }
+.eng.cl { color: #e8b48f; background: rgba(217, 119, 87, .14); }
+.eng.gpt { color: #7fd8c0; background: rgba(16, 163, 127, .15); }

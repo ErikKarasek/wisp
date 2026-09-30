@@ -51,6 +51,8 @@ export type Item = {
   state: State;
   chip?: string;
   bubble?: string;
+  /** Agents: the subscription they run on. */
+  engine?: "Claude" | "ChatGPT";
   character: Partial<MascotCharacter>;
   facts: [string, string][];
   /** A job's log label, an agent's live runs, or static lines to show instead. */
@@ -306,7 +308,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
       actions.push({
         label: "Probudit",
         primary: true,
-        confirm: "Spustí agenta přes tvoje Claude předplatné. Pokračovat?",
+        confirm: `Spustí agenta přes tvoje ${a.adapterType === "codex_local" ? "ChatGPT" : "Claude"} předplatné. Pokračovat?`,
         command: { type: "paperclip", kind: "agentInvoke", id: a.id },
       });
     }
@@ -331,6 +333,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
     state,
     chip,
     bubble,
+    engine: a.adapterType === "codex_local" ? "ChatGPT" : "Claude",
     character: characterFor(`agent:${a.name}`),
     facts: tasks ? [...facts, ["Úkoly", tasks]] : facts,
     log: { agent: { companyId: a.companyId, agentId: a.id } },

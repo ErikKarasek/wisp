@@ -136,6 +136,8 @@ const ALLOWED: &[(&str, &str)] = &[
     ("GET", "/companies/{id}/skills"),
     ("GET", "/companies/{id}/adapters/claude_local/models"),
     ("GET", "/companies/{id}/adapters/codex_local/models"),
+    // how much of the ChatGPT (and Claude) subscription is used
+    ("GET", "/companies/{id}/costs/quota-windows"),
 ];
 
 fn allowed(method: &str, path: &str) -> bool {
@@ -179,6 +181,8 @@ pub async fn request(method: &str, path: &str, body: Option<Value>) -> Result<Va
         Some(b) => req.json(&b),
         None => req,
     };
+    // Paperclip asks the Claude and Codex CLIs for the limits, which takes ~9 s.
+    let req = if path.ends_with("/costs/quota-windows") { req.timeout(Duration::from_secs(30)) } else { req };
     let res = req.send().await.map_err(|e| e.to_string())?;
     let status = res.status();
     let text = res.text().await.unwrap_or_default();

@@ -53,6 +53,9 @@ let selected: string | null = null;
 let jobs: Job[] = [];
 let paperclip: PaperclipSnapshot | null = null;
 let usage: ClaudeUsage | null = null;
+/** The ChatGPT subscription's limits, as Paperclip reads them from Codex. */
+type QuotaWindow = { label: string; usedPercent: number | null; resetsAt: string | null };
+let gptQuota: QuotaWindow[] = [];
 let prCount = 0;
 /** The last item that changed in a way worth showing in the notch. */
 let news: MiniItem | null = null;
@@ -159,6 +162,12 @@ function cardFor(item: Item, seed: number): Card {
   q(".doing").textContent = item.doing;
   q(".doing").title = item.doing;
   q(".when").textContent = item.when;
+  if (item.engine) {
+    const tag = document.createElement("b");
+    tag.className = `eng ${item.engine === "ChatGPT" ? "gpt" : "cl"}`;
+    tag.textContent = item.engine;
+    q(".when").prepend(tag);
+  }
   // A poked character keeps its reaction until it calms down.
   if (!poking(item.id)) q(".bubble").textContent = item.bubble ?? "";
   card.el.classList.toggle("sel", item.id === selected);
@@ -326,9 +335,22 @@ function renderSide() {
           })
           .join("")
       : "";
+  const gptLabel = (l: string) => (/^5h/i.test(l) ? "5 h" : /week/i.test(l) ? "týden" : /month/i.test(l) ? "měsíc" : l);
+  const gpt = gptQuota.length
+    ? `<h6>Limit ChatGPT</h6>` +
+      gptQuota
+        .map((w) => {
+          const pct = w.usedPercent ?? 0;
+          const resets = w.resetsAt ? new Date(w.resetsAt).toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+          return `<div class="gauge${pct >= 85 ? " hot" : ""}"${resets ? ` title="obnoví se ${esc(resets)}"` : ""}><div class="bar"><i style="width:${pct}%"></i></div>
+            <small>${esc(gptLabel(w.label))}: ${pct} %</small></div>`;
+        })
+        .join("")
+    : "";
   const neurons = cloudflare ? cloudflareNeurons(cloudflare) : null;
   const gauge =
     claude +
+    gpt +
     (neurons == null
       ? ""
       : `<h6>Workers AI dnes</h6><div class="gauge${neurons >= NEURONS_PER_DAY * 0.9 ? " hot" : ""}"><div class="bar"><i style="width:${Math.min(100, (neurons / NEURONS_PER_DAY) * 100).toFixed(1)}%"></i></div>
@@ -1021,8 +1043,21 @@ async function start() {
       })
       .catch(() => {});
   }
+  // Paperclip asks Codex for the ChatGPT limits; it takes a few seconds, so both run at once.
+  const loadGptQuota = async () => {
+    const company = paperclip?.online ? paperclip.companies[0]?.company?.id : null;
+    if (!company) return;
+    const all = await invoke<{ provider: string; ok: boolean; windows: QuotaWindow[] }[]>("paperclip_request", {
+      method: "GET",
+      path: `/companies/${company}/costs/quota-windows`,
+      body: null,
+    }).catch(() => null);
+    const openai = all?.find((q) => q.provider === "openai" && q.ok);
+    if (all) gptQuota = openai ? openai.windows.filter((w) => typeof w.usedPercent === "number") : [];
+  };
   const loadUsage = async () => {
-    usage = await invoke<ClaudeUsage>("claude_usage").catch(() => usage);
+    const [claude] = await Promise.all([invoke<ClaudeUsage>("claude_usage").catch(() => usage), loadGptQuota()]);
+    usage = claude;
     render();
     broadcast();
   };
