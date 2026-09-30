@@ -24,10 +24,11 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 let discovered: string[] | null = null;
 
 export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
-  const [hasToken, hasBot, autostart] = await Promise.all([
+  const [hasToken, hasBot, autostart, ccHooks] = await Promise.all([
     invoke<boolean>("secret_exists", { name: "cloudflare" }).catch(() => false),
     invoke<boolean>("secret_exists", { name: "telegram" }).catch(() => false),
     isEnabled().catch(() => false),
+    invoke<boolean>("cc_hooks_installed").catch(() => false),
   ]);
   const cf = ctx.cloudflare;
   const cfState = !hasToken
@@ -66,6 +67,10 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       </div></div>
       <div class="prow top"><span>Chování</span><div class="checks">
         ${np("follow", "Oči sledují myš")}${np("dance", "Tancuje, když hraje hudba")}${np("peek", "Vykoukne, když se něco stane")}
+      </div></div>
+      <div class="prow top"><span>Claude Code</span><div class="checks">
+        <label class="check"><input type="checkbox" data-f="ccHooks" ${ccHooks ? "checked" : ""}> Ukazovat, co Claude Code v terminálu dělá, a povolovat mu příkazy z notche</label>
+        <small class="muted">Přidá háčky do ~/.claude/settings.json. Když Dispečink neběží, Claude se ptá v terminálu jako dřív. Na povolení čeká notch minutu, pak se zeptá terminál.</small>
       </div></div>
     </section>
 
@@ -331,6 +336,18 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
     ctx.cfg.notch = (e.target as HTMLInputElement).checked;
     ctx.setNotch(ctx.cfg.notch);
     await ctx.save();
+  });
+  el.querySelector<HTMLInputElement>('[data-f="ccHooks"]')!.addEventListener("change", async (e) => {
+    const box = e.target as HTMLInputElement;
+    try {
+      await invoke("cc_hooks_set", { on: box.checked });
+      ctx.cfg.ccHooks = box.checked;
+      await ctx.save();
+      ctx.toast(box.checked ? "Claude Code teď hlásí notchi, co dělá." : "Háčky Claude Code jsou pryč.", true);
+    } catch (err) {
+      box.checked = !box.checked;
+      ctx.toast(String(err));
+    }
   });
   el.querySelector<HTMLInputElement>('[data-f="trayLimits"]')!.addEventListener("change", async (e) => {
     ctx.cfg.trayLimits = (e.target as HTMLInputElement).checked;

@@ -24,4 +24,5 @@ libc = "0.2"
 objc2 = "0.6"
 block2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSGeometry", "objc2-core-foundation"] }
+tiny_http = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

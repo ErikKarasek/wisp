@@ -57,6 +57,8 @@ export type Config = {
   sounds: boolean;
   /** Claude's and ChatGPT's limits as text next to the menu-bar icon. */
   trayLimits: boolean;
+  /** Claude Code's hooks report to the notch; undefined until first set up. */
+  ccHooks?: boolean;
   /** The mascot in the MacBook notch. */
   notch: boolean;
   notchPrefs: NotchPrefs;

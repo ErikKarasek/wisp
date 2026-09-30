@@ -1,4 +1,6 @@
+mod ask;
 mod calendar;
+mod claudecode;
 mod cloudflare;
 mod github;
 mod launchd;
@@ -300,6 +302,26 @@ async fn claude_usage() -> Result<usage::Usage, String> {
 }
 
 #[tauri::command]
+fn cc_decide(id: String, answer: String) -> bool {
+    claudecode::decide(&id, &answer)
+}
+
+#[tauri::command]
+fn cc_hooks_installed() -> bool {
+    claudecode::hooks_installed()
+}
+
+#[tauri::command]
+fn cc_hooks_set(on: bool) -> Result<(), String> {
+    claudecode::set_hooks(on)
+}
+
+#[tauri::command]
+async fn ask_file(path: String, question: String) -> Result<String, String> {
+    blocking(move || ask::ask_file(&path, &question)).await?
+}
+
+#[tauri::command]
 async fn gemini_usage() -> Result<Vec<usage::AgyWindow>, String> {
     blocking(usage::gemini_usage).await?
 }
@@ -411,6 +433,7 @@ pub fn run() {
             }
             tray.build(app)?;
             notch::setup(handle);
+            claudecode::start(handle);
             Ok(())
         })
         // Closing the window only hides it; the tray keeps watching.
@@ -444,6 +467,10 @@ pub fn run() {
             set_tray_title,
             chatgpt_usage,
             gemini_usage,
+            cc_decide,
+            cc_hooks_installed,
+            cc_hooks_set,
+            ask_file,
             github_prs,
             github_pr_diff,
             github_pr_action,

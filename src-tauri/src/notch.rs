@@ -321,6 +321,13 @@ pub fn peek(app: &AppHandle, millis: u64) {
     set_open(app, true, g);
 }
 
+/// Stop holding the notch open after a peek; it closes once the cursor is away.
+pub fn release() {
+    if let Ok(mut s) = STATE.lock() {
+        s.peek_until = None;
+    }
+}
+
 pub fn current_geometry() -> Geometry {
     STATE.lock().map(|s| s.geometry).unwrap_or_default()
 }

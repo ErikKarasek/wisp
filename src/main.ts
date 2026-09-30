@@ -1067,6 +1067,14 @@ async function start() {
   history = await invoke<HistoryEntry[]>("history_load").catch(() => []);
   void invoke("notch_set_close_delay", { millis: Math.round(cfg.notchPrefs.closeDelay * 1000) });
   void invoke("notch_set_width", { width: NOTCH_WIDTH[cfg.notchPrefs.width] }).then(() => invoke("notch_set_enabled", { enabled: cfg.notch }));
+  // Claude Code in the notch: set its hooks up once; after that the switch in Settings decides.
+  if (cfg.ccHooks === undefined) {
+    const ok = await invoke("cc_hooks_set", { on: true }).then(() => true).catch(() => false);
+    if (ok) {
+      cfg.ccHooks = true;
+      await saveConfig(cfg);
+    }
+  }
   // The Mac and Paperclip answer at once; the cloud fills in when it arrives.
   await refresh(false);
   void refresh(true);

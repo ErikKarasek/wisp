@@ -3,6 +3,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { EXPRESSIONS, type ExpressionName, type MascotCharacter } from "./mascot/mascot";
 import { mountMascot, type MountedMascot } from "./mascot/svg";
 import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot, windowName, resetText, claudeResetMs, elapsedPercent } from "./broadcast";
@@ -295,7 +296,139 @@ export async function startNotch() {
     return out.join("");
   }
   let lastWing = 46;
-  subscribe((s) => {
+
+  // ----- Claude Code in a terminal: its hooks post to Dispečink, which passes them here -----
+  type CcEvent = { session: string; project: string; kind: string; text: string };
+  type Perm = { id: string; session: string; project: string; tool: string; detail: string; rule: string };
+  const ccSessions = new Map<string, { project: string; lines: string[]; at: number; since: number; busy: boolean }>();
+  let ccDone: { project: string; text: string; at: number } | null = null;
+  let perms: Perm[] = [];
+  let permShown: string | null = null;
+  const ccWorking = () => {
+    const now = Date.now();
+    const [id, v] = [...ccSessions.entries()].filter(([, v]) => v.busy && now - v.at < 120_000).sort((a, b) => b[1].at - a[1].at)[0] ?? [];
+    return v ? { id: `cc:${id}`, name: `${v.project} · Claude`, character: {}, lines: v.lines } : undefined;
+  };
+  void listen<CcEvent>("cc-event", (e) => {
+    const { session, project, kind, text } = e.payload;
+    const now = Date.now();
+    if (kind === "end") {
+      ccSessions.delete(session);
+      return redraw();
+    }
+    const cur = ccSessions.get(session) ?? { project, lines: [], at: now, since: now, busy: false };
+    cur.project = project;
+    cur.at = now;
+    if (kind === "prompt") {
+      cur.busy = true;
+      cur.since = now;
+      cur.lines = text ? [`› ${text}`] : [];
+    } else if (kind === "step") {
+      if (!cur.busy) cur.since = now;
+      cur.busy = true;
+      cur.lines = [...cur.lines, text].slice(-6);
+    } else if (kind === "done") {
+      // Only a turn that took a while is worth a sound and a peek.
+      const long = cur.busy && now - cur.since > 30_000;
+      cur.busy = false;
+      ccDone = { project, text, at: now };
+      if (long) {
+        if (cfg.sounds !== false) sounds.done();
+        void invoke("notch_peek", { millis: 5000 });
+      }
+    } else if (kind === "waiting") {
+      cur.busy = false;
+    }
+    ccSessions.set(session, cur);
+    redraw();
+  });
+  void listen<Perm>("cc-permission", (e) => {
+    perms = [...perms.filter((p) => p.id !== e.payload.id), e.payload];
+    if (cfg.sounds !== false) sounds.you();
+    redraw();
+  });
+  void listen<string>("cc-permission-done", (e) => {
+    perms = perms.filter((p) => p.id !== e.payload);
+    redraw();
+  });
+  // A permission prompt from Claude Code: allow, always, deny, or leave it to the terminal.
+  function renderPerm() {
+    const p = perms[0];
+    if (permShown === p.id) return;
+    permShown = p.id;
+    const tool = p.tool === "Bash" ? "chce spustit" : p.tool === "Edit" || p.tool === "Write" || p.tool === "MultiEdit" ? "chce upravit" : `chce použít ${p.tool}`;
+    steps.innerHTML = `<small class="who warn">${escHtml(p.project)} · Claude ${tool}${perms.length > 1 ? ` <i>(+${perms.length - 1})</i>` : ""}</small>
+      <div class="step now cmd">${escHtml(p.detail)}</div>
+      <div class="perm">
+        <button data-a="deny">Zamítnout</button>
+        <button data-a="terminal" title="Nech to na terminálu">Terminál</button>
+        <button data-a="always" title="Povolit i příště: ${escHtml(p.rule)}">Vždy</button>
+        <button data-a="allow" class="go">Povolit</button>
+      </div>`;
+    steps.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) =>
+      b.addEventListener("click", () => {
+        void invoke("cc_decide", { id: p.id, answer: b.dataset.a });
+        perms = perms.filter((x) => x.id !== p.id);
+        permShown = null;
+        redraw();
+      }),
+    );
+  }
+
+  // ----- a file dropped on the notch, and a question about it (Gemini answers) -----
+  let fileAsk: { path: string; name: string } | null = null;
+  void getCurrentWebview().onDragDropEvent((e) => {
+    const p = e.payload;
+    if (p.type === "enter" || p.type === "over") root.classList.add("dropping");
+    else if (p.type === "leave") root.classList.remove("dropping");
+    else if (p.type === "drop") {
+      root.classList.remove("dropping");
+      if (p.paths[0]) showFile(p.paths[0]);
+    }
+  });
+  function showFile(path: string) {
+    const name = path.split("/").pop() ?? path;
+    fileAsk = { path, name };
+    permShown = null;
+    steps.innerHTML = `<small class="who">${escHtml(name)}<button class="x" title="Zavřít">✕</button></small>
+      <div class="step past wrap reply">Na co se chceš zeptat? Odpoví Gemini z tvého AI Pro.</div>
+      <div class="answer"><input type="text" placeholder="Třeba: kolik to dělá celkem?" spellcheck="false"><button>Zeptat se</button></div>`;
+    const input = steps.querySelector("input") as HTMLInputElement;
+    const go = steps.querySelector(".answer button") as HTMLButtonElement;
+    const reply = steps.querySelector(".reply") as HTMLElement;
+    input.focus();
+    steps.querySelector(".x")!.addEventListener("click", () => {
+      fileAsk = null;
+      redraw();
+    });
+    const ask = async () => {
+      const q = input.value.trim();
+      if (!q || go.disabled) return;
+      go.disabled = true;
+      reply.textContent = "Gemini čte soubor…";
+      try {
+        const text = await invoke<string>("ask_file", { path, question: q });
+        reply.textContent = text.replace(/\*\*|__|`/g, "");
+        input.value = "";
+        input.placeholder = "Další otázka…";
+      } catch (err) {
+        reply.textContent = String(err);
+      }
+      go.disabled = false;
+      void invoke("notch_peek", { millis: 8000 });
+    };
+    go.addEventListener("click", () => void ask());
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") void ask();
+    });
+  }
+
+  let lastSnap: Snapshot | null = null;
+  const redraw = () => {
+    if (lastSnap) draw(lastSnap);
+  };
+  const draw = (s: Snapshot) => {
+    lastSnap = s;
     base = faceFor(worst(s));
     face();
     const bad = s.items.filter((i) => i.state === "bad").length;
@@ -305,7 +438,7 @@ export async function startNotch() {
     st.innerHTML = music ? `<i></i><i></i><i></i><i></i>` : bad ? `${bad}` : s.counts.attention ? `${s.counts.attention}` : s.counts.run ? `<i></i><i></i><i></i>` : "✓";
     $(".sum").textContent = headline(s);
 
-    const working = s.live?.[0];
+    const working = s.live?.[0] ?? ccWorking();
     ($(".dots") as HTMLElement).hidden = !working;
 
     // Live activity: while an agent works, the closed notch widens to show it.
@@ -352,6 +485,16 @@ export async function startNotch() {
       gpt.title = s.gpt.map((w, i) => `${i ? "" : "ChatGPT: "}${windowName(w.windowSecs)} ${w.percent} %${w.resetsAtMs ? ` (obnoví se ${resetText(w.resetsAtMs)})` : ""}`).join("\n");
     }
 
+    // Claude Code asking for permission comes first, then a dropped file.
+    root.classList.toggle("asking", perms.length > 0);
+    if (perms.length) {
+      renderPerm();
+      return renderCrew(s, working);
+    }
+    permShown = null;
+    if (fileAsk) return renderCrew(s, working);
+    const doneCc = !working && ccDone && Date.now() - ccDone.at < 15_000 ? ccDone : null;
+
     const asking = !working && !(fresh && fresh.id === "morning") ? s.items.find((i) => i.ask) : undefined;
     if (asking?.ask) {
       if (askFor !== asking.ask.issueId) showAsk(asking);
@@ -364,6 +507,8 @@ export async function startNotch() {
       steps.innerHTML =
         `<small class="who">${escHtml(working.name)} pracuje</small>` +
         lines.map((l, i) => `<div class="step ${i === lines.length - 1 ? "now" : "past"}">${i === lines.length - 1 ? "›_ " : ""}${escHtml(l)}</div>`).join("");
+    } else if (doneCc) {
+      steps.innerHTML = `<small class="who">${escHtml(doneCc.project)} · Claude</small><div class="step now big-text">Hotovo</div><div class="step past wrap">${escHtml(doneCc.text)}</div>`;
     } else if (fresh) {
       steps.innerHTML = `<small class="who">${escHtml(fresh.name)}</small><div class="step now big-text">${escHtml(fresh.chip)}</div><div class="step past${fresh.id === "morning" ? " wrap" : ""}">${escHtml(fresh.doing)}</div>`;
     } else {
@@ -371,7 +516,8 @@ export async function startNotch() {
     }
 
     renderCrew(s, working);
-  });
+  };
+  subscribe(draw);
 
   // An agent that waits on you: its question, and a box to answer it right here.
   let askFor: string | null = null;
