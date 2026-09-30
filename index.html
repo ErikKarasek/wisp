@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dispečink</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="app-id" data-tauri-drag-region>Dispečink</div>
+      <div class="summary" id="summary" data-tauri-drag-region></div>
+      <button class="icon-btn" id="refresh" title="Obnovit (⌘R)">↻</button>
+    </header>
+    <div class="body">
+      <nav class="side" id="side"></nav>
+      <main class="main" id="main"></main>
+    </div>
+    <section class="detail" id="detail" hidden></section>
+    <div class="toast" id="toast" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
