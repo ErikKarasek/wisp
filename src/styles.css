@@ -111,6 +111,7 @@ button { font: inherit; color: inherit; }
   border-radius: 12px; padding: 10px 12px; color: var(--muted); font-size: 13px;
 }
 .notice .m { width: 44px; height: 44px; flex: none; }
+.notice[hidden] { display: none; }
 
 /* ---------- detail ---------- */
 .detail {

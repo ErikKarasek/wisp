@@ -394,7 +394,8 @@ export function paperclipGroups(snap: PaperclipSnapshot, now = Date.now()): Grou
   if (!snap.online) {
     return [{ id: "paperclip", title: "Paperclip", note: "agenti", items: [], notice: "Paperclip neodpovídá. Agenti teď nepoběží." }];
   }
-  return snap.companies.map(({ company, agents, routines, issues }) => {
+  // A company with nobody in it has nothing to show.
+  return snap.companies.filter((c) => c.agents.length || c.routines.length).map(({ company, agents, routines, issues }) => {
     const id = `paperclip:${company.id}`;
     const prefix = company.issuePrefix ?? "";
     return {
