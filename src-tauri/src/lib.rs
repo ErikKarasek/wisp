@@ -292,6 +292,26 @@ async fn claude_usage() -> Result<usage::Usage, String> {
     blocking(usage::claude_usage).await?
 }
 
+/// The codex binary Paperclip installed for itself, newest version first. The
+/// Codex CLI engine needs its full path: it isn't on any PATH.
+#[tauri::command]
+fn codex_command() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let root = std::path::Path::new(&home).join(".paperclip/cli/installs/npm");
+    let mut versions: Vec<_> = std::fs::read_dir(root).ok()?.flatten().map(|e| e.path()).collect();
+    // 2026.1001.0 is newer than 2026.916.1, so compare the numbers, not the text.
+    versions.sort_by_key(|v| {
+        let name = v.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        name.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>()
+    });
+    versions
+        .into_iter()
+        .rev()
+        .map(|v| v.join("node_modules/.bin/codex"))
+        .find(|p| p.exists())
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 async fn github_prs(repos: Vec<String>) -> Result<Vec<serde_json::Value>, String> {
     blocking(move || github::pull_requests(&repos)).await
@@ -403,6 +423,7 @@ pub fn run() {
             show_main_window,
             quit_app,
             claude_usage,
+            codex_command,
             github_prs,
             github_pr_diff,
             github_pr_action,

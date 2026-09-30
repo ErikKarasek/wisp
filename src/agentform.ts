@@ -30,6 +30,13 @@ const ROLES: [string, string][] = [
 const PATH_ENV = "/Users/erickos007/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
 
 const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+/** ChatGPT agents run on the Codex CLI engine: the default ACP engine sandboxes
+ * them with no network and no writes outside their workspace. */
+async function codexConfig(): Promise<Obj> {
+  const command = await invoke<string | null>("codex_command").catch(() => null);
+  return { engine: "cli", ...(command ? { command } : {}) };
+}
+
 const request = <T = any,>(method: string, path: string, body?: unknown) =>
   invoke<T>("paperclip_request", { method, path, body: body ?? null });
 
@@ -262,13 +269,15 @@ export async function openAgentForm(o: AgentFormOptions) {
     q(".note").textContent = "";
     try {
       if (agent) {
+        const codex = engine === "codex_local" ? await codexConfig() : {};
         if (engine !== startEngine) {
           // A new engine: Paperclip starts the adapter config afresh but keeps env.
           // Everything else (instructions path, env) is carried over explicitly.
-          await request("PATCH", `/agents/${agent.id}`, { ...common, adapterType: engine, adapterConfig: { ...cfg, model, paperclipSkillSync: { desiredSkills } } });
+          const { engine: _e, command: _c, ...rest } = cfg;
+          await request("PATCH", `/agents/${agent.id}`, { ...common, adapterType: engine, adapterConfig: { ...rest, ...codex, model, paperclipSkillSync: { desiredSkills } } });
         } else {
           // adapterConfig is merged key by key, so env and the rest stay as they are.
-          await request("PATCH", `/agents/${agent.id}`, { ...common, adapterConfig: { model, paperclipSkillSync: { desiredSkills } } });
+          await request("PATCH", `/agents/${agent.id}`, { ...common, adapterConfig: { ...codex, model, paperclipSkillSync: { desiredSkills } } });
         }
         if (text !== instructions) await request("PUT", `/agents/${agent.id}/instructions-bundle/file`, { path: "AGENTS.md", content: text });
         await setToken(agent.id, name);
@@ -280,6 +289,7 @@ export async function openAgentForm(o: AgentFormOptions) {
           ...common,
           adapterType: engine,
           adapterConfig: {
+            ...(engine === "codex_local" ? await codexConfig() : {}),
             model,
             paperclipSkillSync: { desiredSkills },
             // So gh and claude from ~/.local/bin are found, like the other agents.
