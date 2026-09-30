@@ -10,7 +10,9 @@ use std::fs;
 use std::path::PathBuf;
 
 const KEYCHAIN_SERVICE: &str = "cz.erikkarasek.dispecink";
-const SECRETS: &[&str] = &["cloudflare"];
+const SECRETS: &[&str] = &["cloudflare", "telegram"];
+/// Enough history for weeks of state changes; the oldest drop off.
+const HISTORY_MAX: usize = 5000;
 
 fn path(dir: PathBuf) -> PathBuf {
     dir.join("config.json")
@@ -58,4 +60,33 @@ pub fn secret_delete(name: &str) -> Result<(), String> {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(e.to_string()),
     }
+}
+
+// ---------- history ----------
+
+fn history_path(dir: PathBuf) -> PathBuf {
+    dir.join("history.json")
+}
+
+pub fn history_load(dir: PathBuf) -> Value {
+    fs::read_to_string(history_path(dir))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(Value::Array(vec![]))
+}
+
+pub fn history_append(dir: PathBuf, entries: Vec<Value>) -> Result<(), String> {
+    let mut all = match history_load(dir.clone()) {
+        Value::Array(a) => a,
+        _ => vec![],
+    };
+    all.extend(entries);
+    if all.len() > HISTORY_MAX {
+        all.drain(..all.len() - HISTORY_MAX);
+    }
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file = history_path(dir);
+    let tmp = file.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_string(&all).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &file).map_err(|e| e.to_string())
 }

@@ -19,8 +19,9 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 let discovered: string[] | null = null;
 
 export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
-  const [hasToken, autostart] = await Promise.all([
+  const [hasToken, hasBot, autostart] = await Promise.all([
     invoke<boolean>("secret_exists", { name: "cloudflare" }).catch(() => false),
+    invoke<boolean>("secret_exists", { name: "telegram" }).catch(() => false),
     isEnabled().catch(() => false),
   ]);
   const cf = ctx.cloudflare;
@@ -45,10 +46,17 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
 
     <section>
       <h3>Cloudflare ${cfState}</h3>
-      <p>Na Workery stačí token jen pro čtení. Vytvoř ho na
-        <a href="#" data-link="https://dash.cloudflare.com/profile/api-tokens">dash.cloudflare.com → API Tokens</a>
-        přes <b>Create Custom Token</b> s oprávněními <b>Account · Workers Scripts · Read</b> a
-        <b>Account · Account Analytics · Read</b>. Uloží se do Klíčenky macOS, appka ho nikam jinam neposílá.</p>
+      <p>Appka potřebuje od Cloudflare klíč (token), který umí jen číst. Vytvoříš ho takhle:</p>
+      <ol class="steps">
+        <li>Klikni na <a href="#" data-link="https://dash.cloudflare.com/profile/api-tokens">Cloudflare → API Tokens</a> a přihlas se.</li>
+        <li>Dej <b>Create Token</b>, sjeď úplně dolů na <b>Custom token</b> a klikni <b>Get started</b>.</li>
+        <li><b>Token name</b>: Dispečink.</li>
+        <li><b>Permissions</b>: v prvním řádku vyber <b>Account</b> → <b>Workers Scripts</b> → <b>Read</b>.
+          Pak <b>+ Add more</b> a vyber <b>Account</b> → <b>Account Analytics</b> → <b>Read</b>.</li>
+        <li><b>Account Resources</b>: nech <b>Include</b> a vyber svůj účet. Zbytek neměň.</li>
+        <li><b>Continue to summary</b> → <b>Create Token</b> → zkopíruj token (ukáže se jen jednou).</li>
+        <li>Vlož ho sem a dej <b>Uložit</b>. Uloží se do Klíčenky macOS.</li>
+      </ol>
       <div class="inline">
         <input type="password" data-f="cfToken" placeholder="${hasToken ? "Token je uložený. Nový ho nahradí." : "Vlož token"}" autocomplete="off" spellcheck="false">
         <button class="btn primary" data-act="cfSave">Uložit</button>
@@ -66,9 +74,31 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
     </section>
 
     <section>
-      <h3>Upozornění a spouštění</h3>
+      <h3>Telegram ${!hasBot ? `<span class="pill">bez bota</span>` : ctx.cfg.telegram.enabled && ctx.cfg.telegram.chat ? `<span class="pill good">posílá</span>` : `<span class="pill">vypnutý</span>`}</h3>
+      <p>Když něco selže nebo na tebe čeká, přijde zpráva. Posílá ji Dispečink z Macu, takže jen když je Mac zapnutý.
+        Použij bota, kterého nic jiného nečte: nového od <b>@BotFather</b>, nebo <b>@DDevlogbot</b>. Bota od job-mailu ne,
+        ten si zprávy vyzvedává sám a hledání chatu by se s ním přetahovalo.</p>
+      <div class="inline">
+        <input type="password" data-f="botToken" placeholder="${hasBot ? "Token bota je uložený. Nový ho nahradí." : "Token bota od @BotFather"}" autocomplete="off" spellcheck="false">
+        <button class="btn primary" data-act="botSave">Uložit</button>
+        ${hasBot ? `<button class="btn" data-act="botDelete">Smazat</button>` : ""}
+      </div>
+      ${hasBot ? `
+      <div class="inline" style="margin-top:8px">
+        <input type="text" data-f="chat" value="${esc(ctx.cfg.telegram.chat)}" placeholder="Chat id" spellcheck="false">
+        <button class="btn" data-act="findChat">Najít můj chat</button>
+        <button class="btn" data-act="testMsg">Poslat zkoušku</button>
+      </div>
+      <div class="chats"></div>
+      <label class="toggle"><input type="checkbox" data-f="tgOn" ${ctx.cfg.telegram.enabled ? "checked" : ""}> Posílat upozornění do Telegramu</label>` : ""}
+    </section>
+
+    <section>
+      <h3>Upozornění, zvuky a spouštění</h3>
       <label class="toggle"><input type="checkbox" data-f="notify" ${ctx.cfg.notifications ? "checked" : ""}>
         Upozornit, když něco selže nebo na mě čeká</label>
+      <label class="toggle"><input type="checkbox" data-f="sounds" ${ctx.cfg.sounds ? "checked" : ""}>
+        Zvuky, když něco doběhne, selže nebo šťouchnu do postavičky</label>
       <label class="toggle"><input type="checkbox" data-f="autostart" ${autostart ? "checked" : ""}>
         Spouštět Dispečink po přihlášení</label>
     </section>
@@ -130,6 +160,63 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       await ctx.refreshCloud();
     }),
   );
+
+  el.querySelector('[data-act="botSave"]')!.addEventListener("click", async () => {
+    const input = el.querySelector<HTMLInputElement>('[data-f="botToken"]')!;
+    if (!input.value.trim()) return ctx.toast("Nejdřív vlož token bota.");
+    try {
+      await invoke("secret_set", { name: "telegram", value: input.value });
+      ctx.toast("Token bota uložený do Klíčenky. Teď napiš botovi a dej „Najít můj chat“.", true);
+    } catch (e) {
+      ctx.toast(String(e));
+    }
+    await again();
+  });
+  el.querySelector('[data-act="botDelete"]')?.addEventListener("click", async () => {
+    await invoke("secret_delete", { name: "telegram" }).catch((e) => ctx.toast(String(e)));
+    ctx.cfg.telegram.enabled = false;
+    await ctx.save();
+    await again();
+  });
+  el.querySelector<HTMLInputElement>('[data-f="chat"]')?.addEventListener("change", async (e) => {
+    ctx.cfg.telegram.chat = (e.target as HTMLInputElement).value.trim();
+    await ctx.save();
+  });
+  el.querySelector('[data-act="findChat"]')?.addEventListener("click", async () => {
+    const box = el.querySelector(".chats") as HTMLElement;
+    try {
+      const chats = await invoke<{ id: string; name: string }[]>("telegram_chats");
+      box.innerHTML = chats.length
+        ? chats.map((c) => `<button class="btn" data-chat="${esc(c.id)}">${esc(c.name)} · ${esc(c.id)}</button>`).join("")
+        : `<span class="muted">Nic nenašel. Napiš botovi v Telegramu cokoli a zkus to znovu.</span>`;
+      box.querySelectorAll<HTMLButtonElement>("[data-chat]").forEach((b) =>
+        b.addEventListener("click", async () => {
+          ctx.cfg.telegram.chat = b.dataset.chat!;
+          await ctx.save();
+          await again();
+        }),
+      );
+    } catch (e) {
+      ctx.toast(String(e));
+    }
+  });
+  el.querySelector('[data-act="testMsg"]')?.addEventListener("click", async () => {
+    try {
+      await invoke("telegram_send", { chat: ctx.cfg.telegram.chat, text: "Dispečink: zkušební zpráva. Tudy ti dám vědět, když něco selže." });
+      ctx.toast("Odesláno.", true);
+    } catch (e) {
+      ctx.toast(String(e));
+    }
+  });
+  el.querySelector<HTMLInputElement>('[data-f="tgOn"]')?.addEventListener("change", async (e) => {
+    ctx.cfg.telegram.enabled = (e.target as HTMLInputElement).checked;
+    await ctx.save();
+    await again();
+  });
+  el.querySelector<HTMLInputElement>('[data-f="sounds"]')!.addEventListener("change", async (e) => {
+    ctx.cfg.sounds = (e.target as HTMLInputElement).checked;
+    await ctx.save();
+  });
 
   el.querySelector<HTMLInputElement>('[data-f="notify"]')!.addEventListener("change", async (e) => {
     ctx.cfg.notifications = (e.target as HTMLInputElement).checked;

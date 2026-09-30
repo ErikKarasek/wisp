@@ -3,6 +3,7 @@ mod github;
 mod launchd;
 mod paperclip;
 mod store;
+mod telegram;
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -40,6 +41,21 @@ async fn job_action(label: String, action: String) -> Result<(), String> {
         other => Err(format!("Neznámá akce {other}")),
     })
     .await?
+}
+
+#[tauri::command]
+async fn job_create(spec: launchd::JobSpec) -> Result<String, String> {
+    blocking(move || launchd::create(&spec)).await?
+}
+
+#[tauri::command]
+async fn job_update(label: String, spec: launchd::JobSpec) -> Result<(), String> {
+    blocking(move || launchd::update(&label, &spec)).await?
+}
+
+#[tauri::command]
+async fn job_delete(label: String) -> Result<(), String> {
+    blocking(move || launchd::delete(&label)).await?
 }
 
 // ---------- Paperclip ----------
@@ -110,6 +126,34 @@ async fn secret_exists(name: String) -> Result<bool, String> {
     blocking(move || store::secret_get(&name).is_some()).await
 }
 
+#[tauri::command]
+fn history_load(app: AppHandle) -> Result<serde_json::Value, String> {
+    Ok(store::history_load(config_dir(&app)?))
+}
+
+#[tauri::command]
+fn history_append(app: AppHandle, entries: Vec<serde_json::Value>) -> Result<(), String> {
+    store::history_append(config_dir(&app)?, entries)
+}
+
+// ---------- Telegram ----------
+
+async fn telegram_token() -> Result<String, String> {
+    blocking(|| store::secret_get("telegram"))
+        .await?
+        .ok_or_else(|| "Chybí token Telegram bota.".to_string())
+}
+
+#[tauri::command]
+async fn telegram_send(chat: String, text: String) -> Result<(), String> {
+    telegram::send(&telegram_token().await?, &chat, &text).await
+}
+
+#[tauri::command]
+async fn telegram_chats() -> Result<Vec<serde_json::Value>, String> {
+    telegram::recent_chats(&telegram_token().await?).await
+}
+
 // ---------- tray ----------
 
 fn tray_menu(app: &AppHandle, lines: &[String]) -> tauri::Result<Menu<Wry>> {
@@ -151,6 +195,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             let handle = app.handle();
@@ -180,6 +225,9 @@ pub fn run() {
             list_jobs,
             job_log,
             job_action,
+            job_create,
+            job_update,
+            job_delete,
             paperclip_snapshot,
             paperclip_action,
             cloudflare_snapshot,
@@ -191,6 +239,10 @@ pub fn run() {
             secret_set,
             secret_delete,
             secret_exists,
+            history_load,
+            history_append,
+            telegram_send,
+            telegram_chats,
             set_tray
         ])
         .build(tauri::generate_context!())

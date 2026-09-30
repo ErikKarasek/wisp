@@ -25,6 +25,7 @@ export type Command =
   | { type: "job"; label: string; action: "run" | "restart" | "pause" | "resume" }
   | { type: "paperclip"; kind: "agentPause" | "agentResume" | "agentInvoke" | "routineRun"; id: string }
   | { type: "github"; repo: string; workflowId: number; action: "run" | "enable" | "disable" }
+  | { type: "editJob"; label: string }
   | { type: "open"; target: string };
 
 export type ActionSpec = {
@@ -40,6 +41,8 @@ export type Item = {
   group: string;
   name: string;
   doing: string;
+  /** What it is for, when that differs from what it is doing right now. */
+  about?: string;
   when: string;
   state: State;
   chip?: string;
@@ -114,6 +117,9 @@ export type Job = {
   logPath: string | null;
   logModifiedMs: number | null;
   lastLogLine: string | null;
+  managed: boolean;
+  command: string | null;
+  workingDir: string | null;
 };
 
 const JOBS: Record<string, { name: string; doing: string }> = {
@@ -156,7 +162,7 @@ function nextRun(j: Job, now: number): number | null {
 }
 
 export function jobItem(j: Job, now = Date.now()): Item {
-  const info = JOBS[j.label] ?? { name: j.label.replace(/^com\.erikkarasek\./, ""), doing: j.program.join(" ") };
+  const info = JOBS[j.label] ?? { name: j.label.replace(/^com\.erikkarasek\./, ""), doing: j.command ?? j.program.join(" ") };
   const last = j.logModifiedMs;
   const next = nextRun(j, now);
   const whenParts: string[] = [];
@@ -204,6 +210,7 @@ export function jobItem(j: Job, now = Date.now()): Item {
     actions.push({ label: "Zapnout", primary: true, command: { type: "job", label: j.label, action: "resume" } });
   }
   if (j.logPath) actions.push({ label: "Otevřít log", command: { type: "open", target: j.logPath } });
+  if (j.managed) actions.push({ label: "Upravit", command: { type: "editJob", label: j.label } });
 
   const facts: [string, string][] = [
     ["Rozvrh", scheduleText(j.schedule)],
@@ -218,6 +225,7 @@ export function jobItem(j: Job, now = Date.now()): Item {
     group: "mac",
     name: info.name,
     doing,
+    about: info.doing,
     when: whenParts.join(" · "),
     state,
     chip,
@@ -437,7 +445,9 @@ export function cloudflareNeurons(snap: CloudflareSnapshot): number | null {
 }
 
 export function cloudflareGroup(snap: CloudflareSnapshot, now = Date.now()): Group | null {
-  if (!snap.configured) return null;
+  if (!snap.configured) {
+    return { id: "cloudflare", title: "Cloudflare", note: "Workers", items: [], notice: "Přidej token v Nastavení a uvidíš tu svoje Workery." };
+  }
   if (!("workers" in snap)) {
     return { id: "cloudflare", title: "Cloudflare", note: "Workers", items: [], notice: `Cloudflare neodpovídá: ${snap.error}` };
   }

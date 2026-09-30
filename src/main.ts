@@ -22,8 +22,11 @@ import {
   type PaperclipSnapshot,
   type State,
 } from "./model";
+import { openJobForm } from "./jobform";
 import { renderSettings } from "./settings";
+import { sounds } from "./sounds";
 import { openStudio } from "./studio";
+import { ago } from "./time";
 
 const LOCAL_MS = 10_000; // launchd and Paperclip, both on this Mac
 const CLOUD_MS = 60_000; // Cloudflare and GitHub, rate limits apply
@@ -40,15 +43,20 @@ let groups: Group[] = [];
 const automatic = new Map<string, { name: string; character: Partial<MascotCharacter> }>();
 let filter = "all";
 let selected: string | null = null;
+let jobs: Job[] = [];
+
+type HistoryEntry = { id: string; name: string; state: State; at: number; text: string };
+let history: HistoryEntry[] = [];
 
 // ---------- data ----------
 
 async function loadLocal() {
   const now = Date.now();
-  const [jobs, snap] = await Promise.all([
+  const [jobList, snap] = await Promise.all([
     invoke<Job[]>("list_jobs").catch(() => [] as Job[]),
     invoke<PaperclipSnapshot>("paperclip_snapshot").catch((e) => ({ online: false, error: String(e) }) as PaperclipSnapshot),
   ]);
+  jobs = jobList;
   localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now)];
 }
 
@@ -74,6 +82,14 @@ function compose() {
     const saved = charId ? cfg.characters.find((c) => c.id === charId) : undefined;
     if (saved) item.character = saved.character;
     if (cfg.names[item.id]) item.name = cfg.names[item.id];
+    const note = cfg.notes[item.id];
+    if (note && item.about !== undefined) {
+      // The user's words replace the built-in description, not a live error or task.
+      if (item.doing === item.about) item.doing = note;
+      item.about = note;
+    } else if (note) {
+      item.facts = [["Poznámka", note], ...item.facts];
+    }
   }
 }
 
@@ -102,6 +118,7 @@ function cardFor(item: Item, seed: number): Card {
       <div class="name"><span class="t"></span><span class="chip"></span></div>
       <div class="doing"></div><div class="when"></div>`;
     el.addEventListener("click", () => select(item.id));
+    el.querySelector(".m")!.addEventListener("click", () => poke(item.id));
     const mascot = mountMascot(el.querySelector(".m") as HTMLElement, {
       character: item.character,
       expression: STATES[item.state].expr,
@@ -126,9 +143,37 @@ function cardFor(item: Item, seed: number): Card {
   q(".doing").textContent = item.doing;
   q(".doing").title = item.doing;
   q(".when").textContent = item.when;
-  q(".bubble").textContent = item.bubble ?? "";
+  // A poked character keeps its reaction until it calms down.
+  if (!poking(item.id)) q(".bubble").textContent = item.bubble ?? "";
   card.el.classList.toggle("sel", item.id === selected);
   return card;
+}
+
+// Poke a character: it jumps and looks surprised. Too many pokes make it cross.
+const pokes = new Map<string, number[]>();
+const poking = (id: string) => Date.now() - (pokes.get(id)?.at(-1) ?? 0) < 1200;
+function poke(id: string) {
+  const card = cards.get(id);
+  if (!card) return;
+  const now = Date.now();
+  const recent = (pokes.get(id) ?? []).filter((t) => now - t < 2500).concat(now);
+  pokes.set(id, recent);
+  const cross = recent.length >= 5;
+  const m = card.el.querySelector(".m") as HTMLElement;
+  m.classList.remove("hop");
+  void m.offsetWidth; // restart the animation
+  m.classList.add("hop");
+  card.mascot.setExpression(cross ? "angry" : recent.length >= 3 ? "happy" : "surprised");
+  const bubble = card.el.querySelector(".bubble") as HTMLElement;
+  if (cross) bubble.textContent = "nech mě!";
+  if (cfg.sounds) sounds.poke(cross ? 0.6 : 1 + recent.length * 0.08);
+  window.setTimeout(() => {
+    if (Date.now() - (pokes.get(id)?.at(-1) ?? 0) < 1100) return;
+    card.mascot.setExpression(STATES[card.state].expr);
+    const item = allItems().find((i) => i.id === id);
+    bubble.textContent = item?.bubble ?? "";
+    if (cross) pokes.set(id, []);
+  }, 1200);
 }
 
 function matches(item: Item) {
@@ -165,7 +210,8 @@ function renderMain() {
       groupEls.set(g.id, sec);
     }
     main.appendChild(sec); // keeps group order; moving keeps the mascots alive
-    sec.querySelector("h3")!.innerHTML = `${esc(g.title)} <em>${esc(g.note)}</em>`;
+    sec.querySelector("h3")!.innerHTML =
+      `${esc(g.title)} <em>${esc(g.note)}</em>` + (g.id === "mac" ? `<button class="add-job" data-act="newJob">+ Nová úloha</button>` : "");
     const list = sec.querySelector(".cards") as HTMLElement;
     let notice = sec.querySelector(".notice") as HTMLElement | null;
     if (g.notice && !notice) {
@@ -255,6 +301,7 @@ function renderSide() {
     gauge +
     `<h6>Tvoje</h6>` +
     `<button data-act="studio">Postavičky<span>${cfg.characters.length}</span></button>` +
+    `<button data-act="newJob">Nová úloha</button>` +
     btn(["settings", "Nastavení", null]);
   side.querySelectorAll<HTMLButtonElement>("button[data-f]").forEach((b) =>
     b.addEventListener("click", () => {
@@ -328,7 +375,7 @@ async function renderDetail() {
     detailMascot?.destroy();
     detail.innerHTML = `<button class="m" title="Změnit postavičku"></button><div class="info">
       <h4><span class="n"></span><span class="chip"></span><button class="icon-btn close" title="Zavřít (Esc)">✕</button></h4>
-      <p class="d"></p><div class="facts"></div><pre class="log"></pre><div class="btns"></div></div>`;
+      <p class="d"></p><div class="facts"></div><div class="history"></div><pre class="log"></pre><div class="btns"></div></div>`;
     detail.querySelector(".close")!.addEventListener("click", () => select(null));
     detail.querySelector(".m")!.addEventListener("click", () => {
       const it = allItems().find((i) => i.id === selected);
@@ -358,6 +405,11 @@ async function renderDetail() {
   q(".facts").innerHTML = [...item.facts, ["Postavička", charName ?? "automatická"] as [string, string]]
     .map(([k, v]) => `<span>${esc(k)}: <b>${esc(v)}</b></span>`)
     .join("");
+
+  const past = history.filter((h) => h.id === item.id).slice(-12).reverse();
+  q(".history").innerHTML = past.length
+    ? past.map((h) => `<span class="h s-${h.state}" title="${esc(h.text)}"><i></i>${esc(STATES[h.state].chip)} <small>${esc(ago(h.at))}</small></span>`).join("")
+    : `<span class="h empty">Zatím žádné změny. Historie se zapisuje, dokud Dispečink běží.</span>`;
 
   const btns = q(".btns");
   const sig = actionSig(item.actions);
@@ -429,6 +481,7 @@ function actionButton(a: ActionSpec): HTMLButtonElement {
 
 async function runCommand(a: ActionSpec) {
   const c = a.command;
+  if (c.type === "editJob") return jobForm(jobs.find((j) => j.label === c.label));
   try {
     if (c.type === "open") {
       if (/^https?:/.test(c.target)) await openUrl(c.target);
@@ -458,32 +511,70 @@ function toast(text: string, ok = false) {
   toastTimer = window.setTimeout(() => (t.hidden = true), ok ? 2500 : 6000);
 }
 
-// ---------- notifications ----------
+// ---------- changes: history, sounds, notifications, Telegram ----------
 
 const seenStates = new Map<string, State>();
 let notifyAllowed: boolean | null = null;
 
-async function notifyChanges() {
-  const fresh: Item[] = [];
+async function onChanges() {
+  const now = Date.now();
+  const changed: Item[] = [];
   for (const item of allItems()) {
     const before = seenStates.get(item.id);
     seenStates.set(item.id, item.state);
     // The first sighting only sets the baseline.
-    if (before === undefined || before === item.state) continue;
-    if ((item.state === "bad" || item.state === "you") && before !== "bad" && before !== "you") fresh.push(item);
+    if (before !== undefined && before !== item.state) changed.push(item);
   }
-  if (!fresh.length || !cfg.notifications) return;
-  if (notifyAllowed === null) {
-    notifyAllowed = (await isPermissionGranted().catch(() => false)) || (await requestPermission().catch(() => "denied")) === "granted";
+  if (!changed.length) return;
+
+  const entries = changed.map((i) => ({ id: i.id, name: i.name, state: i.state, at: now, text: i.doing }));
+  history.push(...entries);
+  void invoke("history_append", { entries }).catch(() => {});
+
+  const alarming = changed.filter((i) => i.state === "bad" || i.state === "you");
+  if (cfg.sounds) {
+    if (changed.some((i) => i.state === "bad")) sounds.bad();
+    else if (alarming.length) sounds.you();
+    else if (changed.some((i) => i.state === "done")) sounds.done();
   }
-  if (!notifyAllowed) return;
-  for (const item of fresh.slice(0, 3)) {
-    sendNotification({
-      title: item.state === "bad" ? `${item.name}: selhal` : `${item.name} na tebe čeká`,
-      body: item.doing,
-    });
+  if (!alarming.length) return;
+
+  const title = (i: Item) => (i.state === "bad" ? `${i.name}: selhal` : `${i.name} na tebe čeká`);
+  if (cfg.notifications) {
+    if (notifyAllowed === null) {
+      notifyAllowed = (await isPermissionGranted().catch(() => false)) || (await requestPermission().catch(() => "denied")) === "granted";
+    }
+    if (notifyAllowed) for (const i of alarming.slice(0, 3)) sendNotification({ title: title(i), body: i.doing });
+  }
+  if (cfg.telegram.enabled && cfg.telegram.chat) {
+    const text = ["Dispečink", ...alarming.map((i) => `• ${title(i)}\n  ${i.doing}`)].join("\n");
+    void invoke("telegram_send", { chat: cfg.telegram.chat, text }).catch((e) => toast(`Telegram: ${e}`));
   }
 }
+
+// ---------- job form ----------
+
+function jobForm(job?: Job) {
+  openJobForm({
+    cfg,
+    job,
+    save: () => saveConfig(cfg),
+    toast,
+    created: (id) => {
+      filter = "all";
+      selected = id;
+      void refresh().then(() => {
+        const item = allItems().find((i) => i.id === id);
+        if (item) studio(item); // straight on to picking its character
+      });
+    },
+    changed: () => void refresh(),
+  });
+}
+
+document.addEventListener("click", (e) => {
+  if ((e.target as HTMLElement).closest('[data-act="newJob"]')) jobForm();
+});
 
 // ---------- tray ----------
 
@@ -563,7 +654,7 @@ async function refresh(withCloud = false): Promise<void> {
     await Promise.all([loadLocal(), withCloud ? loadCloud() : Promise.resolve()]);
     compose();
     render();
-    await Promise.all([updateTray(), notifyChanges()]);
+    await Promise.all([updateTray(), onChanges()]);
     if (withCloud && filter === "settings") await showSettings();
   } finally {
     busy = false;
@@ -577,6 +668,7 @@ async function refresh(withCloud = false): Promise<void> {
 
 async function start() {
   cfg = await loadConfig();
+  history = await invoke<HistoryEntry[]>("history_load").catch(() => []);
   await refresh(true);
   // First run: find the repos with workflows once, in the background.
   if (cfg.githubRepos === null) {

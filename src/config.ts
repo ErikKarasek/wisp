@@ -12,9 +12,13 @@ export type Config = {
   assignments: Record<string, string>;
   /** Item id → the name the user gave it. */
   names: Record<string, string>;
+  /** Item id → what the user says it does. */
+  notes: Record<string, string>;
   /** null until the first discovery of repos with workflows. */
   githubRepos: string[] | null;
   notifications: boolean;
+  sounds: boolean;
+  telegram: { enabled: boolean; chat: string };
 };
 
 const base = (c: Partial<MascotCharacter>): MascotCharacter => ({
@@ -51,8 +55,11 @@ export function defaults(): Config {
     characters: STARTERS.map(([name, c]) => ({ id: newId(), name, character: base(c) })),
     assignments: {},
     names: {},
+    notes: {},
     githubRepos: null,
     notifications: true,
+    sounds: true,
+    telegram: { enabled: false, chat: "" },
   };
 }
 
@@ -63,6 +70,7 @@ export function fullCharacter(c: Partial<MascotCharacter>): MascotCharacter {
 export async function loadConfig(): Promise<Config> {
   const raw = await invoke<Partial<Config>>("config_load").catch(() => ({}) as Partial<Config>);
   const fresh = !raw || !Array.isArray(raw.characters);
+  // Settings added in later versions get their defaults.
   const cfg = { ...defaults(), ...(fresh ? {} : raw) } as Config;
   if (fresh) await saveConfig(cfg);
   return cfg;

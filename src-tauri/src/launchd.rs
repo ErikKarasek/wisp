@@ -5,7 +5,7 @@
 //! action checks the label against that list first, so the app can never touch
 //! a system or third-party job.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -13,6 +13,10 @@ use std::process::Command;
 use std::time::UNIX_EPOCH;
 
 const PREFIXES: &[&str] = &["com.erikkarasek.", "ing.paperclip."];
+/// New jobs get this prefix, and this key marks the ones the app made itself:
+/// only those can be edited or deleted from the app.
+const NEW_PREFIX: &str = "com.erikkarasek.";
+const MANAGED_KEY: &str = "cz.erikkarasek.dispecink.managed";
 const LAUNCHCTL: &str = "/bin/launchctl";
 
 #[derive(Serialize, Clone)]
@@ -53,6 +57,11 @@ pub struct Job {
     pub log_path: Option<String>,
     pub log_modified_ms: Option<i64>,
     pub last_log_line: Option<String>,
+    /// Made by Dispečink, so it may be edited and deleted here.
+    pub managed: bool,
+    /// For managed jobs: the shell command and working folder, for the edit form.
+    pub command: Option<String>,
+    pub working_dir: Option<String>,
 }
 
 fn uid() -> u32 {
@@ -243,6 +252,9 @@ fn read_job(path: &Path, disabled: &[String]) -> Option<Job> {
         .or_else(|| d.get("StandardErrorPath"))
         .and_then(|v| v.as_string())
         .map(String::from);
+    let managed = d.get(MANAGED_KEY).and_then(|v| v.as_boolean()) == Some(true);
+    let command = managed.then(|| program.get(2).cloned()).flatten();
+    let working_dir = d.get("WorkingDirectory").and_then(|v| v.as_string()).map(String::from);
     let status = print_status(&label);
     let pid = status.as_ref().and_then(|s| s.pid);
     Some(Job {
@@ -261,6 +273,9 @@ fn read_job(path: &Path, disabled: &[String]) -> Option<Job> {
         last_log_line: log_path.as_deref().and_then(|p| tail(p, 1)),
         log_path,
         label,
+        managed,
+        command,
+        working_dir,
     })
 }
 
@@ -346,3 +361,179 @@ pub fn resume(label: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+// ---------- making jobs ----------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HourMinute {
+    pub hour: u8,
+    pub minute: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NewSchedule {
+    /// At these times; on these weekdays (0 = Sunday), or every day when empty.
+    Daily { times: Vec<HourMinute>, weekdays: Vec<u8> },
+    Interval { minutes: u32 },
+    KeepAlive,
+    AtLogin,
+    Manual,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobSpec {
+    pub slug: String,
+    pub command: String,
+    pub working_dir: Option<String>,
+    pub schedule: NewSchedule,
+    #[serde(default)]
+    pub run_now: bool,
+}
+
+fn home() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_default())
+}
+
+fn valid_slug(slug: &str) -> bool {
+    let mut chars = slug.chars();
+    slug.len() <= 40
+        && chars.next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+fn plist_path(label: &str) -> PathBuf {
+    agents_dir().join(format!("{label}.plist"))
+}
+
+fn write_plist(label: &str, spec: &JobSpec) -> Result<(), String> {
+    use plist::{Dictionary, Value};
+    let command = spec.command.trim();
+    if command.is_empty() {
+        return Err("Chybí příkaz.".into());
+    }
+    let mut d = Dictionary::new();
+    d.insert("Label".into(), Value::String(label.into()));
+    // A login shell, so the job gets the same PATH (Homebrew, ~/.local/bin) as Terminal.
+    d.insert(
+        "ProgramArguments".into(),
+        Value::Array(vec!["/bin/zsh".into(), "-lc".into(), Value::String(command.into())]),
+    );
+    let logs = home().join("Library/Logs/Dispecink");
+    fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
+    let log = logs.join(format!("{}.log", spec.slug)).to_string_lossy().into_owned();
+    d.insert("StandardOutPath".into(), Value::String(log.clone()));
+    d.insert("StandardErrorPath".into(), Value::String(log));
+    if let Some(dir) = spec.working_dir.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        if !Path::new(dir).is_dir() {
+            return Err(format!("Složka {dir} neexistuje."));
+        }
+        d.insert("WorkingDirectory".into(), Value::String(dir.into()));
+    }
+    match &spec.schedule {
+        NewSchedule::Daily { times, weekdays } => {
+            if times.is_empty() {
+                return Err("Přidej aspoň jeden čas.".into());
+            }
+            let mut list = Vec::new();
+            for t in times {
+                if t.hour > 23 || t.minute > 59 {
+                    return Err("Neplatný čas.".into());
+                }
+                let days: Vec<Option<u8>> = if weekdays.is_empty() { vec![None] } else { weekdays.iter().map(|w| Some(*w % 7)).collect() };
+                for day in days {
+                    let mut e = Dictionary::new();
+                    e.insert("Hour".into(), Value::Integer((t.hour as i64).into()));
+                    e.insert("Minute".into(), Value::Integer((t.minute as i64).into()));
+                    if let Some(day) = day {
+                        e.insert("Weekday".into(), Value::Integer((day as i64).into()));
+                    }
+                    list.push(Value::Dictionary(e));
+                }
+            }
+            d.insert("StartCalendarInterval".into(), Value::Array(list));
+        }
+        NewSchedule::Interval { minutes } => {
+            if *minutes < 1 {
+                return Err("Interval musí být aspoň minuta.".into());
+            }
+            d.insert("StartInterval".into(), Value::Integer((*minutes as i64 * 60).into()));
+        }
+        NewSchedule::KeepAlive => {
+            d.insert("KeepAlive".into(), Value::Boolean(true));
+            d.insert("RunAtLoad".into(), Value::Boolean(true));
+        }
+        NewSchedule::AtLogin => {
+            d.insert("RunAtLoad".into(), Value::Boolean(true));
+        }
+        NewSchedule::Manual => {}
+    }
+    d.insert(MANAGED_KEY.into(), Value::Boolean(true));
+    fs::create_dir_all(agents_dir()).map_err(|e| e.to_string())?;
+    let path = plist_path(label);
+    let tmp = path.with_extension("plist.tmp");
+    Value::Dictionary(d).to_file_xml(&tmp).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+pub fn create(spec: &JobSpec) -> Result<String, String> {
+    if !valid_slug(&spec.slug) {
+        return Err("Zkratka smí mít jen malá písmena bez diakritiky, číslice a pomlčky.".into());
+    }
+    let label = format!("{NEW_PREFIX}{}", spec.slug);
+    if plist_path(&label).exists() || print_status(&label).is_some() {
+        return Err(format!("Úloha {label} už existuje."));
+    }
+    write_plist(&label, spec)?;
+    let path = plist_path(&label).to_string_lossy().into_owned();
+    if let Err(e) = launchctl(&["bootstrap", &domain(), &path]) {
+        let _ = fs::remove_file(&path);
+        return Err(e);
+    }
+    if spec.run_now {
+        launchctl(&["kickstart", &format!("{}/{}", domain(), label)])?;
+    }
+    Ok(label)
+}
+
+fn managed(label: &str) -> Result<Job, String> {
+    let job = find(label)?;
+    if !job.managed {
+        return Err("Tuhle úlohu nezaložil Dispečink, takže ji tu neměním.".into());
+    }
+    Ok(job)
+}
+
+pub fn update(label: &str, spec: &JobSpec) -> Result<(), String> {
+    let job = managed(label)?;
+    if label != format!("{NEW_PREFIX}{}", spec.slug) {
+        return Err("Zkratka úlohy se měnit nedá.".into());
+    }
+    let target = format!("{}/{}", domain(), label);
+    if job.loaded {
+        launchctl(&["bootout", &target])?;
+    }
+    write_plist(label, spec)?;
+    // A paused job stays paused; the new settings apply once it is resumed.
+    if !job.disabled {
+        launchctl(&["bootstrap", &domain(), &job.plist_path])?;
+    }
+    if spec.run_now && !job.disabled {
+        launchctl(&["kickstart", &target])?;
+    }
+    Ok(())
+}
+
+/// Stops the job and removes its plist. Its log stays in ~/Library/Logs/Dispecink.
+pub fn delete(label: &str) -> Result<(), String> {
+    let job = managed(label)?;
+    let target = format!("{}/{}", domain(), label);
+    if job.loaded {
+        launchctl(&["bootout", &target])?;
+    }
+    let _ = launchctl(&["enable", &target]); // forget a leftover "disabled" flag
+    fs::remove_file(&job.plist_path).map_err(|e| e.to_string())
+}
+
