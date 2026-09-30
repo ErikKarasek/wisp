@@ -150,6 +150,11 @@ async fn telegram_send(chat: String, text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn telegram_bot() -> Result<serde_json::Value, String> {
+    telegram::bot_info(&telegram_token().await?).await
+}
+
+#[tauri::command]
 async fn telegram_chats() -> Result<Vec<serde_json::Value>, String> {
     telegram::recent_chats(&telegram_token().await?).await
 }
@@ -243,6 +248,7 @@ pub fn run() {
             history_append,
             telegram_send,
             telegram_chats,
+            telegram_bot,
             set_tray
         ])
         .build(tauri::generate_context!())

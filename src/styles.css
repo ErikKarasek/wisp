@@ -283,3 +283,6 @@ button { font: inherit; color: inherit; }
 }
 .settings .steps { margin: 0 0 12px; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .settings .steps b { color: var(--text); font-weight: 600; }
+.settings .bot { margin-top: 10px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.settings .bot b { color: var(--text); }
+.settings .bot .err { flex-basis: 100%; }

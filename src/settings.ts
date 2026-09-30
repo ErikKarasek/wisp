@@ -84,6 +84,7 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
         ${hasBot ? `<button class="btn" data-act="botDelete">Smazat</button>` : ""}
       </div>
       ${hasBot ? `
+      <div class="bot" data-bot>Zjišťuju, který bot je uložený…</div>
       <div class="inline" style="margin-top:8px">
         <input type="text" data-f="chat" value="${esc(ctx.cfg.telegram.chat)}" placeholder="Chat id" spellcheck="false">
         <button class="btn" data-act="findChat">Najít můj chat</button>
@@ -182,22 +183,60 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
     ctx.cfg.telegram.chat = (e.target as HTMLInputElement).value.trim();
     await ctx.save();
   });
-  el.querySelector('[data-act="findChat"]')?.addEventListener("click", async () => {
+  // Which bot is saved, with a link that opens its chat in Telegram.
+  const botBox = el.querySelector<HTMLElement>("[data-bot]");
+  if (botBox) {
+    invoke<{ username: string; name: string; webhook: boolean }>("telegram_bot")
+      .then((b) => {
+        botBox.innerHTML =
+          `Bot: <b>${esc(b.name)}</b> <a href="#" data-link="https://t.me/${esc(b.username)}">@${esc(b.username)}</a> ` +
+          `<button class="btn" data-link="https://t.me/${esc(b.username)}">Otevřít v Telegramu</button>` +
+          (b.webhook
+            ? `<div class="err">Tenhle bot má webhook, jeho zprávy si bere jiná služba. Použij jiného bota.</div>`
+            : "");
+        botBox.querySelectorAll<HTMLElement>("[data-link]").forEach((a) =>
+          a.addEventListener("click", (e) => {
+            e.preventDefault();
+            void openUrl(a.dataset.link!);
+          }),
+        );
+      })
+      .catch((e) => (botBox.innerHTML = `<span class="err">Token bota nefunguje: ${esc(String(e))}</span>`));
+  }
+
+  // Wait for the user's message instead of looking once: they usually write it after clicking.
+  el.querySelector('[data-act="findChat"]')?.addEventListener("click", async (e) => {
+    const button = e.currentTarget as HTMLButtonElement;
     const box = el.querySelector(".chats") as HTMLElement;
+    button.disabled = true;
+    const until = Date.now() + 90_000;
+    let chats: { id: string; name: string }[] = [];
     try {
-      const chats = await invoke<{ id: string; name: string }[]>("telegram_chats");
+      while (Date.now() < until && box.isConnected) {
+        chats = await invoke<{ id: string; name: string }[]>("telegram_chats");
+        if (chats.length) break;
+        const left = Math.ceil((until - Date.now()) / 1000);
+        box.innerHTML = `<span class="muted">Napiš teď botovi v Telegramu cokoli (třeba „ahoj“). Čekám… ${left} s</span>`;
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+      if (!box.isConnected) return;
       box.innerHTML = chats.length
-        ? chats.map((c) => `<button class="btn" data-chat="${esc(c.id)}">${esc(c.name)} · ${esc(c.id)}</button>`).join("")
-        : `<span class="muted">Nic nenašel. Napiš botovi v Telegramu cokoli a zkus to znovu.</span>`;
+        ? `<span class="muted">Vyber sebe:</span> ` +
+          chats.map((c) => `<button class="btn" data-chat="${esc(c.id)}">${esc(c.name)} · ${esc(c.id)}</button>`).join("")
+        : `<span class="err">Za 90 s nepřišla žádná zpráva. Píšeš opravdu tomu botovi, který je nahoře?</span>`;
       box.querySelectorAll<HTMLButtonElement>("[data-chat]").forEach((b) =>
         b.addEventListener("click", async () => {
           ctx.cfg.telegram.chat = b.dataset.chat!;
+          ctx.cfg.telegram.enabled = true;
           await ctx.save();
           await again();
+          ctx.toast("Chat uložený. Zkus „Poslat zkoušku“.", true);
         }),
       );
-    } catch (e) {
-      ctx.toast(String(e));
+    } catch (err) {
+      box.innerHTML = `<span class="err">${esc(String(err))}</span>`;
+    } finally {
+      button.disabled = false;
     }
   });
   el.querySelector('[data-act="testMsg"]')?.addEventListener("click", async () => {

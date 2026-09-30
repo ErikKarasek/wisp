@@ -655,7 +655,6 @@ async function refresh(withCloud = false): Promise<void> {
     compose();
     render();
     await Promise.all([updateTray(), onChanges()]);
-    if (withCloud && filter === "settings") await showSettings();
   } finally {
     busy = false;
     $("refresh").classList.remove("spin");
