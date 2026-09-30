@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 type Obj = Record<string, any>;
-type Engine = "claude_local" | "codex_local";
+type Engine = "claude_local" | "codex_local" | "gemini_local";
 
 const CHATGPT_MODELS = [
   { id: "gpt-6-luna", label: "GPT-6 Luna (výchozí v Codexu)" },
@@ -32,6 +32,14 @@ const PATH_ENV = "/Users/erickos007/.local/bin:/opt/homebrew/bin:/usr/local/bin:
 const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 /** ChatGPT agents run on the Codex CLI engine: the default ACP engine sandboxes
  * them with no network and no writes outside their workspace. */
+/** The engine-specific part of the adapter config. */
+async function engineConfig(engine: Engine): Promise<Obj> {
+  if (engine === "codex_local") return codexConfig();
+  // Gemini CLI straight, in yolo mode without a sandbox, like the other engines.
+  if (engine === "gemini_local") return { engine: "cli" };
+  return {};
+}
+
 async function codexConfig(): Promise<Obj> {
   const command = await invoke<string | null>("codex_command").catch(() => null);
   return { engine: "cli", ...(command ? { command } : {}) };
@@ -107,11 +115,12 @@ export async function openAgentForm(o: AgentFormOptions) {
   let agent: Obj | null = null;
   let instructions = "";
   type Model = { id: string; label: string };
-  const models: Record<Engine, Model[]> = { claude_local: [], codex_local: [] };
+  const models: Record<Engine, Model[]> = { claude_local: [], codex_local: [], gemini_local: [] };
   let skills: Obj[] = [];
   try {
-    [models.claude_local, skills] = await Promise.all([
+    [models.claude_local, models.gemini_local, skills] = await Promise.all([
       request(`GET`, `/companies/${o.companyId}/adapters/claude_local/models`).catch(() => []),
+      request(`GET`, `/companies/${o.companyId}/adapters/gemini_local/models`).catch(() => []),
       request(`GET`, `/companies/${o.companyId}/skills`).catch(() => []),
     ]);
     // Codex signed in with a ChatGPT account accepts only these (tried one by one);
@@ -128,9 +137,9 @@ export async function openAgentForm(o: AgentFormOptions) {
   }
 
   const cfg = agent?.adapterConfig ?? {};
-  let engine: Engine = agent?.adapterType === "codex_local" ? "codex_local" : "claude_local";
+  let engine: Engine = agent?.adapterType === "codex_local" || agent?.adapterType === "gemini_local" ? agent.adapterType : "claude_local";
   const startEngine = engine;
-  const model = cfg.model ?? (engine === "codex_local" ? models.codex_local[0]?.id : "claude-sonnet-5") ?? "";
+  const model = cfg.model ?? (engine === "claude_local" ? "claude-sonnet-5" : models[engine][0]?.id) ?? "";
   if (model && !models[engine].some((m) => m.id === model)) models[engine].unshift({ id: model, label: model });
   const modelOptions = (e: Engine, current: string) =>
     models[e].map((m) => `<option value="${esc(m.id)}" ${m.id === current ? "selected" : ""}>${esc(m.label)}</option>`).join("");
@@ -152,6 +161,7 @@ export async function openAgentForm(o: AgentFormOptions) {
     <label class="row">Motor<select data-f="engine">
       <option value="claude_local" ${engine === "claude_local" ? "selected" : ""}>Claude (tvoje předplatné Claude)</option>
       <option value="codex_local" ${engine === "codex_local" ? "selected" : ""}>ChatGPT (tvoje předplatné ChatGPT, přes Codex)</option>
+      <option value="gemini_local" ${engine === "gemini_local" ? "selected" : ""}>Gemini (tvoje předplatné Google AI Pro, přes Gemini CLI)</option>
     </select></label>
     <label class="row">Model<select data-f="model">${modelOptions(engine, model)}</select></label>
     <label class="row">Rozpočet<span class="inline"><input type="number" data-f="budget" min="0" step="1" value="${Math.round((agent?.budgetMonthlyCents ?? 500) / 100)}"> $ měsíčně, pak se sám pozastaví</span></label>
@@ -269,7 +279,7 @@ export async function openAgentForm(o: AgentFormOptions) {
     q(".note").textContent = "";
     try {
       if (agent) {
-        const codex = engine === "codex_local" ? await codexConfig() : {};
+        const codex = await engineConfig(engine);
         if (engine !== startEngine) {
           // A new engine: Paperclip starts the adapter config afresh but keeps env.
           // Everything else (instructions path, env) is carried over explicitly.
@@ -289,7 +299,7 @@ export async function openAgentForm(o: AgentFormOptions) {
           ...common,
           adapterType: engine,
           adapterConfig: {
-            ...(engine === "codex_local" ? await codexConfig() : {}),
+            ...(await engineConfig(engine)),
             model,
             paperclipSkillSync: { desiredSkills },
             // So gh and claude from ~/.local/bin are found, like the other agents.
