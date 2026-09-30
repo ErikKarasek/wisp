@@ -103,10 +103,28 @@ pub async fn action(kind: &str, id: &str) -> Result<(), String> {
     }
 }
 
-/// The calls the agent editor makes, and only those: reading and saving an
-/// agent and its instructions, hiring one, deleting one, and the lists the
-/// form needs. `{id}` stands for one id segment.
+/// The calls Dispečink makes, and only those. `{id}` stands for one id segment.
 const ALLOWED: &[(&str, &str)] = &[
+    // tasks and their comments
+    ("GET", "/issues/{id}"),
+    ("PATCH", "/issues/{id}"),
+    ("GET", "/issues/{id}/comments"),
+    ("POST", "/issues/{id}/comments"),
+    ("POST", "/companies/{id}/issues"),
+    // what an agent is doing: its runs and their logs
+    ("GET", "/companies/{id}/heartbeat-runs"),
+    ("GET", "/heartbeat-runs/{id}"),
+    ("GET", "/heartbeat-runs/{id}/log"),
+    // agents' secrets (values go in, never come back out)
+    ("GET", "/companies/{id}/secrets"),
+    ("POST", "/companies/{id}/secrets"),
+    ("POST", "/secrets/{id}/rotate"),
+    // routines and their schedules
+    ("POST", "/companies/{id}/routines"),
+    ("PATCH", "/routines/{id}"),
+    ("POST", "/routines/{id}/triggers"),
+    ("PATCH", "/routine-triggers/{id}"),
+    // agents
     ("GET", "/agents/{id}"),
     ("PATCH", "/agents/{id}"),
     ("DELETE", "/agents/{id}"),
@@ -133,9 +151,15 @@ pub async fn request(method: &str, path: &str, body: Option<Value>) -> Result<Va
     if !allowed(method, path) {
         return Err(format!("{method} {path} Dispečink nesmí volat"));
     }
-    // The only query the editor uses: which instructions file to read.
+    // Only these query keys, with plain values.
+    const KEYS: &[&str] = &["path", "limit", "agentId", "offset", "limitBytes"];
     if let Some(q) = path.split_once('?').map(|(_, q)| q) {
-        if !q.starts_with("path=") || q.contains('&') || q.contains("..") {
+        let ok = q.split('&').all(|pair| {
+            pair.split_once('=').is_some_and(|(k, v)| {
+                KEYS.contains(&k) && !v.contains("..") && v.chars().all(|c| c.is_ascii_alphanumeric() || "-_.%".contains(c))
+            })
+        });
+        if !ok {
             return Err("Neplatný dotaz".into());
         }
     }

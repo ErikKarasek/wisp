@@ -27,6 +27,7 @@ export type Command =
   | { type: "github"; repo: string; workflowId: number; action: "run" | "enable" | "disable" }
   | { type: "editJob"; label: string }
   | { type: "editAgent"; companyId: string; agentId: string }
+  | { type: "editRoutine"; companyId: string; routineId?: string }
   | { type: "open"; target: string };
 
 export type ActionSpec = {
@@ -50,8 +51,8 @@ export type Item = {
   bubble?: string;
   character: Partial<MascotCharacter>;
   facts: [string, string][];
-  /** A job's log label, or static lines to show instead of a log. */
-  log: { job: string } | { lines: string[] } | null;
+  /** A job's log label, an agent's live runs, or static lines to show instead. */
+  log: { job: string } | { agent: { companyId: string; agentId: string } } | { lines: string[] } | null;
   actions: ActionSpec[];
 };
 
@@ -256,7 +257,7 @@ export type PaperclipSnapshot =
 const OPEN_WORK = new Set(["todo", "in_progress", "in_review", "backlog"]);
 const ms = (s: unknown) => (typeof s === "string" ? Date.parse(s) : NaN);
 
-function agentItem(a: Obj, issues: Obj[], groupId: string, base: string, prefix: string, now: number): Item {
+function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
   const mine = issues.filter((i) => i.assigneeAgentId === a.id);
   const blocked = mine.find((i) => i.status === "blocked");
   const active = mine.find((i) => i.status === "in_progress") ?? mine.find((i) => OPEN_WORK.has(i.status));
@@ -310,15 +311,12 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, base: string, prefix:
     actions.push({ label: "Obnovit", primary: true, command: { type: "paperclip", kind: "agentResume", id: a.id } });
   }
   actions.push({ label: "Upravit", command: { type: "editAgent", companyId: a.companyId, agentId: a.id } });
-  actions.push({ label: "Otevřít v Paperclipu", command: { type: "open", target: `${base}/${prefix}/agents/${a.urlKey ?? a.id}` } });
 
   const facts: [string, string][] = [["Role", a.title ?? "–"]];
   if (a.adapterConfig?.model) facts.push(["Model", a.adapterConfig.model]);
   if (spent != null) facts.push(["Tento měsíc", budget ? `$${spent.toFixed(2)} z $${budget.toFixed(0)}` : `$${spent.toFixed(2)}`]);
 
-  const lines = mine.length
-    ? mine.map((i) => `${i.identifier}  ${i.status.padEnd(11)}  ${i.title}`)
-    : ["Žádné otevřené úkoly."];
+  const tasks = mine.map((i) => `${i.identifier} · ${i.title}`).join(", ");
 
   return {
     id: `agent:${a.id}`,
@@ -330,13 +328,13 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, base: string, prefix:
     chip,
     bubble,
     character: characterFor(`agent:${a.name}`),
-    facts,
-    log: { lines },
+    facts: tasks ? [...facts, ["Úkoly", tasks]] : facts,
+    log: { agent: { companyId: a.companyId, agentId: a.id } },
     actions,
   };
 }
 
-function routineItem(r: Obj, agents: Obj[], groupId: string, base: string, prefix: string, now: number): Item {
+function routineItem(r: Obj, agents: Obj[], groupId: string, now: number): Item {
   const agent = agents.find((a) => a.id === r.assigneeAgentId);
   const triggers: Obj[] = (r.triggers ?? []).filter((t: Obj) => t.enabled);
   const nexts = triggers.map((t) => ms(t.nextRunAt)).filter((n) => !Number.isNaN(n));
@@ -378,7 +376,7 @@ function routineItem(r: Obj, agents: Obj[], groupId: string, base: string, prefi
       command: { type: "paperclip", kind: "routineRun", id: r.id },
     });
   }
-  actions.push({ label: "Otevřít v Paperclipu", command: { type: "open", target: `${base}/${prefix}/routines/${r.id}` } });
+  actions.push({ label: "Upravit", command: { type: "editRoutine", companyId: r.companyId, routineId: r.id } });
 
   return {
     id: `routine:${r.id}`,
@@ -414,8 +412,8 @@ export function paperclipGroups(snap: PaperclipSnapshot, now = Date.now()): Grou
       note: company.name,
       company: { id: company.id, name: company.name, prefix },
       items: [
-        ...agents.map((a) => agentItem(a, issues, id, snap.baseUrl, prefix, now)),
-        ...routines.map((r) => routineItem(r, agents, id, snap.baseUrl, prefix, now)),
+        ...agents.map((a) => agentItem(a, issues, id, now)),
+        ...routines.map((r) => routineItem(r, agents, id, now)),
       ],
     };
   });

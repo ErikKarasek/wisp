@@ -117,6 +117,7 @@ export async function openAgentForm(o: AgentFormOptions) {
   // Stored keys are short ("paperclip", "company/<id>/<slug>"); the list gives long ones.
   const shortKey = (s: Obj) => (s.key.startsWith("company/") ? s.key : s.slug);
   const others = o.agents.filter((a) => a.id !== o.agentId);
+  const hasToken = cfg.env?.GH_TOKEN?.type === "secret_ref";
 
   const form = root.querySelector(".form") as HTMLElement;
   form.innerHTML = `
@@ -130,6 +131,9 @@ export async function openAgentForm(o: AgentFormOptions) {
     <label class="row">Rozpočet<span class="inline"><input type="number" data-f="budget" min="0" step="1" value="${Math.round((agent?.budgetMonthlyCents ?? 500) / 100)}"> $ měsíčně, pak se sám pozastaví</span></label>
     <div class="row"><span>Probouzení</span><span class="inline"><label class="check"><input type="checkbox" data-f="hb" ${heartbeat.enabled ? "checked" : ""}> samo každých</label>
       <input type="number" data-f="hbMin" min="5" step="5" value="${Math.max(5, Math.round((heartbeat.intervalSec ?? 3600) / 60))}"> min <small>jinak jen když dostane úkol</small></span></div>
+    <div class="row"><span>GitHub token</span><span class="inline">
+      <input type="password" data-f="ghToken" autocomplete="off" spellcheck="false" placeholder="${hasToken ? "Má token. Nový ho nahradí." : "Nemá token"}" style="flex:1">
+      <small>uloží se šifrovaně, zpátky ho už nikdo neuvidí</small></span></div>
     <div class="row top"><span>Skilly</span><div class="skills">${skills
       .map((s) => `<label class="check" title="${esc(s.description ?? "")}"><input type="checkbox" data-skill="${esc(shortKey(s))}" ${chosen.has(shortKey(s)) ? "checked" : ""}> ${esc(s.slug)}</label>`)
       .join("")}</div></div>
@@ -137,7 +141,6 @@ export async function openAgentForm(o: AgentFormOptions) {
     <p class="note"></p>
     <div class="btns">
       ${agent ? `<button class="btn" data-act="delete">Smazat agenta</button>` : ""}
-      <button class="btn" data-act="open">Otevřít v Paperclipu</button>
       <span class="spacer"></span>
       <button class="btn" data-act="close">Zrušit</button>
       <button class="btn primary" data-act="save">${agent ? "Uložit" : "Založit agenta"}</button>
@@ -184,6 +187,25 @@ export async function openAgentForm(o: AgentFormOptions) {
     }
   });
 
+  /** A new GitHub token: replace the value of the agent's secret, or give it one. */
+  async function setToken(agentId: string, name: string) {
+    const token = q<HTMLInputElement>('[data-f="ghToken"]').value.trim();
+    if (!token) return;
+    const fresh = await request<Obj>("GET", `/agents/${agentId}`);
+    const env: Obj = {};
+    for (const [k, v] of Object.entries<Obj>(fresh.adapterConfig?.env ?? {})) {
+      env[k] = v && typeof v === "object" && v.type === "secret_ref" ? { type: "secret_ref", secretId: v.secretId, version: v.version ?? "latest" } : v;
+    }
+    if (env.GH_TOKEN?.type === "secret_ref") {
+      await request("POST", `/secrets/${env.GH_TOKEN.secretId}/rotate`, { value: token });
+      return;
+    }
+    const slug = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    const secret = await request<Obj>("POST", `/companies/${o.companyId}/secrets`, { name: `gh_token_${slug}_${Date.now().toString(36)}`, value: token });
+    env.GH_TOKEN = { type: "secret_ref", secretId: secret.id, version: "latest" };
+    await request("PATCH", `/agents/${agentId}`, { adapterConfig: { env } });
+  }
+
   async function save(button: HTMLButtonElement) {
     const name = q<HTMLInputElement>('[data-f="name"]').value.trim();
     if (!name) {
@@ -213,6 +235,7 @@ export async function openAgentForm(o: AgentFormOptions) {
         // adapterConfig is merged key by key, so env and the rest stay as they are.
         await request("PATCH", `/agents/${agent.id}`, { ...common, adapterConfig: { model, paperclipSkillSync: { desiredSkills } } });
         if (text !== instructions) await request("PUT", `/agents/${agent.id}/instructions-bundle/file`, { path: "AGENTS.md", content: text });
+        await setToken(agent.id, name);
         o.toast(`${name} uložený.`, true);
         close();
         o.changed();
@@ -228,7 +251,8 @@ export async function openAgentForm(o: AgentFormOptions) {
           },
           instructionsBundle: { entryFile: "AGENTS.md", files: { "AGENTS.md": text } },
         });
-        o.toast(`${name} založený. GH_TOKEN mu přidáš v Paperclipu, pokud ho potřebuje.`, true);
+        await setToken(made.id, name);
+        o.toast(`${name} založený.`, true);
         close();
         o.created(`agent:${made.id}`);
       }

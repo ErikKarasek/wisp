@@ -184,11 +184,11 @@ fn tray_menu(app: &AppHandle, lines: &[String]) -> tauri::Result<Menu<Wry>> {
 /// The page draws the tray face (the mascot wearing the worst state) and sends
 /// it here with the lines for the tray menu.
 #[tauri::command]
-fn set_tray(app: AppHandle, png: Vec<u8>, tooltip: String, lines: Vec<String>) -> Result<(), String> {
+fn set_tray(app: AppHandle, png: Vec<u8>, tooltip: String, lines: Vec<String>, template: bool) -> Result<(), String> {
     let tray = app.tray_by_id(TRAY_ID).ok_or("Ikona v liště chybí")?;
     let icon = Image::from_bytes(&png).map_err(|e| e.to_string())?;
     tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
-    tray.set_icon_as_template(false).map_err(|e| e.to_string())?;
+    tray.set_icon_as_template(template).map_err(|e| e.to_string())?;
     tray.set_tooltip(Some(tooltip)).map_err(|e| e.to_string())?;
     let menu = tray_menu(&app, &lines).map_err(|e| e.to_string())?;
     tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;

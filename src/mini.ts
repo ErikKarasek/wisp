@@ -10,6 +10,7 @@ import { SEVERITY, STATES, type State } from "./model";
 import { sounds } from "./sounds";
 import "./mini.css";
 
+const escHtml = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 const byUrgency = (a: MiniItem, b: MiniItem) => SEVERITY.indexOf(a.state) - SEVERITY.indexOf(b.state);
 
 function worst(s: Snapshot): State {
@@ -127,6 +128,7 @@ export async function startNotch() {
         <div class="wing r"><span class="st"></span></div>
       </div>
       <div class="open">
+        <div class="livebox" hidden><div class="m"></div><div class="t"><b></b><div class="lines"></div></div></div>
         <div class="news" hidden><div class="m"></div><div class="t"><b></b><small></small></div></div>
         <div class="list"></div>
         <button class="more">Otevřít Dispečink</button>
@@ -174,6 +176,9 @@ export async function startNotch() {
   const status = document.querySelector(".st") as HTMLElement;
   const news = document.querySelector(".news") as HTMLElement;
   let newsMascot: MountedMascot | null = null;
+  const liveBox = document.querySelector(".livebox") as HTMLElement;
+  let liveMascot: MountedMascot | null = null;
+  let liveFor: string | null = null;
   let newsId: string | null = null;
   const render = rowList(document.querySelector(".open .list") as HTMLElement);
   subscribe((s) => {
@@ -194,7 +199,21 @@ export async function startNotch() {
       (news.querySelector("b") as HTMLElement).textContent = `${fresh.name}: ${fresh.chip}`;
       (news.querySelector("small") as HTMLElement).textContent = fresh.doing;
     }
-    render([...s.items].filter((i) => i.id !== fresh?.id).sort(byUrgency).slice(0, fresh ? 3 : 4));
+    // An agent at work takes the top: what it is doing, step by step, like a terminal.
+    const working = s.live?.[0];
+    liveBox.hidden = !working;
+    if (working) {
+      if (liveFor !== working.id) {
+        liveMascot?.destroy();
+        liveMascot = mountMascot(liveBox.querySelector(".m") as HTMLElement, { character: working.character, expression: "thriving", seed: 8 });
+        liveFor = working.id;
+      }
+      (liveBox.querySelector("b") as HTMLElement).textContent = `${working.name} pracuje`;
+      (liveBox.querySelector(".lines") as HTMLElement).innerHTML = working.lines.map((l) => `<code>${escHtml(l)}</code>`).join("");
+      news.hidden = true;
+    }
+    const shown = working ? 2 : fresh ? 3 : 4;
+    render([...s.items].filter((i) => i.id !== fresh?.id && i.id !== working?.id).sort(byUrgency).slice(0, shown));
   });
   document.querySelector(".more")!.addEventListener("click", () => void invoke("show_main_window"));
   news.addEventListener("click", () => {

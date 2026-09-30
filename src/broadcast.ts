@@ -26,4 +26,6 @@ export type Snapshot = {
   /** The item that just changed, for the notch to show when it peeks. */
   news: MiniItem | null;
   at: number;
+  /** Agents working right now and their last few steps. */
+  live: { id: string; name: string; character: Partial<MascotCharacter>; lines: string[] }[];
 };

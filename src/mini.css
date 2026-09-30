@@ -74,3 +74,12 @@ body.mini button { font: inherit; color: inherit; }
 .nt .open .list { flex: 1; min-height: 0; overflow: hidden; }
 .nt .more { border: 0; background: none; color: #8b9cff; font-size: 12px; padding: 4px; align-self: center; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .nt, .nt .open { transition: none; } .nt .wing .m.hop, .nt .wing .m.dizzy { animation: none; } }
+.nt .livebox { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 8px; align-items: start;
+  padding: 7px 8px; border-radius: 12px; background: rgba(139, 156, 255, .12); margin-bottom: 4px; }
+.nt .livebox[hidden] { display: none; }
+.nt .livebox .m { width: 38px; height: 38px; }
+.nt .livebox b { font-size: 12.5px; }
+.nt .livebox .lines { display: grid; gap: 1px; margin-top: 2px; }
+.nt .livebox code { font: 10.5px/1.4 ui-monospace, "SF Mono", Menlo, monospace; color: #9097a3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nt .livebox code:last-child { color: #d6dcff; }

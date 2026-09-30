@@ -26,6 +26,9 @@ import {
   type State,
 } from "./model";
 import { openJobForm } from "./jobform";
+import { latestRun, LiveRun, stepLine, type Step } from "./live";
+import { openRoutineForm } from "./routineform";
+import { renderTasks } from "./tasks";
 import { renderSettings } from "./settings";
 import { sounds } from "./sounds";
 import { openStudio } from "./studio";
@@ -201,12 +204,15 @@ function matches(item: Item) {
 function renderMain() {
   const main = $("main");
   const settings = $("settings");
-  if (filter === "settings") {
+  const tasks = $("tasks");
+  if (filter === "settings" || filter === "tasks") {
     groupEls.forEach((s) => (s.hidden = true));
-    settings.hidden = false;
+    settings.hidden = filter !== "settings";
+    tasks.hidden = filter !== "tasks";
     return;
   }
   settings.hidden = true;
+  tasks.hidden = true;
   const seen = new Set<string>();
   groups.forEach((g, gi) => {
     let sec = groupEls.get(g.id);
@@ -222,7 +228,8 @@ function renderMain() {
       (g.id === "mac"
         ? `<button class="add-job" data-act="newJob">+ Nová úloha</button>`
         : g.company
-          ? `<button class="add-job" data-act="newAgent" data-company="${esc(g.company.id)}">+ Nový agent</button>`
+          ? `<span class="h-actions"><button class="add-job" data-act="newRoutine" data-company="${esc(g.company.id)}">+ Nová rutina</button>` +
+            `<button class="add-job" data-act="newAgent" data-company="${esc(g.company.id)}">+ Nový agent</button></span>`
           : "");
     const list = sec.querySelector(".cards") as HTMLElement;
     let notice = sec.querySelector(".notice") as HTMLElement | null;
@@ -312,13 +319,14 @@ function renderSide() {
     where.map(btn).join("") +
     gauge +
     `<h6>Tvoje</h6>` +
+    btn(["tasks", "Úkoly", paperclip?.online ? paperclip.companies.reduce((n, c) => n + c.issues.length, 0) : null]) +
     `<button data-act="studio">Postavičky<span>${cfg.characters.length}</span></button>` +
     `<button data-act="newJob">Nová úloha</button>` +
     btn(["settings", "Nastavení", null]);
   side.querySelectorAll<HTMLButtonElement>("button[data-f]").forEach((b) =>
     b.addEventListener("click", () => {
       filter = b.dataset.f!;
-      if (filter === "settings") selected = null;
+      if (filter === "settings" || filter === "tasks") selected = null;
       $("main").scrollTop = 0;
       render();
     }),
@@ -387,7 +395,7 @@ async function renderDetail() {
     detailMascot?.destroy();
     detail.innerHTML = `<button class="m" title="Změnit postavičku"></button><div class="info">
       <h4><span class="n"></span><span class="chip"></span><button class="icon-btn close" title="Zavřít (Esc)">✕</button></h4>
-      <p class="d"></p><div class="facts"></div><div class="history"></div><pre class="log"></pre><div class="btns"></div></div>`;
+      <p class="d"></p><div class="facts"></div><div class="history"></div><pre class="log"></pre><div class="live" hidden></div><div class="btns"></div></div>`;
     detail.querySelector(".close")!.addEventListener("click", () => select(null));
     detail.querySelector(".m")!.addEventListener("click", () => {
       const it = allItems().find((i) => i.id === selected);
@@ -438,7 +446,12 @@ async function renderDetail() {
   }
 
   const log = q(".log");
-  if (!item.log) {
+  const liveBox = q(".live");
+  liveBox.hidden = !(item.log && "agent" in item.log);
+  if (item.log && "agent" in item.log) {
+    log.hidden = true;
+    await renderLive(liveBox, item.log.agent.companyId, item.log.agent.agentId);
+  } else if (!item.log) {
     log.hidden = true;
   } else if ("lines" in item.log) {
     log.hidden = false;
@@ -460,6 +473,76 @@ async function renderDetail() {
     if (atBottom) log.scrollTop = log.scrollHeight;
   }
 }
+
+// ---------- live runs ----------
+
+const liveRuns = new Map<string, LiveRun>(); // agent id → its latest run's reader
+const runStatus = new Map<string, string>(); // run id → status
+
+async function liveFor(companyId: string, agentId: string) {
+  const run = await latestRun(companyId, agentId).catch(() => null);
+  if (!run) return null;
+  let live = liveRuns.get(agentId);
+  if (!live || live.runId !== run.id) {
+    live = new LiveRun(run.id);
+    liveRuns.set(agentId, live);
+  }
+  // A finished run's log doesn't change; read it once more and then leave it.
+  if (runStatus.get(run.id) !== run.status || run.status === "running" || !live.steps.length) {
+    await live.poll().catch(() => {});
+    runStatus.set(run.id, run.status);
+  }
+  return { run, steps: live.steps };
+}
+
+const STEP_ICON = { running: "…", done: "✓", failed: "✗" };
+
+async function renderLive(box: HTMLElement, companyId: string, agentId: string) {
+  const got = await liveFor(companyId, agentId);
+  if (!got) {
+    box.innerHTML = `<p class="muted">Tenhle agent ještě neběžel.</p>`;
+    return;
+  }
+  const { run, steps } = got;
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
+  const head = run.status === "running" ? `<b class="pulse">Právě pracuje</b>` : `Poslední běh ${run.finishedAt ? ago(Date.parse(run.finishedAt)) : ""} · ${run.status === "succeeded" ? "dopadl dobře" : run.status}`;
+  box.innerHTML =
+    `<div class="lhead">${head}</div>` +
+    (steps.length ? steps.slice(-80).map(stepHtml).join("") : `<p class="muted">Zatím nic.</p>`);
+  if (atBottom || run.status === "running") box.scrollTop = box.scrollHeight;
+}
+
+function stepHtml(s: Step) {
+  if (s.kind === "say") return `<div class="lsay">${esc(s.text.trim())}</div>`;
+  return `<div class="ltool ${s.status}"><i>${STEP_ICON[s.status]}</i><div><code>${esc(s.title)}</code>${
+    s.detail ? `<small>${esc(s.detail)}</small>` : ""
+  }${s.output ? `<pre>${esc(s.output.slice(0, 1200))}</pre>` : ""}</div></div>`;
+}
+
+type LiveLine = { id: string; name: string; character: Item["character"]; lines: string[] };
+let liveNow: LiveLine[] = [];
+
+/** Every couple of seconds while an agent works: its detail and the notch follow along. */
+async function liveTick() {
+  const working = allItems().filter((i) => i.state === "run" && i.log && "agent" in i.log);
+  const next: LiveLine[] = [];
+  for (const i of working) {
+    const a = (i.log as { agent: { companyId: string; agentId: string } }).agent;
+    const got = await liveFor(a.companyId, a.agentId);
+    if (!got) continue;
+    const lines = got.steps.slice(-4).map(stepLine).filter(Boolean).map((l) => l.slice(0, 90));
+    next.push({ id: i.id, name: i.name, character: i.character, lines });
+  }
+  const changed = JSON.stringify(next) !== JSON.stringify(liveNow);
+  liveNow = next;
+  if (changed) broadcast();
+  const sel = allItems().find((i) => i.id === selected);
+  if (sel && sel.state === "run" && sel.log && "agent" in sel.log) {
+    const box = document.querySelector<HTMLElement>("#detail .live");
+    if (box) await renderLive(box, sel.log.agent.companyId, sel.log.agent.agentId);
+  }
+}
+setInterval(() => void liveTick(), 2500);
 
 const actionSig = (actions: ActionSpec[]) => actions.map((a) => a.label).join("|");
 
@@ -495,6 +578,7 @@ async function runCommand(a: ActionSpec) {
   const c = a.command;
   if (c.type === "editJob") return jobForm(jobs.find((j) => j.label === c.label));
   if (c.type === "editAgent") return agentForm(c.companyId, c.agentId);
+  if (c.type === "editRoutine") return routineForm(c.companyId, c.routineId);
   try {
     if (c.type === "open") {
       if (/^https?:/.test(c.target)) await openUrl(c.target);
@@ -546,7 +630,7 @@ async function onChanges() {
 
   const alarming = changed.filter((i) => i.state === "bad" || i.state === "you");
   // The notch peeks out with the most important change.
-  const headline = alarming[0] ?? changed.find((i) => i.state === "done");
+  const headline = alarming[0] ?? changed.find((i) => i.state === "done") ?? changed.find((i) => i.state === "run" && i.log && "agent" in i.log);
   if (headline) {
     news = {
       id: headline.id,
@@ -607,7 +691,22 @@ document.addEventListener("click", (e) => {
   if (el.closest('[data-act="newJob"]')) jobForm();
   const hire = el.closest<HTMLElement>('[data-act="newAgent"]');
   if (hire) agentForm(hire.dataset.company!);
+  const routine = el.closest<HTMLElement>('[data-act="newRoutine"]');
+  if (routine) routineForm(routine.dataset.company!);
 });
+
+function routineForm(companyId: string, routineId?: string) {
+  if (!paperclip?.online) return toast("Paperclip neodpovídá.");
+  const c = paperclip.companies.find((x) => x.company.id === companyId);
+  if (!c) return;
+  openRoutineForm({
+    companyId,
+    routine: routineId ? c.routines.find((r) => r.id === routineId) : undefined,
+    agents: c.agents,
+    toast,
+    changed: () => void refresh(),
+  });
+}
 
 // ---------- agent form ----------
 
@@ -654,6 +753,7 @@ function snapshot(): Snapshot {
     counts: { attention: n(["bad", "you", "new"]), run: n(["run"]), sleep: n(["sleep"]), ok: n(["ok", "done"]), off: n(["off"]) },
     news,
     at: newsAt,
+    live: liveNow,
   };
 }
 let newsAt = 0;
@@ -687,21 +787,40 @@ async function updateTray() {
   if (sig === traySig) return;
   traySig = sig;
   try {
-    const png = await renderPng(mascotSvg({ color: "#e6e8ef", eyeColor: "#15161a" }, EXPRESSIONS[face], 44), 44);
-    await invoke("set_tray", { png: Array.from(png), tooltip, lines });
+    // Like the system icons: a template silhouette that follows the menu bar's
+    // colour, with the eyes cut out so the expression still shows. Red when
+    // something failed, because that should catch the eye.
+    const failed = worst === "bad";
+    const svg = failed
+      ? mascotSvg({ color: "#e0605a", eyeColor: "#2a0d0b" }, EXPRESSIONS[face], 44)
+      : mascotSvg({ color: "#000000", eyeColor: "#ffffff" }, EXPRESSIONS[face], 44);
+    const png = await renderPng(svg, 44, !failed);
+    await invoke("set_tray", { png: Array.from(png), tooltip, lines, template: !failed });
   } catch (e) {
     console.error("tray", e);
     traySig = "";
   }
 }
 
-async function renderPng(svg: string, size: number): Promise<Uint8Array> {
+async function renderPng(svg: string, size: number, cutOutLight = false): Promise<Uint8Array> {
   const img = new Image();
   img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   await img.decode();
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = size;
-  canvas.getContext("2d")!.drawImage(img, 0, 0, size, size);
+  const g = canvas.getContext("2d")!;
+  g.drawImage(img, 0, 0, size, size);
+  if (cutOutLight) {
+    // Light pixels (the eyes) become holes; the dark body stays solid.
+    const data = g.getImageData(0, 0, size, size);
+    const px = data.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const light = (px[i] + px[i + 1] + px[i + 2]) / 765;
+      px[i + 3] = Math.round(px[i + 3] * (1 - light));
+      px[i] = px[i + 1] = px[i + 2] = 0;
+    }
+    g.putImageData(data, 0, 0);
+  }
   const blob = await new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("png"))), "image/png"));
   return new Uint8Array(await blob.arrayBuffer());
 }
@@ -715,9 +834,24 @@ function render() {
   void renderDetail();
   if (filter === "settings" && !settingsShown) void showSettings();
   if (filter !== "settings") settingsShown = false;
+  if (filter === "tasks" && !tasksShown) showTasks();
+  if (filter !== "tasks") tasksShown = false;
 }
 
 let settingsShown = false;
+let tasksShown = false;
+function showTasks() {
+  tasksShown = true;
+  if (!paperclip?.online) {
+    $("tasks").innerHTML = `<p class="muted">Paperclip neodpovídá.</p>`;
+    return;
+  }
+  renderTasks($("tasks"), {
+    companies: paperclip.companies.filter((c) => c.agents.length),
+    toast,
+    changed: () => void refresh().then(() => (tasksShown = false)).then(render),
+  });
+}
 async function showSettings() {
   settingsShown = true;
   await renderSettings($("settings"), {
