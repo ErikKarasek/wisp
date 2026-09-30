@@ -179,7 +179,7 @@ function cardFor(item: Item, seed: number): Card {
   if (item.engine) {
     const tag = document.createElement("b");
     tag.className = `eng ${{ ChatGPT: "gpt", Gemini: "gem", Claude: "cl" }[item.engine]}`;
-    tag.textContent = item.engine;
+    tag.textContent = item.engineLabel ?? item.engine;
     q(".when").prepend(tag);
   }
   // A poked character keeps its reaction until it calms down.
@@ -369,17 +369,18 @@ function renderSide() {
         .join("")
     : "";
   const gemRows = geminiQuota.filter((w) => w.group === "Gemini").sort((a, b) => a.windowSecs - b.windowSecs);
-  const other = geminiQuota.filter((w) => w.group !== "Gemini").map((w) => `Claude a GPT ${windowName(w.windowSecs)}: ${w.percent} %`).join(", ");
-  const gemini = gemRows.length
-    ? `<h6 title="${esc(other ? `Antigravity, dál ${other}` : "Antigravity")}">Limit Gemini</h6>` +
-      gemRows
-        .map((w) => {
-          const resets = resetText(w.resetsAtMs);
-          return `<div class="gauge${w.percent >= 85 ? " hot" : ""}"${resets ? ` title="obnoví se ${esc(resets)}"` : ""}><div class="bar"><i style="width:${w.percent}%"></i></div>
-            <small>${esc(windowName(w.windowSecs))}: ${w.percent} %</small></div>`;
-        })
-        .join("")
-    : "";
+  const proRows = geminiQuota.filter((w) => w.group !== "Gemini").sort((a, b) => a.windowSecs - b.windowSecs);
+  const gauges = (rows: AgyWindow[]) =>
+    rows
+      .map((w) => {
+        const resets = resetText(w.resetsAtMs);
+        return `<div class="gauge${w.percent >= 85 ? " hot" : ""}"${resets ? ` title="obnoví se ${esc(resets)}"` : ""}><div class="bar"><i style="width:${w.percent}%"></i></div>
+          <small>${esc(windowName(w.windowSecs))}: ${w.percent} %</small></div>`;
+      })
+      .join("");
+  const gemini =
+    (gemRows.length ? `<h6 title="Google AI Pro v Antigravity">Limit Gemini</h6>${gauges(gemRows)}` : "") +
+    (proRows.length ? `<h6 title="Claude a GPT modely v Antigravity, zvlášť od tvého předplatného Claude">Claude v AI Pro</h6>${gauges(proRows)}` : "");
   const neurons = cloudflare ? cloudflareNeurons(cloudflare) : null;
   const gauge =
     claude +

@@ -53,6 +53,8 @@ export type Item = {
   bubble?: string;
   /** Agents: the subscription they run on. */
   engine?: "Claude" | "ChatGPT" | "Gemini";
+  /** The tag's text when it isn't just the engine, e.g. AI Pro's Claude. */
+  engineLabel?: string;
   character: Partial<MascotCharacter>;
   facts: [string, string][];
   /** A job's log label, an agent's live runs, or static lines to show instead. */
@@ -138,6 +140,8 @@ export type Job = {
 
 const JOBS: Record<string, { name: string; doing: string }> = {
   "com.erikkarasek.devlog": { name: "Devlog", doing: "V noci sepíše, co se za den commitlo" },
+  "com.erikkarasek.gemini-deps": { name: "Hlídač závislostí", doing: "Každé úterý projde závislosti všech projektů a hlásí zranitelnosti" },
+  "com.erikkarasek.gemini-repos": { name: "Přehled repozitářů", doing: "V pátek odpoledne shrne pull requesty, CI a staré větve na GitHubu" },
   "com.erikkarasek.gemini-portfolio": { name: "Kontrola portfolia", doing: "Každou středu projde erikkarasek.cz: odkazy, texty, chybějící projekty" },
   "com.erikkarasek.github-reels": { name: "GitHub reels", doing: "Ráno projde trendy a AI novinky a napíše scénáře reelů" },
   "com.erikkarasek.job-digest": { name: "Job digest", doing: "Pošle souhrn nových nabídek práce" },
@@ -238,12 +242,16 @@ export function jobItem(j: Job, now = Date.now()): Item {
   // Jobs that run an AI themselves: Antigravity (Gemini) or Claude Code.
   const cmd = j.command ?? j.program.join(" ");
   const engine = /gemini-jobs\/|\bagy\b/.test(cmd) ? ("Gemini" as const) : /\bclaude\b/.test(cmd) ? ("Claude" as const) : undefined;
-  if (engine === "Gemini") facts.push(["Motor", "Gemini (Antigravity, Google AI Pro)"]);
+  // run.sh's third argument is the model; Claude there is AI Pro's own Claude, not Erik's subscription.
+  const model = engine === "Gemini" ? (/run\.sh\s+\S+\s+\S+\s+(\S+)/.exec(cmd)?.[1] ?? "gemini-3.1-pro-high") : null;
+  const viaClaude = !!model?.startsWith("claude");
+  if (engine === "Gemini") facts.push(["Motor", viaClaude ? `Claude v Antigravity (Google AI Pro), ${model}` : `Gemini v Antigravity (Google AI Pro), ${model}`]);
 
   return {
     id: `job:${j.label}`,
     group: "mac",
     ...(engine ? { engine } : {}),
+    ...(viaClaude ? { engineLabel: "Claude · AI Pro" } : {}),
     name: info.name,
     doing,
     about: info.doing,
