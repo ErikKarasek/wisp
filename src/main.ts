@@ -5,6 +5,7 @@ import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_S
 import { renderReviews } from "./reviews";
 import { focusAgent, renderChat } from "./chat";
 import { startPhone } from "./phone";
+import { startRelay } from "./relay";
 
 /** Sidebar entries that replace the cards with a view of their own. */
 const VIEWS = ["settings", "tasks", "reviews", "chat"];
@@ -1242,6 +1243,24 @@ async function start() {
   setInterval(() => void loadGemini(), GEMINI_MS);
   window.addEventListener("dispecink-tray", () => void invoke("set_tray_title", { title: trayTitle() }));
   setInterval(() => void morning(), 60_000);
+  startRelay({
+    companies: () => (paperclip?.online ? paperclip.companies : []),
+    overview: () => {
+      const s = snapshot();
+      return {
+        focus,
+        counts: s.counts,
+        items: s.items.map((i) => ({ id: i.id, name: i.name, state: i.state, chip: i.chip, doing: i.doing, when: i.when })),
+        live: s.live.map((l) => ({ name: l.name, lines: l.lines })),
+        limits: {
+          claude: usage ? { session: usage.session?.percent ?? null, week: usage.week?.percent ?? null, resets: usage.session?.resets ?? "" } : null,
+          gpt: gptQuota.map((w) => ({ percent: w.percent, windowSecs: w.windowSecs, resetsAtMs: w.resetsAtMs })),
+          gemini: geminiQuota,
+        },
+      };
+    },
+    toast: (t) => toast(t),
+  });
   void healCodex();
   setInterval(() => void healCodex(), 60 * 60_000);
   startPhone({

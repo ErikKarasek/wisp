@@ -1,0 +1,9 @@
+name = "dispecink-relay"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dispecink-relay"
+database_id = "ddd1dbe2-a0e9-4870-9fc4-37c4e358b05e"

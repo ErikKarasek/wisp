@@ -1,0 +1,43 @@
+name: DispecinkPhone
+options:
+  bundleIdPrefix: cz.erikkarasek
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+targets:
+  Dispecink:
+    type: application
+    platform: iOS
+    sources: [App, Shared]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cz.erikkarasek.dispecink.phone
+        INFOPLIST_KEY_CFBundleDisplayName: Dispečink
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    dependencies:
+      - target: DispecinkWidget
+  DispecinkWidget:
+    type: app-extension
+    platform: iOS
+    sources: [Widget, Shared]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cz.erikkarasek.dispecink.phone.widget
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Dispečink
+        INFOPLIST_KEY_NSExtension: { NSExtensionPointIdentifier: com.apple.widgetkit-extension }
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: Dispečink
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension

@@ -43,6 +43,13 @@ pub struct CcPermission {
 }
 
 static PENDING: Mutex<Option<HashMap<String, Sender<String>>>> = Mutex::new(None);
+/// The prompts themselves, for the phone.
+static ASKS: Mutex<Vec<CcPermission>> = Mutex::new(Vec::new());
+
+/// Permission prompts waiting for an answer right now.
+pub fn pending() -> Vec<CcPermission> {
+    ASKS.lock().map(|a| a.clone()).unwrap_or_default()
+}
 
 fn short(s: &str, n: usize) -> String {
     let line = s.lines().next().unwrap_or("").trim();
@@ -143,6 +150,7 @@ fn permission(app: &AppHandle, v: &Value) -> String {
         rule: rule(&tool, &input),
         tool,
     };
+    ASKS.lock().unwrap().push(ask.clone());
     let (tx, rx) = channel();
     PENDING.lock().unwrap().get_or_insert_with(HashMap::new).insert(id.clone(), tx);
     let _ = app.emit("cc-permission", ask.clone());
@@ -168,6 +176,7 @@ fn permission(app: &AppHandle, v: &Value) -> String {
         tauri::async_runtime::block_on(crate::telegram::edit(&r, m, &format!("{text}\n\n{what}")));
     }
     PENDING.lock().unwrap().get_or_insert_with(HashMap::new).remove(&id);
+    ASKS.lock().unwrap().retain(|a| a.id != id);
     let _ = app.emit("cc-permission-done", id);
     crate::notch::release();
     let decision = match answer.as_str() {

@@ -7,6 +7,7 @@ mod launchd;
 mod media;
 mod notch;
 mod paperclip;
+mod relay;
 mod store;
 mod telegram;
 mod usage;
@@ -366,6 +367,11 @@ fn run_cleanup() -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn relay_push(app: AppHandle, state: serde_json::Value) -> Result<(), String> {
+    relay::push(&app, state).await
+}
+
+#[tauri::command]
 async fn gemini_usage() -> Result<Vec<usage::AgyWindow>, String> {
     blocking(usage::gemini_usage).await?
 }
@@ -491,6 +497,7 @@ pub fn run() {
             notch::setup(handle);
             claudecode::start(handle);
             telegram::start_listening(handle);
+            relay::start(handle);
             Ok(())
         })
         // Closing the window only hides it; the tray keeps watching.
@@ -531,6 +538,7 @@ pub fn run() {
             ask_report,
             ask_quick,
             run_cleanup,
+            relay_push,
             heal_codex,
             signing_cert_days,
             github_prs,
