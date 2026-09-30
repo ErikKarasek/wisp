@@ -225,3 +225,16 @@ body.mini button { font: inherit; color: inherit; }
 .nt .answer button:disabled { opacity: .5; }
 .nt .ring.gpt .fill { stroke: #10a37f; }
 .nt .ring.gpt.hot .fill { stroke: #e0605a; }
+
+/* The limits beside the closed notch: Claude (session inside the week), ChatGPT. */
+.nt .rw .lim { display: flex; gap: 7px; flex: none; }
+.nt .rw .lim[hidden] { display: none; }
+.nt .li { display: flex; align-items: center; gap: 3px; }
+.nt .li svg { width: 17px; height: 17px; transform: rotate(-90deg); fill: none; stroke-width: 2.6; }
+.nt .li .tr { stroke: rgba(255, 255, 255, .13); }
+.nt .li .fl { stroke-linecap: round; transition: stroke-dasharray .6s; }
+.nt .li.cl .fl { stroke: #d97757; }
+.nt .li.cl .fl.wk { stroke: #b5634a; opacity: .75; }
+.nt .li.gp .fl { stroke: #10a37f; }
+.nt .li b { font: 600 10.5px ui-rounded, -apple-system, sans-serif; color: #cfd3da; font-variant-numeric: tabular-nums; }
+.nt .li.fast b { color: #e2b04a; }

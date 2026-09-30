@@ -52,3 +52,31 @@ export type Snapshot = {
   usage: ClaudeUsage | null;
   gpt: QuotaWindow[];
 };
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** When a Claude limit resets, from the CLI's "Sep 30 at 11:29pm", "Oct 6 at 7pm" or "11:30pm". */
+export function claudeResetMs(text: string, now = Date.now()): number | null {
+  const t = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i.exec(text);
+  if (!t) return null;
+  let hour = Number(t[1]) % 12;
+  if (t[3].toLowerCase() === "pm") hour += 12;
+  const d = new Date(now);
+  d.setHours(hour, Number(t[2] ?? 0), 0, 0);
+  const md = /([a-z]{3})[a-z]*\s+(\d{1,2})/i.exec(text);
+  const month = md ? MONTHS.indexOf(md[1].toLowerCase()) : -1;
+  if (md && month >= 0) {
+    d.setMonth(month, Number(md[2]));
+    if (d.getTime() < now - 86400_000) d.setFullYear(d.getFullYear() + 1);
+  } else if (d.getTime() < now) {
+    d.setDate(d.getDate() + 1);
+  }
+  return d.getTime();
+}
+
+/** How far into a limit window we are, 0–100, from when it resets and how long it is. */
+export function elapsedPercent(resetMs: number | null, windowSecs: number, now = Date.now()): number | null {
+  if (!resetMs || !windowSecs) return null;
+  const left = (resetMs - now) / (windowSecs * 1000);
+  return Math.round(Math.min(1, Math.max(0, 1 - left)) * 100);
+}

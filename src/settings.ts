@@ -62,6 +62,7 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       <div class="prow top"><span>Ukazovat</span><div class="checks">
         ${np("showOthers", "Ostatní agenty a úlohy (malé postavičky pod botem)")}${np("showMusic", "Co hraje (Spotify, Hudba)")}
         ${np("showCalendar", "Další události z kalendáře")}${np("showMirror", "Tlačítko kamery (zrcátko)")}
+        ${np("showLimits", "Limity Claude a ChatGPT vedle zavřeného notche, pořád")}
       </div></div>
       <div class="prow top"><span>Chování</span><div class="checks">
         ${np("follow", "Oči sledují myš")}${np("dance", "Tancuje, když hraje hudba")}${np("peek", "Vykoukne, když se něco stane")}

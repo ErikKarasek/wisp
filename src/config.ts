@@ -12,6 +12,8 @@ export type NotchPrefs = {
   showMusic: boolean;
   showCalendar: boolean;
   showMirror: boolean;
+  /** Claude's and ChatGPT's limits beside the closed notch, all the time. */
+  showLimits: boolean;
   /** A character from the gallery for the bot; null for the plain white one. */
   bot: string | null;
   /** Dance while music plays. */
@@ -32,6 +34,7 @@ export const defaultNotchPrefs = (): NotchPrefs => ({
   showMusic: true,
   showCalendar: true,
   showMirror: true,
+  showLimits: true,
   bot: null,
   dance: true,
   peek: true,

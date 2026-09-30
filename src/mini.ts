@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { EXPRESSIONS, type ExpressionName, type MascotCharacter } from "./mascot/mascot";
 import { mountMascot, type MountedMascot } from "./mascot/svg";
-import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot, windowName, resetText } from "./broadcast";
+import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot, windowName, resetText, claudeResetMs, elapsedPercent } from "./broadcast";
 import { defaultNotchPrefs, type NotchPrefs, type SavedCharacter } from "./config";
 import { SEVERITY, STATES, type State } from "./model";
 import { sounds } from "./sounds";
@@ -151,7 +151,7 @@ export async function startNotch() {
         </div>
         <div class="gap"></div>
         <div class="side r">
-          <span class="closed-only rw"><span class="lstep"></span><span class="st"></span></span>
+          <span class="closed-only rw"><span class="lstep"></span><span class="st"></span><span class="lim" hidden></span></span>
           <div class="open-only icons">
             <span class="ring" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
             <span class="ring gpt" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
@@ -261,6 +261,31 @@ export async function startNotch() {
   const crew = $(".crew");
   const crewMascots = new Map<string, MountedMascot>();
   const LIVE_WING = 190;
+  /** What the limits add to each wing (both wings grow, so the notch stays centred). */
+  const LIMITS_W = 78;
+  const arc = (r: number, pct: number) => {
+    const len = 2 * Math.PI * r;
+    return `stroke-dasharray="${((Math.min(100, pct) / 100) * len).toFixed(2)} ${len.toFixed(2)}"`;
+  };
+  const ahead = (used: number, elapsed: number | null) => elapsed != null && used > elapsed + 10;
+  function limitsHtml(s: Snapshot): string {
+    const out: string[] = [];
+    const ses = s.usage?.session;
+    const week = s.usage?.week;
+    if (ses || week) {
+      const sesAhead = ses ? ahead(ses.percent, elapsedPercent(claudeResetMs(ses.resets), 5 * 3600)) : false;
+      out.push(`<span class="li cl${sesAhead ? " fast" : ""}"><svg viewBox="0 0 20 20">
+        ${week ? `<circle cx="10" cy="10" r="8.5" class="tr"/><circle cx="10" cy="10" r="8.5" class="fl wk" ${arc(8.5, week.percent)}/>` : ""}
+        ${ses ? `<circle cx="10" cy="10" r="5" class="tr"/><circle cx="10" cy="10" r="5" class="fl" ${arc(5, ses.percent)}/>` : ""}
+      </svg><b>${ses?.percent ?? week?.percent}</b></span>`);
+    }
+    const g = s.gpt?.[0];
+    if (g) {
+      const gAhead = ahead(g.percent, elapsedPercent(g.resetsAtMs, g.windowSecs));
+      out.push(`<span class="li gp${gAhead ? " fast" : ""}"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" class="tr"/><circle cx="10" cy="10" r="7" class="fl" ${arc(7, g.percent)}/></svg><b>${g.percent}</b></span>`);
+    }
+    return out.join("");
+  }
   let lastWing = 46;
   subscribe((s) => {
     base = faceFor(worst(s));
@@ -276,7 +301,15 @@ export async function startNotch() {
     ($(".dots") as HTMLElement).hidden = !working;
 
     // Live activity: while an agent works, the closed notch widens to show it.
-    const wing = working ? LIVE_WING : 46;
+    // The limits stay beside the notch all the time, like Codenotch: Claude's
+    // session inside its week, and ChatGPT. A number turns amber when it runs
+    // ahead of the time gone in its window.
+    const lim = $(".lim");
+    const limits = limitsHtml(s);
+    lim.hidden = !prefs.showLimits || !limits;
+    if (!lim.hidden && lim.innerHTML !== limits) lim.innerHTML = limits;
+    const extra = lim.hidden ? 0 : LIMITS_W;
+    const wing = (working ? LIVE_WING : 46) + extra;
     if (wing !== lastWing) {
       lastWing = wing;
       root.style.setProperty("--wing", `${wing}px`);
