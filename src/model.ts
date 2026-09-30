@@ -2,6 +2,7 @@
 // they are doing, and how they feel about it.
 
 import type { ExpressionName, MascotCharacter, MascotShape } from "./mascot/mascot";
+import { cronEvery, nextCron } from "./cron";
 import { ago, ahead, cronInWords, duration, nextCalendar, type CalendarTime } from "./time";
 
 export type State = "run" | "ok" | "done" | "sleep" | "you" | "new" | "bad" | "off";
@@ -23,6 +24,7 @@ export const SEVERITY: State[] = ["bad", "you", "new", "run", "done", "ok", "sle
 export type Command =
   | { type: "job"; label: string; action: "run" | "restart" | "pause" | "resume" }
   | { type: "paperclip"; kind: "agentPause" | "agentResume" | "agentInvoke" | "routineRun"; id: string }
+  | { type: "github"; repo: string; workflowId: number; action: "run" | "enable" | "disable" }
   | { type: "open"; target: string };
 
 export type ActionSpec = {
@@ -63,7 +65,7 @@ function hash(s: string) {
 }
 
 /** Everyone keeps the same face forever: known ones by hand, the rest by name. */
-function characterFor(key: string): Partial<MascotCharacter> {
+export function characterFor(key: string): Partial<MascotCharacter> {
   const known = CHARACTERS[key];
   if (known) return known;
   const h = hash(key);
@@ -82,6 +84,9 @@ const CHARACTERS: Record<string, Partial<MascotCharacter>> = {
   "agent:Dispatcher": { shape: "capsule", color: "#8fd694" },
   "agent:Fixer": { shape: "cube", color: "#f08a7e" },
   "agent:karel": { shape: "lemon", color: "#9ec1ff" },
+  "cf:site-watch": { shape: "round", color: "#5fcfa8" },
+  "cf:job-tracker-scout": { shape: "lemon", color: "#f2a65a" },
+  "cf:github-reels": { shape: "cloud", color: "#e7a3dc" },
 };
 
 // ---------- launchd ----------
@@ -398,4 +403,230 @@ export function paperclipGroups(snap: PaperclipSnapshot, now = Date.now()): Grou
 
 export function macGroup(jobs: Job[], now = Date.now()): Group {
   return { id: "mac", title: "Mac", note: "launchd", items: jobs.map((j) => jobItem(j, now)) };
+}
+
+// ---------- Cloudflare ----------
+
+type Part<T> = { ok: T } | { error: string };
+export type CloudflareSnapshot =
+  | { configured: false }
+  | { configured: true; error: string; account?: string }
+  | {
+      configured: true;
+      account: string;
+      workers: { name: string; modifiedOn: string; schedules: { cron: string }[] }[];
+      invocations: Part<{ sum: { requests: number; errors: number }; dimensions: { scriptName: string } }[]>;
+      cronEvents: Part<{ scriptName: string; cron: string; status: string; datetime: string }[]>;
+      neurons: Part<{ sum: { totalNeurons: number } }[]>;
+    };
+
+const WORKERS: Record<string, string> = {
+  "site-watch": "Hlídá weby a hlásí výpadky do Telegramu",
+  "job-tracker-scout": "Ráno hledá nové nabídky práce",
+  "github-reels": "Webová appka s reely",
+  opengym: "OpenGym",
+  "subscription-tracker": "Hlídá předplatná",
+  lolstats: "Statistiky z League of Legends",
+};
+
+export const NEURONS_PER_DAY = 10_000;
+
+export function cloudflareNeurons(snap: CloudflareSnapshot): number | null {
+  if (!snap.configured || !("workers" in snap) || !("ok" in snap.neurons)) return null;
+  return snap.neurons.ok?.[0]?.sum?.totalNeurons ?? 0;
+}
+
+export function cloudflareGroup(snap: CloudflareSnapshot, now = Date.now()): Group | null {
+  if (!snap.configured) return null;
+  if (!("workers" in snap)) {
+    return { id: "cloudflare", title: "Cloudflare", note: "Workers", items: [], notice: `Cloudflare neodpovídá: ${snap.error}` };
+  }
+  const inv = "ok" in snap.invocations ? snap.invocations.ok ?? [] : [];
+  const events = "ok" in snap.cronEvents ? snap.cronEvents.ok ?? [] : [];
+  const problems = [snap.invocations, snap.cronEvents].filter((p) => "error" in p).map((p) => (p as { error: string }).error);
+
+  const items = snap.workers.map((w): Item => {
+    const stats = inv.filter((i) => i.dimensions.scriptName === w.name);
+    const requests = stats.reduce((n, i) => n + i.sum.requests, 0);
+    const errors = stats.reduce((n, i) => n + i.sum.errors, 0);
+    const lastCron = events.find((e) => e.scriptName === w.name);
+    const crons = w.schedules.map((s) => s.cron);
+    const nexts = crons.map((c) => nextCron(c, true, now)).filter((n): n is number => n != null);
+    const next = nexts.length ? Math.min(...nexts) : null;
+    const lastMs = lastCron ? Date.parse(lastCron.datetime) : NaN;
+
+    let state: State;
+    let chip: string | undefined;
+    let bubble: string | undefined;
+    let doing = WORKERS[w.name] ?? "Worker";
+    if (lastCron && lastCron.status !== "success") {
+      state = "bad";
+      bubble = "cron selhal";
+      doing = `Poslední cron skončil: ${lastCron.status}`;
+    } else if (errors > 0) {
+      state = "you";
+      bubble = `${errors} chyb`;
+      doing = `${errors} chyb z ${requests} běhů za 24 h`;
+    } else if (!Number.isNaN(lastMs) && now - lastMs < RECENT_MS) {
+      state = "done";
+      bubble = "hotovo!";
+    } else if (crons.length) {
+      state = "sleep";
+    } else if (requests > 0) {
+      state = "ok";
+      chip = "běží";
+    } else {
+      state = "sleep";
+      chip = "ticho";
+    }
+
+    const when: string[] = [];
+    if (!Number.isNaN(lastMs)) when.push(`naposledy ${ago(lastMs, now)}`);
+    if (next) when.push(`příště ${ahead(next, now)}`);
+    if (!crons.length) when.push(`${requests} požadavků za 24 h`);
+
+    const every = crons.map((c) => cronEvery(c) ?? `${c} (UTC)`).join(", ");
+    return {
+      id: `cf:${w.name}`,
+      group: "cloudflare",
+      name: w.name,
+      doing,
+      when: when.join(" · "),
+      state,
+      chip,
+      bubble,
+      character: characterFor(`cf:${w.name}`),
+      facts: [
+        ["Cron", every || "žádný"],
+        ["Za 24 h", `${requests} běhů, ${errors} chyb`],
+        ["Nasazeno", ago(Date.parse(w.modifiedOn), now)],
+      ],
+      log: {
+        lines: events
+          .filter((e) => e.scriptName === w.name)
+          .slice(0, 12)
+          .map((e) => `${new Date(e.datetime).toLocaleString("cs-CZ")}  ${e.status.padEnd(9)} ${e.cron}`)
+          .concat(events.some((e) => e.scriptName === w.name) ? [] : ["Žádné běhy cronu za posledních 24 h."]),
+      },
+      actions: [
+        {
+          label: "Otevřít v Cloudflare",
+          primary: true,
+          command: { type: "open", target: `https://dash.cloudflare.com/${snap.account}/workers/services/view/${w.name}/production` },
+        },
+      ],
+    };
+  });
+  return {
+    id: "cloudflare",
+    title: "Cloudflare",
+    note: "Workers",
+    items,
+    notice: problems.length ? `Část dat chybí: ${problems.join(" · ")}` : undefined,
+  };
+}
+
+// ---------- GitHub ----------
+
+type Workflow = {
+  id: number;
+  name: string;
+  path: string;
+  state: string;
+  htmlUrl: string;
+  lastRun: null | {
+    status: string;
+    conclusion: string | null;
+    event: string;
+    branch: string;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+    htmlUrl: string;
+  };
+};
+export type GithubSnapshot =
+  | { ok: false; error: string }
+  | { ok: true; repos: ({ repo: string; workflows: Workflow[] } | { repo: string; error: string })[] };
+
+const FAILED = new Set(["failure", "timed_out", "startup_failure", "action_required"]);
+
+export function githubGroup(snap: GithubSnapshot, now = Date.now()): Group | null {
+  if (!snap.ok) return { id: "github", title: "GitHub", note: "Actions", items: [], notice: snap.error };
+  if (!snap.repos.length) return null;
+  const errors: string[] = [];
+  const items: Item[] = [];
+  for (const r of snap.repos) {
+    if ("error" in r) {
+      errors.push(`${r.repo}: ${r.error}`);
+      continue;
+    }
+    const short = r.repo.split("/")[1];
+    for (const w of r.workflows) {
+      const run = w.lastRun;
+      const updated = run ? Date.parse(run.updatedAt) : NaN;
+      let state: State;
+      let chip: string | undefined;
+      let bubble: string | undefined;
+      let doing = run ? `${short}: ${run.title}` : `${short}: zatím neběžel`;
+      if (w.state !== "active") {
+        state = "off";
+        doing = `${short}: vypnutý`;
+      } else if (run && run.status !== "completed") {
+        state = "run";
+      } else if (run && run.conclusion && FAILED.has(run.conclusion)) {
+        state = "bad";
+        bubble = "červená";
+      } else if (run?.conclusion === "success" && now - updated < RECENT_MS) {
+        state = "done";
+        bubble = "hotovo!";
+      } else if (run?.conclusion === "success") {
+        state = "ok";
+        chip = "zelená";
+      } else {
+        state = "sleep";
+      }
+      const file = w.path.split("/").pop() ?? "";
+      const actions: ActionSpec[] = [];
+      if (w.state === "active") {
+        if (state !== "run") {
+          actions.push({
+            label: "Spustit teď",
+            primary: true,
+            confirm: "Spustí workflow na GitHubu. Pokračovat?",
+            command: { type: "github", repo: r.repo, workflowId: w.id, action: "run" },
+          });
+        }
+        actions.push({ label: "Vypnout", confirm: "Opravdu vypnout?", command: { type: "github", repo: r.repo, workflowId: w.id, action: "disable" } });
+      } else {
+        actions.push({
+          label: "Zapnout",
+          primary: true,
+          confirm: "Zapnout? Běhy spotřebují minuty Actions.",
+          command: { type: "github", repo: r.repo, workflowId: w.id, action: "enable" },
+        });
+      }
+      actions.push({ label: "Otevřít na GitHubu", command: { type: "open", target: `https://github.com/${r.repo}/actions/workflows/${file}` } });
+
+      items.push({
+        id: `gh:${r.repo}/${w.id}`,
+        group: "github",
+        name: w.name,
+        doing,
+        when: run ? `naposledy ${ago(updated, now)} · ${run.event}` : "zatím neběžel",
+        state,
+        chip,
+        bubble,
+        character: characterFor(`gh:${r.repo}/${w.name}`),
+        facts: [
+          ["Repo", r.repo],
+          ["Soubor", w.path],
+          ["Poslední běh", run ? `${run.conclusion ?? run.status} (${run.branch})` : "–"],
+        ],
+        log: { lines: run ? [`${run.title}`, `${run.event} · ${run.branch} · ${run.conclusion ?? run.status}`, run.htmlUrl] : ["Zatím žádný běh."] },
+        actions,
+      });
+    }
+  }
+  return { id: "github", title: "GitHub", note: "Actions", items, notice: errors.length ? errors.join(" · ") : undefined };
 }

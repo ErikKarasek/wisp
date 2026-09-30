@@ -18,8 +18,19 @@ runs inside it.
   routines with their next run. Wake an agent, pause or resume it, run a
   routine, open it in Paperclip. Waking an agent or running a routine spends
   the Claude subscription, so those buttons ask first.
+- **Cloudflare Workers**: scripts, cron schedules (UTC, shown in local time),
+  runs and errors over 24 h, the last cron events, and today's Workers AI
+  neurons against the 10 000 daily allowance. Needs a read-only API token
+  (Workers Scripts: Read, Account Analytics: Read), kept in the Keychain.
+- **GitHub Actions** through the `gh` login: workflows of the chosen repos with
+  their last run. Run now, enable, disable, open on GitHub.
+- **Characters**: pick one for any item, tweak it (shape, colours, build, lean,
+  eyes), make new ones, rename items. Stored in
+  `~/Library/Application Support/cz.erikkarasek.dispecink/config.json`.
 - **Menu bar**: a mascot whose face is the worst state of all, and a menu of
   whatever needs attention. Closing the window keeps it running there.
+- **Notifications** when something turns failed or waiting, and an optional
+  launch at login.
 
 ## Build and install
 

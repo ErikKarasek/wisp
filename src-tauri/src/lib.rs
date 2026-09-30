@@ -1,10 +1,14 @@
+mod cloudflare;
+mod github;
 mod launchd;
 mod paperclip;
+mod store;
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent, Wry};
+use tauri_plugin_autostart::MacosLauncher;
 
 const TRAY_ID: &str = "main";
 
@@ -13,6 +17,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
         .await
         .map_err(|e| e.to_string())
 }
+
+// ---------- launchd ----------
 
 #[tauri::command]
 async fn list_jobs() -> Result<Vec<launchd::Job>, String> {
@@ -36,6 +42,8 @@ async fn job_action(label: String, action: String) -> Result<(), String> {
     .await?
 }
 
+// ---------- Paperclip ----------
+
 #[tauri::command]
 async fn paperclip_snapshot() -> serde_json::Value {
     paperclip::snapshot().await
@@ -45,6 +53,64 @@ async fn paperclip_snapshot() -> serde_json::Value {
 async fn paperclip_action(kind: String, id: String) -> Result<(), String> {
     paperclip::action(&kind, &id).await
 }
+
+// ---------- Cloudflare ----------
+
+#[tauri::command]
+async fn cloudflare_snapshot() -> serde_json::Value {
+    let token = blocking(|| store::secret_get("cloudflare")).await.ok().flatten();
+    cloudflare::snapshot(token).await
+}
+
+// ---------- GitHub ----------
+
+#[tauri::command]
+async fn github_snapshot(repos: Vec<String>) -> Result<serde_json::Value, String> {
+    blocking(move || github::snapshot(&repos)).await
+}
+
+#[tauri::command]
+async fn github_discover() -> Result<Vec<String>, String> {
+    blocking(github::discover).await?
+}
+
+#[tauri::command]
+async fn github_action(repo: String, workflow_id: i64, action: String) -> Result<(), String> {
+    blocking(move || github::action(&repo, workflow_id, &action)).await?
+}
+
+// ---------- settings ----------
+
+fn config_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path().app_config_dir().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn config_load(app: AppHandle) -> Result<serde_json::Value, String> {
+    store::load(config_dir(&app)?)
+}
+
+#[tauri::command]
+fn config_save(app: AppHandle, value: serde_json::Value) -> Result<(), String> {
+    store::save(config_dir(&app)?, &value)
+}
+
+#[tauri::command]
+async fn secret_set(name: String, value: String) -> Result<(), String> {
+    blocking(move || store::secret_set(&name, &value)).await?
+}
+
+#[tauri::command]
+async fn secret_delete(name: String) -> Result<(), String> {
+    blocking(move || store::secret_delete(&name)).await?
+}
+
+#[tauri::command]
+async fn secret_exists(name: String) -> Result<bool, String> {
+    blocking(move || store::secret_get(&name).is_some()).await
+}
+
+// ---------- tray ----------
 
 fn tray_menu(app: &AppHandle, lines: &[String]) -> tauri::Result<Menu<Wry>> {
     let menu = Menu::new(app)?;
@@ -84,6 +150,8 @@ fn show_main(app: &AppHandle) {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             let handle = app.handle();
             let mut tray = TrayIconBuilder::with_id(TRAY_ID)
@@ -114,6 +182,15 @@ pub fn run() {
             job_action,
             paperclip_snapshot,
             paperclip_action,
+            cloudflare_snapshot,
+            github_snapshot,
+            github_discover,
+            github_action,
+            config_load,
+            config_save,
+            secret_set,
+            secret_delete,
+            secret_exists,
             set_tray
         ])
         .build(tauri::generate_context!())

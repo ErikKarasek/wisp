@@ -1,49 +1,98 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import { EXPRESSIONS } from "./mascot/mascot";
+import { fullCharacter, loadConfig, saveConfig, type Config } from "./config";
+import { EXPRESSIONS, type MascotCharacter } from "./mascot/mascot";
 import { mascotSvg, mountMascot, type MountedMascot } from "./mascot/svg";
 import {
+  cloudflareGroup,
+  cloudflareNeurons,
+  githubGroup,
   macGroup,
+  NEURONS_PER_DAY,
   paperclipGroups,
   SEVERITY,
   STATES,
   type ActionSpec,
+  type CloudflareSnapshot,
+  type GithubSnapshot,
   type Group,
   type Item,
   type Job,
   type PaperclipSnapshot,
   type State,
 } from "./model";
+import { renderSettings } from "./settings";
+import { openStudio } from "./studio";
 
-const REFRESH_MS = 10_000;
+const LOCAL_MS = 10_000; // launchd and Paperclip, both on this Mac
+const CLOUD_MS = 60_000; // Cloudflare and GitHub, rate limits apply
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
+let cfg: Config;
+let localGroups: Group[] = [];
+let cloudGroups: Group[] = [];
+let cloudflare: CloudflareSnapshot | null = null;
 let groups: Group[] = [];
+/** The name and face each item has before the user's own settings. */
+const automatic = new Map<string, { name: string; character: Partial<MascotCharacter> }>();
 let filter = "all";
 let selected: string | null = null;
 
 // ---------- data ----------
 
-async function load(): Promise<Group[]> {
+async function loadLocal() {
   const now = Date.now();
   const [jobs, snap] = await Promise.all([
     invoke<Job[]>("list_jobs").catch(() => [] as Job[]),
     invoke<PaperclipSnapshot>("paperclip_snapshot").catch((e) => ({ online: false, error: String(e) }) as PaperclipSnapshot),
   ]);
-  return [macGroup(jobs, now), ...paperclipGroups(snap, now)];
+  localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now)];
+}
+
+async function loadCloud() {
+  const now = Date.now();
+  const [cf, gh] = await Promise.all([
+    invoke<CloudflareSnapshot>("cloudflare_snapshot").catch((e) => ({ configured: true, error: String(e) }) as CloudflareSnapshot),
+    cfg.githubRepos?.length
+      ? invoke<GithubSnapshot>("github_snapshot", { repos: cfg.githubRepos }).catch((e) => ({ ok: false, error: String(e) }) as GithubSnapshot)
+      : Promise.resolve(null),
+  ]);
+  cloudflare = cf;
+  cloudGroups = [cloudflareGroup(cf, now), gh && githubGroup(gh, now)].filter((g): g is Group => !!g);
+}
+
+/** Apply the user's names and characters on top of what the sources report. */
+function compose() {
+  // Work on copies, so applying the settings twice never mixes them into the originals.
+  groups = [...localGroups, ...cloudGroups].map((g) => ({ ...g, items: g.items.map((i) => ({ ...i })) }));
+  for (const item of groups.flatMap((g) => g.items)) {
+    automatic.set(item.id, { name: item.name, character: item.character });
+    const charId = cfg.assignments[item.id];
+    const saved = charId ? cfg.characters.find((c) => c.id === charId) : undefined;
+    if (saved) item.character = saved.character;
+    if (cfg.names[item.id]) item.name = cfg.names[item.id];
+  }
 }
 
 const allItems = () => groups.flatMap((g) => g.items);
 
+async function save() {
+  await saveConfig(cfg);
+  compose();
+  render();
+}
+
 // ---------- cards ----------
 
-type Card = { el: HTMLElement; mascot: MountedMascot; state: State };
+type Card = { el: HTMLElement; mascot: MountedMascot; state: State; look: string };
 const cards = new Map<string, Card>();
 const groupEls = new Map<string, HTMLElement>();
 
 function cardFor(item: Item, seed: number): Card {
+  const look = JSON.stringify(item.character);
   let card = cards.get(item.id);
   if (!card) {
     const el = document.createElement("div");
@@ -58,13 +107,17 @@ function cardFor(item: Item, seed: number): Card {
       expression: STATES[item.state].expr,
       seed,
     });
-    card = { el, mascot, state: item.state };
+    card = { el, mascot, state: item.state, look };
     cards.set(item.id, card);
   }
   const s = STATES[item.state];
   if (card.state !== item.state) {
     card.mascot.setExpression(s.expr);
     card.state = item.state;
+  }
+  if (card.look !== look) {
+    card.mascot.setCharacter(fullCharacter(item.character));
+    card.look = look;
   }
   const q = (sel: string) => card!.el.querySelector(sel) as HTMLElement;
   q(".t").textContent = item.name;
@@ -95,6 +148,13 @@ function matches(item: Item) {
 
 function renderMain() {
   const main = $("main");
+  const settings = $("settings");
+  if (filter === "settings") {
+    groupEls.forEach((s) => (s.hidden = true));
+    settings.hidden = false;
+    return;
+  }
+  settings.hidden = true;
   const seen = new Set<string>();
   groups.forEach((g, gi) => {
     let sec = groupEls.get(g.id);
@@ -162,36 +222,54 @@ function renderSummary() {
     .join("");
 }
 
-let legendDone = false;
+function groupLabel(g: Group) {
+  return g.id === "mac" ? "Mac" : g.id === "cloudflare" ? "Cloudflare" : g.id === "github" ? "GitHub" : g.note;
+}
+
+let legendEl: HTMLElement | null = null;
 function renderSide() {
   const items = allItems();
   const n = (f: (i: Item) => boolean) => items.filter(f).length;
-  const rows: [string, string, number][] = [
+  const rows: [string, string, number | null][] = [
     ["all", "Všichni", items.length],
     ["attention", "Potřebují tě", n((i) => ["bad", "you", "new"].includes(i.state))],
     ["run", "Pracují", n((i) => i.state === "run")],
     ["sleep", "Spí", n((i) => i.state === "sleep")],
   ];
-  const where: [string, string, number][] = groups.map((g) => [g.id, g.id === "mac" ? "Mac" : g.note, g.items.length]);
-  const btn = ([id, label, count]: [string, string, number]) =>
-    `<button data-f="${esc(id)}" class="${filter === id ? "on" : ""}">${esc(label)}<span>${count}</span></button>`;
+  const where: [string, string, number | null][] = groups.map((g) => [g.id, groupLabel(g), g.items.length]);
+  const btn = ([id, label, count]: [string, string, number | null]) =>
+    `<button data-f="${esc(id)}" class="${filter === id ? "on" : ""}">${esc(label)}${count == null ? "" : `<span>${count}</span>`}</button>`;
+
+  const neurons = cloudflare ? cloudflareNeurons(cloudflare) : null;
+  const gauge =
+    neurons == null
+      ? ""
+      : `<h6>Workers AI dnes</h6><div class="gauge${neurons >= NEURONS_PER_DAY * 0.9 ? " hot" : ""}"><div class="bar"><i style="width:${Math.min(100, (neurons / NEURONS_PER_DAY) * 100).toFixed(1)}%"></i></div>
+         <small>${Math.round(neurons).toLocaleString("cs-CZ")} z ${NEURONS_PER_DAY.toLocaleString("cs-CZ")} neuronů</small></div>`;
+
   const side = $("side");
-  const legend = side.querySelector(".legend-wrap");
-  side.innerHTML = rows.map(btn).join("") + `<h6>Kde běží</h6>` + where.map(btn).join("");
+  side.innerHTML =
+    rows.map(btn).join("") +
+    `<h6>Kde běží</h6>` +
+    where.map(btn).join("") +
+    gauge +
+    `<h6>Tvoje</h6>` +
+    `<button data-act="studio">Postavičky<span>${cfg.characters.length}</span></button>` +
+    btn(["settings", "Nastavení", null]);
   side.querySelectorAll<HTMLButtonElement>("button[data-f]").forEach((b) =>
     b.addEventListener("click", () => {
       filter = b.dataset.f!;
+      if (filter === "settings") selected = null;
+      $("main").scrollTop = 0;
       render();
     }),
   );
-  if (legend) {
-    side.appendChild(legend);
-  } else if (!legendDone) {
-    legendDone = true;
-    const wrap = document.createElement("div");
-    wrap.className = "legend-wrap";
-    wrap.innerHTML = `<h6>Co znamená výraz</h6><div class="legend"></div>`;
-    const list = wrap.querySelector(".legend")!;
+  side.querySelector('[data-act="studio"]')!.addEventListener("click", () => studio());
+
+  if (!legendEl) {
+    legendEl = document.createElement("div");
+    legendEl.innerHTML = `<h6>Co znamená výraz</h6><div class="legend"></div>`;
+    const list = legendEl.querySelector(".legend")!;
     (["run", "ok", "done", "sleep", "you", "bad", "off"] as State[]).forEach((s, i) => {
       const row = document.createElement("div");
       row.className = "lg";
@@ -199,14 +277,35 @@ function renderSide() {
       list.appendChild(row);
       mountMascot(row.querySelector(".m") as HTMLElement, { character: { color: "#8b9cff" }, expression: STATES[s].expr, seed: 70 + i });
     });
-    side.appendChild(wrap);
   }
+  side.appendChild(legendEl);
+}
+
+// ---------- studio ----------
+
+function wornBy(characterId: string) {
+  return allItems()
+    .filter((i) => cfg.assignments[i.id] === characterId)
+    .map((i) => i.name);
+}
+
+function studio(item?: Item) {
+  const auto = item ? automatic.get(item.id) : undefined;
+  openStudio({
+    cfg,
+    item,
+    automatic: auto?.character,
+    defaultName: auto?.name,
+    wornBy,
+    save,
+  });
 }
 
 // ---------- detail ----------
 
 let detailMascot: MountedMascot | null = null;
 let detailFor: string | null = null;
+let detailLook = "";
 
 function select(id: string | null) {
   selected = id;
@@ -215,7 +314,7 @@ function select(id: string | null) {
 
 async function renderDetail() {
   const detail = $("detail");
-  const item = allItems().find((i) => i.id === selected);
+  const item = filter === "settings" ? undefined : allItems().find((i) => i.id === selected);
   if (!item) {
     detail.hidden = true;
     detailMascot?.destroy();
@@ -224,34 +323,54 @@ async function renderDetail() {
     return;
   }
   detail.hidden = false;
+  const look = JSON.stringify(item.character);
   if (detailFor !== item.id) {
     detailMascot?.destroy();
-    detail.innerHTML = `<div class="m"></div><div class="info">
+    detail.innerHTML = `<button class="m" title="Změnit postavičku"></button><div class="info">
       <h4><span class="n"></span><span class="chip"></span><button class="icon-btn close" title="Zavřít (Esc)">✕</button></h4>
       <p class="d"></p><div class="facts"></div><pre class="log"></pre><div class="btns"></div></div>`;
     detail.querySelector(".close")!.addEventListener("click", () => select(null));
+    detail.querySelector(".m")!.addEventListener("click", () => {
+      const it = allItems().find((i) => i.id === selected);
+      if (it) studio(it);
+    });
     detailMascot = mountMascot(detail.querySelector(".m") as HTMLElement, {
       character: item.character,
       expression: STATES[item.state].expr,
       seed: 5,
     });
     detailFor = item.id;
+    detailLook = look;
   } else {
     detailMascot?.setExpression(STATES[item.state].expr);
+    if (detailLook !== look) {
+      detailMascot?.setCharacter(fullCharacter(item.character));
+      detailLook = look;
+    }
   }
   const q = (sel: string) => detail.querySelector(sel) as HTMLElement;
   q(".n").textContent = item.name;
   q(".chip").textContent = item.chip ?? STATES[item.state].chip;
   q(".chip").className = `chip s-${item.state}`;
   q(".d").textContent = `${item.doing} · ${item.when}`;
-  q(".facts").innerHTML = item.facts.map(([k, v]) => `<span>${esc(k)}: <b>${esc(v)}</b></span>`).join("");
+  const charId = cfg.assignments[item.id];
+  const charName = cfg.characters.find((c) => c.id === charId)?.name;
+  q(".facts").innerHTML = [...item.facts, ["Postavička", charName ?? "automatická"] as [string, string]]
+    .map(([k, v]) => `<span>${esc(k)}: <b>${esc(v)}</b></span>`)
+    .join("");
 
   const btns = q(".btns");
-  if (btns.dataset.for !== item.id || btns.dataset.sig !== actionSig(item.actions)) {
+  const sig = actionSig(item.actions);
+  if (btns.dataset.for !== item.id || btns.dataset.sig !== sig) {
     btns.dataset.for = item.id;
-    btns.dataset.sig = actionSig(item.actions);
+    btns.dataset.sig = sig;
     btns.innerHTML = "";
     for (const a of item.actions) btns.appendChild(actionButton(a));
+    const dress = document.createElement("button");
+    dress.className = "btn";
+    dress.textContent = "Postavička…";
+    dress.addEventListener("click", () => studio(item));
+    btns.appendChild(dress);
   }
 
   const log = q(".log");
@@ -317,14 +436,16 @@ async function runCommand(a: ActionSpec) {
       return;
     }
     if (c.type === "job") await invoke("job_action", { label: c.label, action: c.action });
-    else await invoke("paperclip_action", { kind: c.kind, id: c.id });
+    else if (c.type === "paperclip") await invoke("paperclip_action", { kind: c.kind, id: c.id });
+    else await invoke("github_action", { repo: c.repo, workflowId: c.workflowId, action: c.action });
     toast(`${a.label}: hotovo`, true);
   } catch (e) {
     toast(String(e));
   }
-  // launchd and Paperclip need a moment before the new state shows.
-  setTimeout(refresh, 800);
-  setTimeout(refresh, 3000);
+  // The sources need a moment before the new state shows.
+  const cloud = c.type === "github";
+  setTimeout(() => void refresh(cloud), 1000);
+  setTimeout(() => void refresh(cloud), cloud ? 6000 : 3000);
 }
 
 let toastTimer = 0;
@@ -335,6 +456,33 @@ function toast(text: string, ok = false) {
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => (t.hidden = true), ok ? 2500 : 6000);
+}
+
+// ---------- notifications ----------
+
+const seenStates = new Map<string, State>();
+let notifyAllowed: boolean | null = null;
+
+async function notifyChanges() {
+  const fresh: Item[] = [];
+  for (const item of allItems()) {
+    const before = seenStates.get(item.id);
+    seenStates.set(item.id, item.state);
+    // The first sighting only sets the baseline.
+    if (before === undefined || before === item.state) continue;
+    if ((item.state === "bad" || item.state === "you") && before !== "bad" && before !== "you") fresh.push(item);
+  }
+  if (!fresh.length || !cfg.notifications) return;
+  if (notifyAllowed === null) {
+    notifyAllowed = (await isPermissionGranted().catch(() => false)) || (await requestPermission().catch(() => "denied")) === "granted";
+  }
+  if (!notifyAllowed) return;
+  for (const item of fresh.slice(0, 3)) {
+    sendNotification({
+      title: item.state === "bad" ? `${item.name}: selhal` : `${item.name} na tebe čeká`,
+      body: item.doing,
+    });
+  }
 }
 
 // ---------- tray ----------
@@ -348,6 +496,8 @@ async function updateTray() {
     .filter((i) => ["bad", "you", "new", "run"].includes(i.state))
     .sort((a, b) => SEVERITY.indexOf(a.state) - SEVERITY.indexOf(b.state));
   const lines = attention.slice(0, 8).map((i) => `${i.name}: ${i.chip ?? STATES[i.state].chip}`);
+  const neurons = cloudflare ? cloudflareNeurons(cloudflare) : null;
+  if (neurons != null && neurons >= NEURONS_PER_DAY * 0.9) lines.push(`Workers AI: ${Math.round((neurons / NEURONS_PER_DAY) * 100)} % denního limitu`);
   if (!lines.length) lines.push("Všechno v pořádku");
   const tooltip = attention.length ? `Dispečink: ${attention.length} potřebuje pozornost` : "Dispečink: všechno v pořádku";
   const sig = `${face}|${lines.join("|")}`;
@@ -380,33 +530,77 @@ function render() {
   renderSide();
   renderMain();
   void renderDetail();
+  if (filter === "settings" && !settingsShown) void showSettings();
+  if (filter !== "settings") settingsShown = false;
+}
+
+let settingsShown = false;
+async function showSettings() {
+  settingsShown = true;
+  await renderSettings($("settings"), {
+    cfg,
+    save: async () => {
+      await saveConfig(cfg);
+    },
+    cloudflare,
+    refreshCloud: () => refresh(true),
+    openStudio: () => studio(),
+    toast,
+  });
 }
 
 let busy = false;
-async function refresh() {
-  if (busy) return;
+let cloudPending = false;
+async function refresh(withCloud = false): Promise<void> {
+  if (busy) {
+    // Don't lose a cloud refresh that arrives while a local one runs.
+    cloudPending ||= withCloud;
+    return;
+  }
   busy = true;
   $("refresh").classList.add("spin");
   try {
-    groups = await load();
+    await Promise.all([loadLocal(), withCloud ? loadCloud() : Promise.resolve()]);
+    compose();
     render();
-    await updateTray();
+    await Promise.all([updateTray(), notifyChanges()]);
+    if (withCloud && filter === "settings") await showSettings();
   } finally {
     busy = false;
     $("refresh").classList.remove("spin");
   }
+  if (cloudPending) {
+    cloudPending = false;
+    await refresh(true);
+  }
 }
 
-$("refresh").addEventListener("click", refresh);
+async function start() {
+  cfg = await loadConfig();
+  await refresh(true);
+  // First run: find the repos with workflows once, in the background.
+  if (cfg.githubRepos === null) {
+    invoke<string[]>("github_discover")
+      .then(async (repos) => {
+        cfg.githubRepos = repos;
+        await saveConfig(cfg);
+        await refresh(true);
+      })
+      .catch(() => {});
+  }
+  setInterval(() => void refresh(false), LOCAL_MS);
+  setInterval(() => void refresh(true), CLOUD_MS);
+}
+
+$("refresh").addEventListener("click", () => void refresh(true));
 document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "r") {
     e.preventDefault();
-    void refresh();
+    void refresh(true);
   } else if (e.key === "Escape") {
     select(null);
   }
 });
-window.addEventListener("focus", () => void refresh());
+window.addEventListener("focus", () => void refresh(false));
 
-void refresh();
-setInterval(refresh, REFRESH_MS);
+void start();
