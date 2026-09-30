@@ -66,3 +66,60 @@ pub fn claude_usage() -> Result<Usage, String> {
     Ok(usage)
 }
 
+
+/// One of the ChatGPT subscription's limits.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GptWindow {
+    pub percent: u8,
+    /// How long the window is: 5 h on Plus and Pro, 30 days on Go.
+    pub window_secs: u64,
+    pub resets_at_ms: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GptUsage {
+    pub plan: String,
+    pub windows: Vec<GptWindow>,
+}
+
+/// ChatGPT's own usage endpoint, with the login Codex keeps in ~/.codex, the
+/// way Paperclip and Codex read it. Takes a fraction of a second, so it can
+/// run every minute. The token stays in this process; nothing is written.
+pub async fn chatgpt_usage() -> Result<GptUsage, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let auth: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(format!("{home}/.codex/auth.json")).map_err(|_| "Codex není přihlášený.".to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let token = auth["tokens"]["access_token"].as_str().ok_or("Codex není přihlášený přes ChatGPT.")?;
+    let mut req = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?
+        .get("https://chatgpt.com/backend-api/wham/usage")
+        .bearer_auth(token)
+        .header("User-Agent", "Dispecink");
+    if let Some(account) = auth["tokens"]["account_id"].as_str() {
+        req = req.header("ChatGPT-Account-Id", account);
+    }
+    let res = req.send().await.map_err(|e| e.to_string())?;
+    if !res.status().is_success() {
+        return Err(format!("ChatGPT vrátil {}", res.status()));
+    }
+    let body: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+    let windows = ["primary_window", "secondary_window"]
+        .iter()
+        .filter_map(|k| {
+            let w = &body["rate_limit"][k];
+            let pct = w["used_percent"].as_f64()?;
+            Some(GptWindow {
+                percent: pct.round().clamp(0.0, 100.0) as u8,
+                window_secs: w["limit_window_seconds"].as_u64().unwrap_or(0),
+                resets_at_ms: w["reset_at"].as_u64().unwrap_or(0) * 1000,
+            })
+        })
+        .collect();
+    Ok(GptUsage { plan: body["plan_type"].as_str().unwrap_or("").to_string(), windows })
+}

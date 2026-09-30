@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { EXPRESSIONS, type ExpressionName, type MascotCharacter } from "./mascot/mascot";
 import { mountMascot, type MountedMascot } from "./mascot/svg";
-import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot } from "./broadcast";
+import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot, windowName, resetText } from "./broadcast";
 import { defaultNotchPrefs, type NotchPrefs, type SavedCharacter } from "./config";
 import { SEVERITY, STATES, type State } from "./model";
 import { sounds } from "./sounds";
@@ -301,15 +301,13 @@ export async function startNotch() {
     // ChatGPT's limit next to it, in its green.
     const gpt = $(".ring.gpt");
     const win = s.gpt?.[0];
-    gpt.hidden = win?.usedPercent == null;
-    if (win?.usedPercent != null) {
-      const pct = win.usedPercent;
+    gpt.hidden = !win;
+    if (win) {
+      const pct = win.percent;
       gpt.querySelector<SVGCircleElement>(".fill")!.style.strokeDasharray = `${(pct / 100) * 88} 88`;
       gpt.classList.toggle("hot", pct >= 85);
       (gpt.querySelector("b") as HTMLElement).textContent = `${pct}`;
-      const when = (w: { resetsAt: string | null }) =>
-        w.resetsAt ? ` (obnoví se ${new Date(w.resetsAt).toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })})` : "";
-      gpt.title = s.gpt.map((w, i) => `${i ? "" : "ChatGPT: "}${w.label.replace(/^5h limit$/i, "5 h")} ${w.usedPercent} %${when(w)}`).join("\n");
+      gpt.title = s.gpt.map((w, i) => `${i ? "" : "ChatGPT: "}${windowName(w.windowSecs)} ${w.percent} %${w.resetsAtMs ? ` (obnoví se ${resetText(w.resetsAtMs)})` : ""}`).join("\n");
     }
 
     const asking = !working && !(fresh && fresh.id === "morning") ? s.items.find((i) => i.ask) : undefined;

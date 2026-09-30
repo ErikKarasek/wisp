@@ -27,8 +27,19 @@ export type MiniItem = {
 
 export type ClaudeUsage = { session?: { percent: number; resets: string }; week?: { percent: number; resets: string } };
 
-/** One of the ChatGPT subscription's limits, as Paperclip reads them from Codex. */
-export type QuotaWindow = { label: string; usedPercent: number | null; resetsAt: string | null };
+/** One of the ChatGPT subscription's limits: 5 h on Plus and Pro, 30 days on Go. */
+export type QuotaWindow = { percent: number; windowSecs: number; resetsAtMs: number };
+
+/** "5 h", "týden", "měsíc": how long a ChatGPT limit window is. */
+export function windowName(secs: number): string {
+  if (!secs) return "limit";
+  if (secs <= 6 * 3600) return `${Math.round(secs / 3600)} h`;
+  if (secs <= 8 * 86400) return "týden";
+  return "měsíc";
+}
+
+export const resetText = (ms: number) =>
+  ms ? new Date(ms).toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 
 export type Snapshot = {
   items: MiniItem[];

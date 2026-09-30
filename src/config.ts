@@ -52,6 +52,8 @@ export type Config = {
   githubRepos: string[] | null;
   notifications: boolean;
   sounds: boolean;
+  /** Claude's and ChatGPT's limits as text next to the menu-bar icon. */
+  trayLimits: boolean;
   /** The mascot in the MacBook notch. */
   notch: boolean;
   notchPrefs: NotchPrefs;
@@ -98,6 +100,7 @@ export function defaults(): Config {
     githubRepos: null,
     notifications: true,
     sounds: true,
+    trayLimits: true,
     notch: true,
     notchPrefs: defaultNotchPrefs(),
     telegram: { enabled: false, chat: "" },

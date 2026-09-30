@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { openAgentForm } from "./agentform";
-import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type QuotaWindow, type Snapshot } from "./broadcast";
+import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type QuotaWindow, type Snapshot, windowName, resetText } from "./broadcast";
 import { renderReviews } from "./reviews";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
@@ -54,6 +54,17 @@ let jobs: Job[] = [];
 let paperclip: PaperclipSnapshot | null = null;
 let usage: ClaudeUsage | null = null;
 let gptQuota: QuotaWindow[] = [];
+/** How often both limits are read: often enough to watch them move while agents work. */
+const USAGE_MS = 60_000;
+
+/** The limits next to the menu-bar icon, e.g. "C 59 %  G 14 %". */
+function trayTitle(): string {
+  if (!cfg.trayLimits) return "";
+  const parts: string[] = [];
+  if (usage?.session) parts.push(`C ${usage.session.percent} %`);
+  if (gptQuota[0]) parts.push(`G ${gptQuota[0].percent} %`);
+  return parts.join("  ");
+}
 let prCount = 0;
 /** The last item that changed in a way worth showing in the notch. */
 let news: MiniItem | null = null;
@@ -341,15 +352,13 @@ function renderSide() {
           })
           .join("")
       : "";
-  const gptLabel = (l: string) => (/^5h/i.test(l) ? "5 h" : /week/i.test(l) ? "týden" : /month/i.test(l) ? "měsíc" : l);
   const gpt = gptQuota.length
     ? `<h6>Limit ChatGPT</h6>` +
       gptQuota
         .map((w) => {
-          const pct = w.usedPercent ?? 0;
-          const resets = w.resetsAt ? new Date(w.resetsAt).toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-          return `<div class="gauge${pct >= 85 ? " hot" : ""}"${resets ? ` title="obnoví se ${esc(resets)}"` : ""}><div class="bar"><i style="width:${pct}%"></i></div>
-            <small>${esc(gptLabel(w.label))}: ${pct} %</small></div>`;
+          const resets = resetText(w.resetsAtMs);
+          return `<div class="gauge${w.percent >= 85 ? " hot" : ""}"${resets ? ` title="obnoví se ${esc(resets)}"` : ""}><div class="bar"><i style="width:${w.percent}%"></i></div>
+            <small>${esc(windowName(w.windowSecs))}: ${w.percent} %</small></div>`;
         })
         .join("")
     : "";
@@ -1050,26 +1059,21 @@ async function start() {
       })
       .catch(() => {});
   }
-  // Paperclip asks Codex for the ChatGPT limits; it takes a few seconds, so both run at once.
+  // ChatGPT answers in a fraction of a second; Claude's CLI takes a few, so both run at once.
   const loadGptQuota = async () => {
-    const company = paperclip?.online ? paperclip.companies[0]?.company?.id : null;
-    if (!company) return;
-    const all = await invoke<{ provider: string; ok: boolean; windows: QuotaWindow[] }[]>("paperclip_request", {
-      method: "GET",
-      path: `/companies/${company}/costs/quota-windows`,
-      body: null,
-    }).catch(() => null);
-    const openai = all?.find((q) => q.provider === "openai" && q.ok);
-    if (all) gptQuota = openai ? openai.windows.filter((w) => typeof w.usedPercent === "number") : [];
+    const got = await invoke<{ plan: string; windows: QuotaWindow[] }>("chatgpt_usage").catch(() => null);
+    if (got) gptQuota = got.windows;
   };
   const loadUsage = async () => {
     const [claude] = await Promise.all([invoke<ClaudeUsage>("claude_usage").catch(() => usage), loadGptQuota()]);
     usage = claude;
     render();
     broadcast();
+    void invoke("set_tray_title", { title: trayTitle() });
   };
   void loadUsage();
-  setInterval(() => void loadUsage(), 5 * 60_000);
+  setInterval(() => void loadUsage(), USAGE_MS);
+  window.addEventListener("dispecink-tray", () => void invoke("set_tray_title", { title: trayTitle() }));
   setInterval(() => void morning(), 60_000);
   setInterval(() => void refresh(false), LOCAL_MS);
   setInterval(() => void refresh(true), CLOUD_MS);

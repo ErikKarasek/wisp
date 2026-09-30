@@ -141,6 +141,8 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
         Upozornit, když něco selže nebo na mě čeká</label>
       <label class="toggle"><input type="checkbox" data-f="sounds" ${ctx.cfg.sounds ? "checked" : ""}>
         Zvuky, když něco doběhne, selže nebo šťouchnu do postavičky</label>
+      <label class="toggle"><input type="checkbox" data-f="trayLimits" ${ctx.cfg.trayLimits ? "checked" : ""}>
+        Limity Claude (C) a ChatGPT (G) vedle ikonky v liště</label>
       <label class="toggle"><input type="checkbox" data-f="autostart" ${autostart ? "checked" : ""}>
         Spouštět Dispečink po přihlášení</label>
     </section>
@@ -328,6 +330,11 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
     ctx.cfg.notch = (e.target as HTMLInputElement).checked;
     ctx.setNotch(ctx.cfg.notch);
     await ctx.save();
+  });
+  el.querySelector<HTMLInputElement>('[data-f="trayLimits"]')!.addEventListener("change", async (e) => {
+    ctx.cfg.trayLimits = (e.target as HTMLInputElement).checked;
+    await ctx.save();
+    window.dispatchEvent(new Event("dispecink-tray"));
   });
   el.querySelector<HTMLInputElement>('[data-f="sounds"]')!.addEventListener("change", async (e) => {
     ctx.cfg.sounds = (e.target as HTMLInputElement).checked;

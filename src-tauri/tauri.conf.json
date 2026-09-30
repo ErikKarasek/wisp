@@ -76,7 +76,7 @@
     ],
     "macOS": {
       "minimumSystemVersion": "13.0",
-      "signingIdentity": "Dispečink Dev",
+      "signingIdentity": "Apple Development: erikkarasek@centrum.cz (BMFX48RAPC)",
       "hardenedRuntime": false
     }
   }

@@ -198,6 +198,13 @@ fn set_tray(app: AppHandle, png: Vec<u8>, tooltip: String, lines: Vec<String>, t
     Ok(())
 }
 
+/// Text next to the menu-bar icon: the Claude and ChatGPT limits. Empty hides it.
+#[tauri::command]
+fn set_tray_title(app: AppHandle, title: String) -> Result<(), String> {
+    let tray = app.tray_by_id(TRAY_ID).ok_or("Ikona v liště chybí")?;
+    tray.set_title(if title.is_empty() { None } else { Some(title) }).map_err(|e| e.to_string())
+}
+
 // ---------- menu-bar panel and notch ----------
 
 /// When the panel last hid itself. Clicking the tray icon while the panel is
@@ -290,6 +297,11 @@ fn notch_set_close_delay(millis: u64) {
 #[tauri::command]
 async fn claude_usage() -> Result<usage::Usage, String> {
     blocking(usage::claude_usage).await?
+}
+
+#[tauri::command]
+async fn chatgpt_usage() -> Result<usage::GptUsage, String> {
+    usage::chatgpt_usage().await
 }
 
 /// The codex binary Paperclip installed for itself, newest version first. The
@@ -424,6 +436,8 @@ pub fn run() {
             quit_app,
             claude_usage,
             codex_command,
+            set_tray_title,
+            chatgpt_usage,
             github_prs,
             github_pr_diff,
             github_pr_action,
