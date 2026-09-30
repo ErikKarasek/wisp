@@ -669,7 +669,9 @@ async function refresh(withCloud = false): Promise<void> {
 async function start() {
   cfg = await loadConfig();
   history = await invoke<HistoryEntry[]>("history_load").catch(() => []);
-  await refresh(true);
+  // The Mac and Paperclip answer at once; the cloud fills in when it arrives.
+  await refresh(false);
+  void refresh(true);
   // First run: find the repos with workflows once, in the background.
   if (cfg.githubRepos === null) {
     invoke<string[]>("github_discover")
