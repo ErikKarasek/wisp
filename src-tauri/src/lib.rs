@@ -322,6 +322,11 @@ async fn ask_file(path: String, question: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn ask_report(report: String, thread: String, question: String) -> Result<String, String> {
+    blocking(move || ask::ask_report(&report, &thread, &question)).await?
+}
+
+#[tauri::command]
 async fn gemini_usage() -> Result<Vec<usage::AgyWindow>, String> {
     blocking(usage::gemini_usage).await?
 }
@@ -434,6 +439,7 @@ pub fn run() {
             tray.build(app)?;
             notch::setup(handle);
             claudecode::start(handle);
+            telegram::start_listening(handle);
             Ok(())
         })
         // Closing the window only hides it; the tray keeps watching.
@@ -471,6 +477,7 @@ pub fn run() {
             cc_hooks_installed,
             cc_hooks_set,
             ask_file,
+            ask_report,
             github_prs,
             github_pr_diff,
             github_pr_action,

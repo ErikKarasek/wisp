@@ -662,7 +662,14 @@ export async function startNotch() {
 
   // ----- calendar: a strip of days and what the chosen one holds -----
   let chosen = midnight(Date.now());
+  // The day the strip was drawn for: after midnight a chosen "today" moves on to the new today.
+  let calToday = chosen;
   async function loadCalendar() {
+    const nowDay = midnight(Date.now());
+    if (nowDay !== calToday) {
+      if (chosen === calToday) chosen = nowDay;
+      calToday = nowDay;
+    }
     if (!prefs.showCalendar) return;
     const today = midnight(Date.now());
     const d = new Date(chosen);

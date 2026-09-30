@@ -4,6 +4,7 @@ import { openAgentForm } from "./agentform";
 import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type QuotaWindow, type AgyWindow, type Snapshot, windowName, resetText } from "./broadcast";
 import { renderReviews } from "./reviews";
 import { focusAgent, renderChat } from "./chat";
+import { startPhone } from "./phone";
 
 /** Sidebar entries that replace the cards with a view of their own. */
 const VIEWS = ["settings", "tasks", "reviews", "chat"];
@@ -400,11 +401,11 @@ function renderSide() {
   const side = $("side");
   side.innerHTML =
     rows.map(btn).join("") +
+    btn(["chat", "Chat s agenty", null]).replace("<button ", '<button class="chat-btn" ') +
     `<h6>Kde běží</h6>` +
     where.map(btn).join("") +
     gauge +
     `<h6>Tvoje</h6>` +
-    btn(["chat", "Chat s agenty", null]) +
     btn(["tasks", "Úkoly", paperclip?.online ? paperclip.companies.reduce((n, c) => n + c.issues.length, 0) : null]) +
     btn(["reviews", "Ke kontrole", prCount]) +
     `<button data-act="studio">Postavičky<span>${cfg.characters.length}</span></button>` +
@@ -858,6 +859,13 @@ let newsAt = 0;
 const broadcast = () => void emit(EV_STATE, snapshot());
 
 void listen(EV_REQUEST, broadcast);
+// The bot's updates are taken by another program (job-mail uses its own bot the same way).
+let tgConflictShown = false;
+void listen("tg-conflict", () => {
+  if (tgConflictShown) return;
+  tgConflictShown = true;
+  toast("Telegram: tvého bota už poslouchá jiný program (asi job-mail). Na ovládání z telefonu dej Dispečinku vlastního bota.");
+});
 void listen(EV_REFRESH, () => void refresh(true));
 void listen(EV_OPEN_SETTINGS, () => {
   filter = "settings";
@@ -1072,7 +1080,24 @@ async function morning(force = false) {
   if (failed.size) parts.push(`Selhalo: ${[...failed].join(", ")}.`);
   if (waiting.length) parts.push(`Čeká na tebe: ${waiting.map((i) => i.name).join(", ")}.`);
   parts.push(events.length ? `Dnes: ${events.slice(0, 3).map((e) => `${e.allDay ? "" : hm(e.startMs) + " "}${e.title}`).join(", ")}.` : "V kalendáři dnes nic.");
-  if (usage?.week) parts.push(`Claude tento týden ${usage.week.percent} %.`);
+  // All three subscriptions, and what runs on its own today.
+  const limits: string[] = [];
+  if (usage?.week) limits.push(`Claude ${usage.week.percent} % týdne`);
+  if (gptQuota[0]) limits.push(`ChatGPT ${gptQuota[0].percent} % ${gptQuota[0].windowSecs > 8 * 86400 ? "měsíce" : "limitu"}`);
+  const gemWeek = geminiQuota.find((w) => w.group === "Gemini" && w.windowSecs === 7 * 86400);
+  const proWeek = geminiQuota.find((w) => w.group !== "Gemini" && w.windowSecs === 7 * 86400);
+  if (gemWeek) limits.push(`Gemini ${gemWeek.percent} % týdne`);
+  if (proWeek) limits.push(`Claude v AI Pro ${proWeek.percent} % týdne`);
+  if (limits.length) parts.push(`Limity: ${limits.join(", ")}.`);
+  const later = allItems()
+    .map((i) => {
+      const today = /příště dnes (\d{1,2}:\d{2})/.exec(i.when)?.[1];
+      const mins = /příště za (\d+) min/.exec(i.when)?.[1];
+      return { name: i.name, at: today ?? (mins ? hm(Date.now() + Number(mins) * 60_000) : undefined) };
+    })
+    .filter((x): x is { name: string; at: string } => !!x.at)
+    .sort((a, b) => a.at.localeCompare(b.at, undefined, { numeric: true }));
+  if (later.length) parts.push(`Dnes ještě poběží: ${later.slice(0, 5).map((x) => `${x.at} ${x.name}`).join(", ")}.`);
   if (prCount) parts.push(`Ke kontrole ${prCount} PR.`);
 
   news = {
@@ -1099,7 +1124,10 @@ async function start() {
   void invoke("notch_set_close_delay", { millis: Math.round(cfg.notchPrefs.closeDelay * 1000) });
   void invoke("notch_set_width", { width: NOTCH_WIDTH[cfg.notchPrefs.width] }).then(() => invoke("notch_set_enabled", { enabled: cfg.notch }));
   // Claude Code in the notch: set its hooks up once; after that the switch in Settings decides.
-  if (cfg.ccHooks === undefined) {
+  if (cfg.ccHooks) {
+    // Keep the hooks in step with this version (their timeouts may have changed).
+    void invoke("cc_hooks_set", { on: true }).catch(() => {});
+  } else if (cfg.ccHooks === undefined) {
     const ok = await invoke("cc_hooks_set", { on: true }).then(() => true).catch(() => false);
     if (ok) {
       cfg.ccHooks = true;
@@ -1145,6 +1173,26 @@ async function start() {
   setInterval(() => void loadGemini(), GEMINI_MS);
   window.addEventListener("dispecink-tray", () => void invoke("set_tray_title", { title: trayTitle() }));
   setInterval(() => void morning(), 60_000);
+  startPhone({
+    chat: () => (cfg.telegram.enabled && cfg.telegram.remote !== false && cfg.telegram.chat ? cfg.telegram.chat : null),
+    companies: () => (paperclip?.online ? paperclip.companies : []),
+    status: () => {
+      const items = allItems();
+      const n = (st: State[]) => items.filter((i) => st.includes(i.state)).length;
+      const waiting = items.filter((i) => ["you", "bad"].includes(i.state));
+      return [
+        `${n(["run"])} pracuje, ${n(["ok", "done"])} v pořádku, ${n(["sleep"])} spí.`,
+        waiting.length ? `Čeká na tebe: ${waiting.map((i) => i.name).join(", ")}.` : "Nic na tebe nečeká.",
+      ];
+    },
+    limits: () => {
+      const out: string[] = [];
+      if (usage?.session) out.push(`Claude: relace ${usage.session.percent} %${usage.week ? `, týden ${usage.week.percent} %` : ""}`);
+      if (gptQuota[0]) out.push(`ChatGPT: ${windowName(gptQuota[0].windowSecs)} ${gptQuota[0].percent} %`);
+      for (const w of geminiQuota) out.push(`${w.group === "Gemini" ? "Gemini" : "Claude v AI Pro"}: ${windowName(w.windowSecs)} ${w.percent} %`);
+      return out;
+    },
+  });
   setInterval(() => void refresh(false), LOCAL_MS);
   setInterval(() => void refresh(true), CLOUD_MS);
 }

@@ -25,7 +25,10 @@ const STATUS: Record<string, [string, string]> = {
   done: ["hotovo", "s-ok"],
   cancelled: ["zrušené", "s-off"],
 };
-const ENGINE: Record<string, string> = { codex_local: "ChatGPT", claude_local: "Claude" };
+const ENGINE: Record<string, string> = { codex_local: "ChatGPT", claude_local: "Claude", reports: "Gemini · Antigravity" };
+/** The reports the Antigravity jobs file (gemini-jobs/run.sh): no agent, a title ending in the model. */
+const isReport = (i: Obj) => !i.assigneeAgentId && /\((Gemini|Claude v Antigravity)\) \d{4}-\d{2}-\d{2}$/.test(i.title);
+const GEMINI = "**Gemini:** ";
 
 const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 const when = (iso: string) => {
@@ -57,6 +60,8 @@ export function renderChat(el: HTMLElement, ctx: ChatContext) {
   clearInterval(poll);
   mascots.splice(0).forEach((m) => m.destroy());
   const agents: Obj[] = ctx.companies.flatMap((c) => c.agents.filter((a) => a.status !== "terminated").map((a) => ({ ...a, companyId: c.company.id })));
+  // The weekly Antigravity reports: ask Gemini about them in the same place.
+  if (ctx.companies[0]) agents.push({ id: "reports", name: "Reporty", adapterType: "reports", companyId: ctx.companies[0].company.id });
   if (!agents.length) {
     el.innerHTML = `<p class="muted">Žádní agenti. Založ si je v Paperclipu přes „+ Nový agent“.</p>`;
     return;
@@ -71,19 +76,20 @@ export function renderChat(el: HTMLElement, ctx: ChatContext) {
           <span><b>${esc(a.name)}</b><small>${esc(ENGINE[a.adapterType] ?? a.adapterType)}${a.status === "paused" ? " · pozastavený" : ""}</small></span></button>`,
       )
       .join("")}</nav>
-    <aside class="c-threads"><button class="c-new${threadId === "new" ? " on" : ""}" data-thread="new">+ Nový úkol pro ${esc(agent.name)}</button><div class="c-list"><p class="muted">Načítám…</p></div></aside>
+    <aside class="c-threads">${agent.id === "reports" ? "" : `<button class="c-new${threadId === "new" ? " on" : ""}" data-thread="new">+ Nový úkol pro ${esc(agent.name)}</button>`}<div class="c-list"><p class="muted">Načítám…</p></div></aside>
     <section class="c-thread"><p class="muted">Načítám…</p></section>
   </div>`;
   el.querySelectorAll<HTMLElement>(".c-agent").forEach((b) => {
     const a = agents.find((x) => x.id === b.dataset.agent)!;
-    mascots.push(mountMascot(b.querySelector(".m") as HTMLElement, { character: ctx.character(a.id), expression: a.status === "paused" ? "sleepy" : "happy", seed: a.name.length }));
+    const look = a.id === "reports" ? { shape: "cloud" as const, color: "#4f8df5" } : ctx.character(a.id);
+    mascots.push(mountMascot(b.querySelector(".m") as HTMLElement, { character: look, expression: a.status === "paused" ? "sleepy" : "happy", seed: a.name.length }));
     b.addEventListener("click", () => {
       agentId = a.id;
       threadId = null;
       renderChat(el, ctx);
     });
   });
-  el.querySelector('[data-thread="new"]')!.addEventListener("click", () => {
+  el.querySelector('[data-thread="new"]')?.addEventListener("click", () => {
     threadId = "new";
     renderChat(el, ctx);
   });
@@ -94,10 +100,15 @@ export function renderChat(el: HTMLElement, ctx: ChatContext) {
   void (async () => {
     const all = await pc<Obj[] | { items: Obj[] }>("GET", `/companies/${agent.companyId}/issues`).catch(() => []);
     const mine = (Array.isArray(all) ? all : all.items)
-      .filter((i) => i.assigneeAgentId === agent.id)
+      .filter((i) => (agent.id === "reports" ? isReport(i) : i.assigneeAgentId === agent.id))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, 40);
-    if (!threadId) threadId = mine.find((i) => !["done", "cancelled"].includes(i.status))?.id ?? mine[0]?.id ?? "new";
+    if (!threadId) threadId = mine.find((i) => !["done", "cancelled"].includes(i.status))?.id ?? mine[0]?.id ?? (agent.id === "reports" ? null : "new");
+    if (!threadId) {
+      threadBox.innerHTML = `<p class="muted">Zatím žádné reporty. Přijdou z kontrol na Gemini (úterý, středa, pátek).</p>`;
+      listBox.innerHTML = "";
+      return;
+    }
     listBox.innerHTML = mine.length
       ? mine
           .map((i) => {
@@ -107,7 +118,7 @@ export function renderChat(el: HTMLElement, ctx: ChatContext) {
           })
           .join("")
       : `<p class="muted">Zatím spolu nic neřešíte.</p>`;
-    el.querySelector<HTMLElement>('[data-thread="new"]')!.classList.toggle("on", threadId === "new");
+    el.querySelector<HTMLElement>('[data-thread="new"]')?.classList.toggle("on", threadId === "new");
     listBox.querySelectorAll<HTMLButtonElement>(".c-item").forEach((b) =>
       b.addEventListener("click", () => {
         threadId = b.dataset.thread!;
@@ -174,7 +185,7 @@ export function renderChat(el: HTMLElement, ctx: ChatContext) {
       <span class="c-typing" hidden>${esc(agent.name)} pracuje…</span></small>
       <span class="c-actions">${issue.status === "done" || issue.status === "cancelled" ? "" : `<button class="btn small" data-close>Hotovo, zavřít</button>`}</span></header>
       <div class="c-msgs"></div>
-      ${composer(`Napiš ${agent.name}…`, "Poslat")}`;
+      ${composer(agent.id === "reports" ? "Zeptej se na tenhle report, třeba: jak to opravím?" : `Napiš ${agent.name}…`, "Poslat")}`;
     const msgs = threadBox.querySelector(".c-msgs") as HTMLElement;
     let count = -1;
     const load = async () => {
@@ -185,16 +196,23 @@ export function renderChat(el: HTMLElement, ctx: ChatContext) {
       count = list.length;
       const nearBottom = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 80;
       msgs.innerHTML =
-        (issue.description ? `<div class="c-msg me first"><div>${md(issue.description)}</div><small>zadání · ${when(issue.createdAt)}</small></div>` : "") +
+        (issue.description
+          ? agent.id === "reports"
+            ? `<div class="c-msg them first"><div>${md(issue.description)}</div><small>report · ${when(issue.createdAt)}</small></div>`
+            : `<div class="c-msg me first"><div>${md(issue.description)}</div><small>zadání · ${when(issue.createdAt)}</small></div>`
+          : "") +
         list
           .map((m) => {
-            const who = m.authorAgentId ? (m.authorAgentId === agent.id ? "" : "agent") : m.authorUserId ? "me" : "sys";
-            return `<div class="c-msg ${m.authorAgentId ? "them" : m.authorUserId ? "me" : "sys"}"><div>${md(m.body ?? "")}</div><small>${who === "sys" ? "Paperclip · " : ""}${when(m.createdAt)}</small></div>`;
+            const body: string = m.body ?? "";
+            if (body.startsWith(GEMINI)) return `<div class="c-msg them"><div>${md(body.slice(GEMINI.length))}</div><small>Gemini · ${when(m.createdAt)}</small></div>`;
+            const kind = m.authorAgentId ? "them" : m.authorUserId || agent.id === "reports" ? "me" : "sys";
+            return `<div class="c-msg ${kind}"><div>${md(body)}</div><small>${kind === "sys" ? "Paperclip · " : ""}${when(m.createdAt)}</small></div>`;
           })
           .join("");
       if (nearBottom || count <= 1) msgs.scrollTop = msgs.scrollHeight;
     };
     const typing = async () => {
+      if (agent.id === "reports") return;
       const run = await latestRun(agent.companyId, agent.id).catch(() => null);
       const busy = !!run && ["running", "queued"].includes(run.status);
       const t = threadBox.querySelector<HTMLElement>(".c-typing");
@@ -213,6 +231,30 @@ export function renderChat(el: HTMLElement, ctx: ChatContext) {
       ctx.changed();
       renderChat(el, ctx);
     });
+    if (agent.id === "reports") {
+      threadBox.querySelector<HTMLElement>(".c-typing")!.textContent = "Gemini přemýšlí…";
+      return onSend(async (text) => {
+        await pc("POST", `/issues/${issue.id}/comments`, { body: text });
+        await load();
+        msgs.scrollTop = msgs.scrollHeight;
+        const t = threadBox.querySelector<HTMLElement>(".c-typing")!;
+        t.hidden = false;
+        const got = await pc<Obj[] | { items: Obj[] }>("GET", `/issues/${issue.id}/comments`).catch(() => []);
+        const past = (Array.isArray(got) ? got : got.items)
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+          .map((m) => ((m.body ?? "").startsWith(GEMINI) ? `Gemini: ${m.body.slice(GEMINI.length)}` : `Erik: ${m.body}`))
+          .join("\n\n");
+        try {
+          const answer = await invoke<string>("ask_report", { report: issue.description ?? "", thread: past, question: text });
+          await pc("POST", `/issues/${issue.id}/comments`, { body: GEMINI + answer });
+        } catch (err) {
+          ctx.toast(String(err));
+        }
+        t.hidden = true;
+        await load();
+        msgs.scrollTop = msgs.scrollHeight;
+      });
+    }
     onSend(async (text) => {
       await pc("POST", `/issues/${issue.id}/comments`, { body: text });
       // A closed or waiting conversation opens again, and the agent wakes to answer.

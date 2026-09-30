@@ -62,7 +62,8 @@ export type Config = {
   /** The mascot in the MacBook notch. */
   notch: boolean;
   notchPrefs: NotchPrefs;
-  telegram: { enabled: boolean; chat: string };
+  /** remote: take commands and replies from the chat too (on unless switched off). */
+  telegram: { enabled: boolean; chat: string; remote?: boolean };
   /** The bot's morning summary: when, whether to Telegram too, and the last day shown. */
   morning: { enabled: boolean; hour: number; telegram: boolean; last: string };
 };

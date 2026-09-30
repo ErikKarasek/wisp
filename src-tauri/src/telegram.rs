@@ -99,3 +99,149 @@ pub async fn bot_info(token: &str) -> Result<Value, String> {
         "webhook": hook["result"]["url"].as_str().is_some_and(|u| !u.is_empty()),
     }))
 }
+
+// ---------- the phone: the same bot, listening back ----------
+//
+// Dispečink long-polls the bot's updates, but only when Telegram is on and
+// `telegram.remote` isn't switched off, and it only listens to the chat from the
+// settings. Buttons answer Claude Code's permission prompts; plain messages go to
+// the main window, which turns them into tasks and comments for the agents.
+
+use tauri::{AppHandle, Emitter, Manager};
+
+pub struct Remote {
+    pub token: String,
+    pub chat: String,
+}
+
+/// The bot and the chat, when remote control is on.
+pub fn remote(app: &AppHandle) -> Option<Remote> {
+    let cfg = crate::store::load(app.path().app_config_dir().ok()?).ok()?;
+    let t = &cfg["telegram"];
+    if t["enabled"] != json!(true) || t["remote"] == json!(false) {
+        return None;
+    }
+    let chat = t["chat"].as_str()?.to_string();
+    if !valid_chat(&chat) {
+        return None;
+    }
+    Some(Remote { token: crate::store::secret_get("telegram")?, chat })
+}
+
+/// A message with buttons; returns its id so it can be edited later.
+pub async fn send_buttons(r: &Remote, text: &str, buttons: &[(&str, String)]) -> Result<i64, String> {
+    let row: Vec<Value> = buttons.iter().map(|(label, data)| json!({ "text": label, "callback_data": data })).collect();
+    let v: Value = client()?
+        .post(format!("https://api.telegram.org/bot{}/sendMessage", r.token))
+        .json(&json!({ "chat_id": r.chat, "text": text, "reply_markup": { "inline_keyboard": [row] } }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    check(&v)?;
+    v["result"]["message_id"].as_i64().ok_or("Telegram nevrátil id zprávy".into())
+}
+
+/// Replace a message's text and drop its buttons.
+pub async fn edit(r: &Remote, message_id: i64, text: &str) {
+    if let Ok(c) = client() {
+        let _ = c
+            .post(format!("https://api.telegram.org/bot{}/editMessageText", r.token))
+            .json(&json!({ "chat_id": r.chat, "message_id": message_id, "text": text }))
+            .send()
+            .await;
+    }
+}
+
+async fn answer_callback(r: &Remote, id: &str, text: &str) {
+    if let Ok(c) = client() {
+        let _ = c
+            .post(format!("https://api.telegram.org/bot{}/answerCallbackQuery", r.token))
+            .json(&json!({ "callback_query_id": id, "text": text }))
+            .send()
+            .await;
+    }
+}
+
+/// Seconds since the last key press or mouse move: "away from the Mac".
+pub fn idle_secs() -> u64 {
+    let out = std::process::Command::new("/usr/sbin/ioreg").args(["-c", "IOHIDSystem"]).output();
+    let text = out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    text.lines()
+        .find(|l| l.contains("\"HIDIdleTime\""))
+        .and_then(|l| l.rsplit('=').next())
+        .and_then(|n| n.trim().parse::<u64>().ok())
+        .map(|ns| ns / 1_000_000_000)
+        .unwrap_or(0)
+}
+
+/// Poll the bot for as long as the app runs.
+pub fn start_listening(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut offset: i64 = 0;
+        let long = reqwest::Client::builder().timeout(Duration::from_secs(65)).build();
+        let Ok(long) = long else { return };
+        loop {
+            let Some(r) = remote(&app) else {
+                tokio_sleep(60).await;
+                continue;
+            };
+            let res = long
+                .post(format!("https://api.telegram.org/bot{}/getUpdates", r.token))
+                .json(&json!({ "offset": offset, "timeout": 50, "allowed_updates": ["message", "callback_query"] }))
+                .send()
+                .await;
+            let v: Value = match res {
+                Ok(resp) => resp.json().await.unwrap_or(Value::Null),
+                Err(_) => {
+                    tokio_sleep(10).await;
+                    continue;
+                }
+            };
+            if v["error_code"] == json!(409) {
+                // Another program (job-mail's bot) takes this bot's updates.
+                let _ = app.emit("tg-conflict", ());
+                tokio_sleep(300).await;
+                continue;
+            }
+            for u in v["result"].as_array().into_iter().flatten() {
+                offset = offset.max(u["update_id"].as_i64().unwrap_or(0) + 1);
+                if let Some(q) = u.get("callback_query") {
+                    if q["message"]["chat"]["id"].as_i64().map(|i| i.to_string()) != Some(r.chat.clone()) {
+                        continue;
+                    }
+                    let data = q["data"].as_str().unwrap_or("");
+                    let qid = q["id"].as_str().unwrap_or("");
+                    if let Some(rest) = data.strip_prefix("cc:") {
+                        let (answer, id) = rest.split_once(':').unwrap_or(("", ""));
+                        let ok = crate::claudecode::decide(id, answer);
+                        answer_callback(&r, qid, if ok { "Hotovo" } else { "Už je vyřízené" }).await;
+                    }
+                } else if let Some(m) = u.get("message") {
+                    if m["chat"]["id"].as_i64().map(|i| i.to_string()) != Some(r.chat.clone()) {
+                        continue;
+                    }
+                    let text = m["text"].as_str().unwrap_or("").trim().to_string();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let _ = app.emit_to(
+                        "main",
+                        "tg-message",
+                        json!({ "text": text, "replyTo": m["reply_to_message"]["text"].as_str().unwrap_or("") }),
+                    );
+                }
+            }
+            if v["ok"] != json!(true) {
+                tokio_sleep(10).await;
+            }
+        }
+    });
+}
+
+async fn tokio_sleep(secs: u64) {
+    tauri::async_runtime::spawn_blocking(move || std::thread::sleep(Duration::from_secs(secs))).await.ok();
+}

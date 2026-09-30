@@ -138,6 +138,8 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
         <button class="btn" data-act="testMsg">Poslat zkoušku</button>
       </div>
       <div class="chats"></div>
+      <label class="toggle"><input type="checkbox" data-f="tgRemote" ${ctx.cfg.telegram.remote !== false ? "checked" : ""}>
+        Ovládat z telefonu: úkoly pro agenty („Watcher: …“), odpovědi agentů a povolování Claude Code, když jsi od Macu pryč</label>
       <label class="toggle"><input type="checkbox" data-f="tgOn" ${ctx.cfg.telegram.enabled ? "checked" : ""}> Posílat upozornění do Telegramu</label>` : ""}
     </section>
 
@@ -227,6 +229,10 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
     ctx.cfg.telegram.enabled = false;
     await ctx.save();
     await again();
+  });
+  el.querySelector<HTMLInputElement>('[data-f="tgRemote"]')?.addEventListener("change", async (e) => {
+    ctx.cfg.telegram.remote = (e.target as HTMLInputElement).checked;
+    await ctx.save();
   });
   el.querySelector<HTMLInputElement>('[data-f="chat"]')?.addEventListener("change", async (e) => {
     ctx.cfg.telegram.chat = (e.target as HTMLInputElement).value.trim();

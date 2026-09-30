@@ -17,6 +17,8 @@ use tauri::{AppHandle, Emitter};
 pub const PORT: u16 = 47811;
 /// How long a permission prompt waits in the notch before the terminal asks.
 const HOLD: Duration = Duration::from_secs(60);
+/// Away from the Mac, it waits this long for an answer from the phone.
+const HOLD_AWAY: Duration = Duration::from_secs(600);
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -145,7 +147,26 @@ fn permission(app: &AppHandle, v: &Value) -> String {
     PENDING.lock().unwrap().get_or_insert_with(HashMap::new).insert(id.clone(), tx);
     let _ = app.emit("cc-permission", ask.clone());
     crate::notch::peek(app, HOLD.as_millis() as u64);
-    let answer = rx.recv_timeout(HOLD).unwrap_or_default();
+    // Away from the Mac for two minutes: the same question with buttons on the phone.
+    let phone = crate::telegram::remote(app).filter(|_| crate::telegram::idle_secs() >= 120).and_then(|r| {
+        let text = format!("{} · Claude chce {}:\n{}", ask.project, if ask.tool == "Bash" { "spustit" } else { "použít nástroj" }, ask.detail);
+        let buttons = [
+            ("Povolit", format!("cc:allow:{id}")),
+            ("Vždy", format!("cc:always:{id}")),
+            ("Zamítnout", format!("cc:deny:{id}")),
+        ];
+        tauri::async_runtime::block_on(crate::telegram::send_buttons(&r, &text, &buttons)).ok().map(|m| (r, m, text))
+    });
+    let answer = rx.recv_timeout(if phone.is_some() { HOLD_AWAY } else { HOLD }).unwrap_or_default();
+    if let Some((r, m, text)) = phone {
+        let what = match answer.as_str() {
+            "allow" => "✓ povoleno",
+            "always" => "✓ povoleno i příště",
+            "deny" => "✗ zamítnuto",
+            _ => "→ zeptá se terminál",
+        };
+        tauri::async_runtime::block_on(crate::telegram::edit(&r, m, &format!("{text}\n\n{what}")));
+    }
     PENDING.lock().unwrap().get_or_insert_with(HashMap::new).remove(&id);
     let _ = app.emit("cc-permission-done", id);
     crate::notch::release();
@@ -260,7 +281,7 @@ pub fn set_hooks(on: bool) -> Result<(), String> {
         for event in ["SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop", "SessionEnd"] {
             add(hooks, event, hook("event", 5, true));
         }
-        add(hooks, "PermissionRequest", hook("permission", HOLD.as_secs() + 15, false));
+        add(hooks, "PermissionRequest", hook("permission", HOLD_AWAY.as_secs() + 15, false));
     }
     let out = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.dispecink-tmp");

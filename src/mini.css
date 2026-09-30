@@ -255,3 +255,8 @@ body.mini button { font: inherit; color: inherit; }
 .nt .reply { max-height: 64px; overflow: auto; color: #cfd3da; }
 .nt.dropping .panes { outline: 2px dashed #8b9cff; outline-offset: -6px; border-radius: 18px; }
 .nt.dropping .steps::before { content: "Pusť soubor sem a zeptej se na něj"; display: block; color: #b9c4ff; font-weight: 600; margin-bottom: 4px; }
+
+/* A card switched off in the notch settings goes away (.card's display beat [hidden]). */
+.nt .card[hidden] { display: none !important; }
+/* Asking for permission: the command and its buttons get the whole card. */
+.nt.asking .hero .big-wrap { display: none; }
