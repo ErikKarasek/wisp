@@ -100,72 +100,98 @@ body.mini button { font: inherit; color: inherit; }
 .nt .icons button[hidden] { display: none; }
 .nt .icons svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
-.nt .panes { position: relative; height: calc(100% - var(--bar-h)); box-sizing: border-box; padding: 4px 12px 12px; opacity: 0;
-  transform: translateY(-10px) scale(.97); transform-origin: top center; transition: opacity .16s, transform .3s var(--ease); }
+.nt .panes { position: relative; height: calc(100% - var(--bar-h)); box-sizing: border-box; padding: 6px 14px 14px; display: flex; gap: 12px;
+  opacity: 0; transform: translateY(-10px) scale(.97); transform-origin: top center; transition: opacity .16s, transform .3s var(--ease); }
+.nt .panes.gone { display: none; }
 .nt.is-open .panes { opacity: 1; transform: none; transition: opacity .22s .1s, transform .42s .06s var(--ease); }
-.nt .cards { height: 100%; display: flex; gap: 10px; }
-.nt .cards[hidden] { display: none; }
+.nt .icons button.on { color: #fff; background: rgba(255, 255, 255, .12); }
+
 /* Black on black, like the notch itself; only a hairline tells the cards apart. */
-.nt .card { background: #000; border: 1px solid rgba(255, 255, 255, .09); border-radius: 22px; padding: 14px; box-sizing: border-box;
-  min-width: 0; overflow: hidden; }
-.nt .card[hidden] { display: none; }
-/* The main window's .card styles don't apply in here. */
-.nt .card { display: block; grid-template-columns: none; transition: none; }
-.nt .card:hover { background: #000; border-color: rgba(255, 255, 255, .09); }
+.nt .card { display: block; grid-template-columns: none; transition: none; background: #000; border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 22px; padding: 14px; box-sizing: border-box; min-width: 0; overflow: hidden; }
+.nt .card:hover { background: #000; border-color: rgba(255, 255, 255, .08); }
 .nt .card .m { margin: 0; grid-row: auto; }
+.nt .card[hidden] { display: none; }
 .nt .muted { color: #7d8490; font-size: 12px; margin: 0; }
 
-/* the bot and its steps */
-.nt .card.hero { flex: 1.25; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; }
-.nt .big-wrap { position: relative; width: 108px; height: 108px; }
+/* the bot, what its agent is doing, and everyone else as small faces */
+.nt .card.hero { flex: 1.3; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 1fr auto; column-gap: 16px; row-gap: 8px; align-items: center; }
+.nt .big-wrap { position: relative; width: 100px; height: 100px; }
 .nt .big-wrap::before { content: ""; position: absolute; inset: 8px; border-radius: 50%; filter: blur(20px); opacity: .5;
   background: radial-gradient(circle, #6ea8ff, transparent 70%); }
-.nt .m.big { position: relative; width: 108px; height: 108px; cursor: pointer; }
-.nt .dots { position: absolute; top: 8px; left: 2px; display: flex; gap: 2px; padding: 5px 6px; border-radius: 12px; background: #2f7bf6; }
+.nt .m.big { position: relative; width: 100px; height: 100px; cursor: pointer; }
+.nt .dots { position: absolute; top: 6px; left: 0; display: flex; gap: 2px; padding: 5px 6px; border-radius: 12px; background: #2f7bf6; }
 .nt .dots[hidden] { display: none; }
 .nt .dots i { width: 5px; height: 5px; border-radius: 50%; background: #fff; animation: blink 1.2s infinite; }
 .nt .dots i:nth-child(2) { animation-delay: .2s; } .nt .dots i:nth-child(3) { animation-delay: .4s; }
-.nt .steps { display: grid; gap: 6px; min-width: 0; }
+.nt .steps { display: grid; gap: 5px; min-width: 0; }
 .nt .steps .who { color: #7d8490; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
 .nt .step { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nt .step.past { color: #6d7380; font-size: 12.5px; }
-.nt .step.now { color: #fff; font-size: 16px; font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: -.01em; }
-.nt .step.now.big-text { font-family: inherit; font-size: 17px; white-space: normal; }
+.nt .step.now { color: #fff; font-size: 15px; font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: -.01em; }
+.nt .step.now.big-text { font-family: inherit; font-size: 17px; white-space: normal; line-height: 1.25; }
+.nt .crew { grid-column: 1 / -1; display: flex; gap: 6px; }
+.nt .crew[hidden] { display: none; }
+.nt .mate { position: relative; width: 30px; height: 30px; padding: 0; border: 0; background: none; cursor: pointer; }
+.nt .mate .m { display: block; width: 30px; height: 30px; }
+.nt .mate i { position: absolute; right: 0; bottom: 1px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid #000; background: #7d8aa8; }
+.nt .mate.s-run i { background: #8b9cff; } .nt .mate.s-ok i, .nt .mate.s-done i { background: #4fbf7d; }
+.nt .mate.s-bad i { background: #e0605a; } .nt .mate.s-you i, .nt .mate.s-new i { background: #e2b04a; } .nt .mate.s-off i { background: #3a3e47; }
 
-/* everyone else */
-.nt .card.pills { flex: 1.1; display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: min-content; align-content: center; gap: 8px; padding: 12px; }
-.nt .pill { --c: #8b9cff; display: flex; align-items: center; gap: 7px; min-width: 0; height: 38px; padding: 0 11px 0 5px; border-radius: 19px; cursor: pointer;
-  border: 1px solid color-mix(in srgb, var(--c) 42%, transparent); background: color-mix(in srgb, var(--c) 12%, #000); color: color-mix(in srgb, var(--c) 70%, #fff); }
-.nt .pill .m { width: 28px; height: 28px; flex: none; }
-.nt .pill .t { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* music, like a small player */
+.nt .card.music { flex: 1.25; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; }
+.nt .cover { position: relative; width: 116px; height: 116px; }
+.nt .cover img, .nt .cover .noart { width: 116px; height: 116px; border-radius: 18px; object-fit: cover; }
+.nt .cover .noart { display: grid; place-items: center; background: #15161a; color: #4a4f59; font-size: 36px; }
+.nt .badge { position: absolute; right: -6px; bottom: -6px; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; border: 3px solid #000; }
+.nt .badge svg { width: 18px; height: 18px; fill: none; stroke: #000; stroke-width: 2.2; stroke-linecap: round; }
+.nt .badge.spotify { background: #1ed760; }
+.nt .badge.music { background: #fa2d48; } .nt .badge.music svg { stroke: #fff; }
+.nt .card.music .meta { display: grid; gap: 1px; min-width: 0; }
+.nt .card.music .meta b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nt .card.music .meta > span { color: #8a909b; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nt .progress { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .14); margin-top: 12px; overflow: hidden; }
+.nt .progress i { display: block; height: 100%; background: #fff; border-radius: 3px; transition: width 1.9s linear; }
+.nt .times { display: flex; justify-content: space-between; font-size: 11px; color: #7d8490; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.nt .controls { display: flex; gap: 18px; justify-content: center; margin-top: 6px; }
+.nt .controls button { width: 34px; height: 34px; border: 0; background: none; color: #fff; cursor: pointer; display: grid; place-items: center; border-radius: 17px; }
+.nt .controls button:hover { background: rgba(255, 255, 255, .08); }
+.nt .controls svg { width: 22px; height: 22px; fill: currentColor; }
+.nt .controls .pp svg { width: 28px; height: 28px; }
 
-/* music and calendar share the last card */
-.nt .card.side-card { flex: .9; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; gap: 10px; padding: 12px; }
-.nt .music[hidden], .nt .cal[hidden] { display: none; }
-.nt .player { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 9px; align-items: center; }
-.nt .art { width: 40px; height: 40px; border-radius: 9px; object-fit: cover; }
-.nt .art.none { display: grid; place-items: center; background: #1a1b20; color: #6d7380; }
-.nt .meta { display: grid; min-width: 0; }
-.nt .meta b { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.nt .meta span { color: #8a909b; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.nt .progress { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, .12); margin: 7px 0 6px; overflow: hidden; }
-.nt .progress i { display: block; height: 100%; background: #e6e8ef; }
-.nt .controls { display: flex; gap: 6px; justify-content: center; }
-.nt .controls button { width: 30px; height: 26px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, .07); color: #fff; font-size: 12px; cursor: pointer; }
-.nt .controls .pp { width: 38px; background: #e6e8ef; color: #111; }
-.nt .mini-empty { color: #6d7380; font-size: 12px; display: flex; gap: 6px; align-items: center; }
-.nt .cal { display: grid; gap: 4px; align-content: start; border-top: 1px solid rgba(255, 255, 255, .07); padding-top: 8px; }
-.nt .ev { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; font-size: 12px; align-items: baseline; }
+/* calendar: month, a strip of days, and the chosen day */
+.nt .card.cal { flex: 1.1; display: grid; grid-template-rows: auto 1fr; gap: 8px; padding: 12px 14px; }
+.nt .cal-head { display: flex; align-items: center; gap: 10px; }
+.nt .my { display: grid; line-height: 1.05; flex: none; }
+.nt .my b { font-size: 17px; }
+.nt .my span { color: #8a909b; font-size: 17px; font-weight: 300; }
+.nt .week { display: flex; gap: 2px; flex: 1; justify-content: space-between; min-width: 0; }
+.nt .week button { flex: 1; min-width: 0; border: 0; background: none; color: #d6dae2; border-radius: 12px; padding: 4px 0 5px; cursor: pointer; display: grid; justify-items: center; gap: 2px; }
+.nt .week small { color: #7d8490; font-size: 11px; }
+.nt .week b { font-size: 15px; font-variant-numeric: tabular-nums; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 13px; }
+.nt .week button.on { background: #2b2d33; }
+.nt .week button.on small { color: #fff; }
+.nt .week button.today b { background: #6d7380; color: #fff; }
+.nt .week button.on.today b { background: #8a909b; }
+.nt .cal-body { min-height: 0; overflow-y: auto; }
+.nt .empty { height: 100%; display: grid; justify-items: center; align-content: center; gap: 2px; text-align: center; }
+.nt .empty svg { width: 34px; height: 34px; fill: none; stroke: #a7adb8; stroke-width: 1.6; stroke-linecap: round; margin-bottom: 2px; }
+.nt .empty svg .ok { fill: #a7adb8; stroke: #000; stroke-width: 1.4; }
+.nt .empty svg .tick { stroke: #000; stroke-width: 1.8; }
+.nt .empty b { font-size: 13.5px; }
+.nt .empty span { color: #8a909b; font-size: 12px; }
+.nt .evs { display: grid; gap: 4px; }
+.nt .ev { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; font-size: 12.5px; align-items: baseline; padding: 4px 8px; border-radius: 9px; }
 .nt .ev .time { color: #8b9cff; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.nt .ev.now .time { color: #5fcfa8; font-weight: 600; }
+.nt .ev.now { background: rgba(139, 156, 255, .15); }
+.nt .ev.past { opacity: .45; }
 .nt .ev b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.nt .ask { border: 0; border-radius: 9px; padding: 6px 10px; background: #8b9cff; color: #11131c; font-weight: 600; font-size: 12px; cursor: pointer; justify-self: start; }
+.nt .ask { border: 0; border-radius: 9px; padding: 7px 12px; background: #8b9cff; color: #11131c; font-weight: 600; font-size: 12px; cursor: pointer; margin-top: 10px; }
 
-/* mirror over the cards */
-.nt .mirror { position: absolute; inset: 4px 12px 12px; border-radius: 22px; overflow: hidden; background: #000; border: 1px solid rgba(255, 255, 255, .09); }
-.nt .mirror[hidden] { display: none; }
-.nt .mirror video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-.nt .mirror .muted { position: absolute; left: 16px; right: 60px; top: 50%; transform: translateY(-50%); text-align: center; }
-.nt .mirror .close { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; border-radius: 14px; border: 0; background: rgba(0, 0, 0, .55); color: #fff; cursor: pointer; }
+/* camera, as one more card */
+.nt .card.mirror { flex: none; aspect-ratio: 1; height: 100%; padding: 0; position: relative; display: grid; place-items: center; }
+.nt .mirror video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); border-radius: 21px; }
+.nt .mirror .muted { position: absolute; padding: 12px; text-align: center; }
 
 @media (prefers-reduced-motion: reduce) { .nt, .nt .panes, .nt .side .open-only, .nt .side .closed-only { transition: none; } .nt .hop, .nt .dizzy, .nt.dancing .m.tiny, .nt.dancing .m.big { animation: none; } }
+.nt .card.mirror[hidden] { display: none; }

@@ -872,6 +872,7 @@ async function showSettings() {
     notchChanged: async () => {
       await saveConfig(cfg);
       await invoke("notch_set_width", { width: NOTCH_WIDTH[cfg.notchPrefs.width] });
+      await invoke("notch_set_close_delay", { millis: Math.round(cfg.notchPrefs.closeDelay * 1000) });
       await emit(EV_NOTCH_PREFS);
     },
     toast,
@@ -921,6 +922,7 @@ async function refreshCloud() {
 async function start() {
   cfg = await loadConfig();
   history = await invoke<HistoryEntry[]>("history_load").catch(() => []);
+  void invoke("notch_set_close_delay", { millis: Math.round(cfg.notchPrefs.closeDelay * 1000) });
   void invoke("notch_set_width", { width: NOTCH_WIDTH[cfg.notchPrefs.width] }).then(() => invoke("notch_set_enabled", { enabled: cfg.notch }));
   // The Mac and Paperclip answer at once; the cloud fills in when it arrives.
   await refresh(false);

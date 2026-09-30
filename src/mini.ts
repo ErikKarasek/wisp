@@ -122,9 +122,19 @@ type NowPlaying = { app: string; playing: boolean; title: string; artist: string
 type CalEvent = { title: string; startMs: number; endMs: number; allDay: boolean; calendar: string; location: string };
 type Cfg = { sounds?: boolean; characters?: SavedCharacter[]; notchPrefs?: Partial<NotchPrefs> };
 
-const CAMERA = `<svg viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="13" height="11" rx="2.5"/><path d="m16.5 10.5 4-2.5v8l-4-2.5z"/></svg>`;
+const CAMERA = `<svg viewBox="0 0 24 24"><circle cx="12" cy="10" r="6"/><circle cx="12" cy="10" r="2.2"/><path d="M8 20h8M12 16v4"/></svg>`;
 const GEAR = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>`;
+const CAL_EMPTY = `<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><circle cx="17.5" cy="17.5" r="4.2" class="ok"/><path d="m15.8 17.6 1.2 1.2 2.3-2.4" class="tick"/></svg>`;
+const BADGE: Record<string, string> = {
+  Spotify: `<span class="badge spotify"><svg viewBox="0 0 24 24"><path d="M6.5 9.5c3.8-1.2 7.6-.9 11 .9M7.2 12.8c3-1 6.2-.7 9 .8M8 15.8c2.4-.7 4.6-.5 6.7.6"/></svg></span>`,
+  Music: `<span class="badge music"><svg viewBox="0 0 24 24"><path d="M10 17V7l8-2v10"/><circle cx="8" cy="17" r="2"/><circle cx="16" cy="15" r="2"/></svg></span>`,
+};
+const MONTHS = ["led", "úno", "bře", "dub", "kvě", "čvn", "čvc", "srp", "zář", "říj", "lis", "pro"];
+const DAYS = ["ne", "po", "út", "st", "čt", "pá", "so"];
+const DAY = 86_400_000;
 const hm = (ms: number) => new Date(ms).toLocaleTimeString("cs-CZ", { hour: "numeric", minute: "2-digit" });
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+const midnight = (ms: number) => new Date(new Date(ms).toDateString()).getTime();
 const WHITE_BOT: Partial<MascotCharacter> = { color: "#e6e8ef", eyeColor: "#15161a" };
 
 export async function startNotch() {
@@ -143,21 +153,20 @@ export async function startNotch() {
         <div class="side r">
           <span class="closed-only"><span class="st"></span></span>
           <div class="open-only icons">
-            <button data-act="mirror" title="Zrcátko">${CAMERA}</button>
+            <button data-act="mirror" title="Kamera">${CAMERA}</button>
             <button data-act="settings" title="Nastavení notche">${GEAR}</button>
           </div>
         </div>
       </div>
-      <div class="panes">
-        <div class="cards">
-          <div class="card hero">
-            <div class="big-wrap"><div class="m big"></div><span class="dots" hidden><i></i><i></i><i></i></span></div>
-            <div class="steps"></div>
-          </div>
-          <div class="card pills"></div>
-          <div class="card side-card"><div class="music"></div><div class="cal"></div></div>
+      <div class="panes gone">
+        <div class="card hero">
+          <div class="big-wrap"><div class="m big"></div><span class="dots" hidden><i></i><i></i><i></i></span></div>
+          <div class="steps"></div>
+          <div class="crew"></div>
         </div>
-        <div class="mirror" hidden><video autoplay playsinline muted></video><p class="muted"></p><button class="close" title="Zavřít">✕</button></div>
+        <div class="card music"></div>
+        <div class="card cal"><div class="cal-head"><div class="my"><b></b><span></span></div><div class="week"></div></div><div class="cal-body"></div></div>
+        <div class="card mirror" hidden><video autoplay playsinline muted></video><p class="muted"></p></div>
       </div>
     </div>`;
   const root = document.querySelector(".nt") as HTMLElement;
@@ -165,8 +174,9 @@ export async function startNotch() {
   root.style.setProperty("--gap", g.hasNotch ? `${g.notchWidth}px` : "0px");
   root.style.setProperty("--closed-w", g.hasNotch ? `${g.notchWidth + 92}px` : "180px");
   const $ = <T extends HTMLElement>(sel: string) => root.querySelector(sel) as T;
+  const panes = $(".panes");
 
-  // ----- the bot: small in the wing, big in the open notch -----
+  // ----- the bot -----
   const botLook = () => {
     const saved = prefs.bot ? cfg.characters?.find((c) => c.id === prefs.bot) : null;
     return saved ? saved.character : WHITE_BOT;
@@ -179,7 +189,7 @@ export async function startNotch() {
   let dancing = false;
   const face = () => {
     if (Date.now() < reacting) return;
-    const ex = EXPRESSIONS[dancing && base === "happy" ? "thriving" : base];
+    const ex = EXPRESSIONS[dancing && prefs.dance && base === "happy" ? "thriving" : base];
     const shaped = prefs.follow ? { ...ex, lookX: look[0], lookY: look[1] * 0.85, wander: 0 } : ex;
     tiny.setExpression(shaped);
     big.setExpression(shaped);
@@ -208,17 +218,32 @@ export async function startNotch() {
     });
   }
 
-  // ----- settings: which cards, which bot, how it behaves -----
+  // ----- open and close -----
+  // When closed, the cards leave the page entirely: a transparent WebKit window
+  // otherwise keeps faint ghosts of layers that were only faded out.
+  let goneTimer = 0;
+  void listen<boolean>("notch-open", (e) => {
+    clearTimeout(goneTimer);
+    if (e.payload) {
+      panes.classList.remove("gone");
+      void panes.offsetWidth; // let the cards exist for a frame before they animate in
+      root.classList.add("is-open");
+    } else {
+      root.classList.remove("is-open");
+      closeMirror();
+      goneTimer = window.setTimeout(() => panes.classList.add("gone"), 360);
+    }
+  });
+
+  // ----- settings -----
   const applyPrefs = () => {
-    $(".pills").hidden = !prefs.showOthers;
+    $(".crew").hidden = !prefs.showOthers;
     $(".music").hidden = !prefs.showMusic;
     $(".cal").hidden = !prefs.showCalendar;
-    $(".side-card").hidden = !prefs.showMusic && !prefs.showCalendar;
     ($("[data-act=mirror]") as HTMLElement).hidden = !prefs.showMirror;
     if (!prefs.showMirror) closeMirror();
-    const look = botLook();
-    tiny.setCharacter(look);
-    big.setCharacter(look);
+    tiny.setCharacter(botLook());
+    big.setCharacter(botLook());
     root.classList.toggle("dancing", dancing && prefs.dance);
     face();
   };
@@ -230,15 +255,10 @@ export async function startNotch() {
   });
   $("[data-act=settings]").addEventListener("click", () => void emit(EV_OPEN_SETTINGS));
 
-  void listen<boolean>("notch-open", (e) => {
-    root.classList.toggle("is-open", e.payload);
-    if (!e.payload) closeMirror();
-  });
-
-  // ----- the working agent's steps, and everyone else as pills -----
+  // ----- the bot's card: what the working agent does, and the rest as a row of faces -----
   const steps = $(".steps");
-  const pills = $(".pills");
-  const pillMascots = new Map<string, MountedMascot>();
+  const crew = $(".crew");
+  const crewMascots = new Map<string, MountedMascot>();
   subscribe((s) => {
     base = faceFor(worst(s));
     face();
@@ -259,42 +279,42 @@ export async function startNotch() {
         `<small class="who">${escHtml(working.name)} pracuje</small>` +
         lines.map((l, i) => `<div class="step ${i === lines.length - 1 ? "now" : "past"}">${i === lines.length - 1 ? "›_ " : ""}${escHtml(l)}</div>`).join("");
     } else if (fresh) {
-      steps.innerHTML = `<small class="who">${escHtml(fresh.name)}</small><div class="step now">${escHtml(fresh.chip)}</div><div class="step past">${escHtml(fresh.doing)}</div>`;
+      steps.innerHTML = `<small class="who">${escHtml(fresh.name)}</small><div class="step now big-text">${escHtml(fresh.chip)}</div><div class="step past">${escHtml(fresh.doing)}</div>`;
     } else {
-      steps.innerHTML = `<small class="who">Dispečink</small><div class="step now big-text">${escHtml(headline(s))}</div><div class="step past">${s.counts.sleep} spí · ${s.counts.run} pracuje · ${s.counts.off} vypnuto</div>`;
+      steps.innerHTML = `<small class="who">Dispečink</small><div class="step now big-text">${escHtml(headline(s))}</div><div class="step past">${s.counts.run} pracuje · ${s.counts.sleep} spí</div>`;
     }
 
-    const others = [...s.items].filter((i) => i.id !== working?.id).sort(byUrgency).slice(0, 4);
+    const others = [...s.items].filter((i) => i.id !== working?.id).sort(byUrgency).slice(0, 7);
     const seen = new Set<string>();
     others.forEach((i, n) => {
       seen.add(i.id);
-      let pill = pills.querySelector<HTMLElement>(`[data-id="${CSS.escape(i.id)}"]`);
-      if (!pill) {
-        pill = document.createElement("button");
-        pill.className = "pill";
-        pill.dataset.id = i.id;
-        pill.innerHTML = `<span class="m"></span><span class="t"></span>`;
-        pill.addEventListener("click", () => void emit(EV_OPEN, { id: i.id }));
-        pillMascots.set(i.id, mountMascot(pill.querySelector(".m") as HTMLElement, { character: i.character, expression: STATES[i.state].expr, seed: 30 + n }));
+      let face = crew.querySelector<HTMLElement>(`[data-id="${CSS.escape(i.id)}"]`);
+      if (!face) {
+        face = document.createElement("button");
+        face.className = "mate";
+        face.dataset.id = i.id;
+        face.innerHTML = `<span class="m"></span><i></i>`;
+        face.addEventListener("click", () => void emit(EV_OPEN, { id: i.id }));
+        crewMascots.set(i.id, mountMascot(face.querySelector(".m") as HTMLElement, { character: i.character, expression: STATES[i.state].expr, seed: 30 + n }));
       }
-      pillMascots.get(i.id)!.setExpression(STATES[i.state].expr);
-      pill.style.setProperty("--c", (i.character.color as string) ?? "#8b9cff");
-      (pill.querySelector(".t") as HTMLElement).textContent = `${i.name}: ${i.chip}`;
-      pill.title = i.doing;
-      pills.appendChild(pill);
+      crewMascots.get(i.id)!.setExpression(STATES[i.state].expr);
+      face.className = `mate s-${i.state}`;
+      face.title = `${i.name}: ${i.chip}\n${i.doing}`;
+      crew.appendChild(face);
     });
-    pills.querySelectorAll<HTMLElement>(".pill").forEach((p) => {
+    crew.querySelectorAll<HTMLElement>(".mate").forEach((p) => {
       if (!seen.has(p.dataset.id!)) {
-        pillMascots.get(p.dataset.id!)?.destroy();
-        pillMascots.delete(p.dataset.id!);
+        crewMascots.get(p.dataset.id!)?.destroy();
+        crewMascots.delete(p.dataset.id!);
         p.remove();
       }
     });
   });
 
-  // ----- music: a small player, and a bot that dances along -----
+  // ----- music -----
   let now: NowPlaying | null = null;
   let notes = 0;
+  let musicSig = "";
   const pollMusic = async () => {
     now = prefs.showMusic || prefs.dance ? await invoke<NowPlaying | null>("media_now").catch(() => null) : null;
     const was = dancing;
@@ -304,7 +324,7 @@ export async function startNotch() {
     renderMusic();
   };
   void pollMusic();
-  setInterval(() => void pollMusic(), 2500);
+  setInterval(() => void pollMusic(), 2000);
   setInterval(() => {
     if (!dancing || !prefs.dance) return;
     const host = root.classList.contains("is-open") ? $(".big-wrap") : $(".side.l .closed-only");
@@ -319,90 +339,112 @@ export async function startNotch() {
   function renderMusic() {
     const box = $(".music");
     if (!prefs.showMusic) return;
-    if (!now) {
-      box.innerHTML = `<div class="mini-empty">♪ <span>Nic nehraje</span></div>`;
-      return;
+    const sig = now ? `${now.app}|${now.title}|${now.artist}|${now.playing}|${now.artworkUrl}` : "none";
+    if (sig !== musicSig) {
+      musicSig = sig;
+      box.innerHTML = now
+        ? `<div class="cover">${now.artworkUrl ? `<img src="${escHtml(now.artworkUrl)}" alt="">` : `<div class="noart">♪</div>`}${BADGE[now.app] ?? ""}</div>
+          <div class="meta"><b>${escHtml(now.title)}</b><span>${escHtml(now.artist)}</span>
+            <div class="progress"><i></i></div><div class="times"><span class="pos"></span><span>${mmss(now.duration)}</span></div>
+            <div class="controls">
+              <button data-media="previous" title="Předchozí"><svg viewBox="0 0 24 24"><path d="M11 6 4 12l7 6zM20 6l-7 6 7 6z"/></svg></button>
+              <button data-media="playpause" class="pp" title="${now.playing ? "Pozastavit" : "Přehrát"}">${now.playing ? `<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>` : `<svg viewBox="0 0 24 24"><path d="M7 4.5v15L19.5 12z"/></svg>`}</button>
+              <button data-media="next" title="Další"><svg viewBox="0 0 24 24"><path d="m13 6 7 6-7 6zM4 6l7 6-7 6z"/></svg></button>
+            </div></div>`
+        : `<div class="cover"><div class="noart">♪</div></div><div class="meta"><b>Nic nehraje</b><span>Pusť něco ve Spotify nebo v Hudbě.</span></div>`;
+      box.querySelectorAll<HTMLElement>("[data-media]").forEach((b) =>
+        b.addEventListener("click", async () => {
+          if (!now) return;
+          await invoke("media_control", { app: now.app, action: b.dataset.media }).catch(() => {});
+          setTimeout(() => void pollMusic(), 350);
+        }),
+      );
     }
-    const pct = now.duration ? Math.min(100, (now.position / now.duration) * 100) : 0;
-    box.innerHTML = `
-      <div class="player">
-        ${now.artworkUrl ? `<img class="art" src="${escHtml(now.artworkUrl)}" alt="">` : `<div class="art none">♪</div>`}
-        <div class="meta"><b>${escHtml(now.title)}</b><span>${escHtml(now.artist)}</span></div>
-      </div>
-      <div class="progress"><i style="width:${pct.toFixed(1)}%"></i></div>
-      <div class="controls">
-        <button data-media="previous" title="Předchozí">⏮</button>
-        <button data-media="playpause" class="pp" title="${now.playing ? "Pozastavit" : "Přehrát"}">${now.playing ? "⏸" : "▶"}</button>
-        <button data-media="next" title="Další">⏭</button>
-      </div>`;
-    box.querySelectorAll<HTMLElement>("[data-media]").forEach((b) =>
-      b.addEventListener("click", async () => {
-        await invoke("media_control", { app: now!.app, action: b.dataset.media }).catch(() => {});
-        setTimeout(() => void pollMusic(), 350);
-      }),
-    );
+    if (now) {
+      const bar = box.querySelector<HTMLElement>(".progress i");
+      if (bar) bar.style.width = `${now.duration ? Math.min(100, (now.position / now.duration) * 100) : 0}%`;
+      const pos = box.querySelector<HTMLElement>(".pos");
+      if (pos) pos.textContent = mmss(now.position);
+    }
   }
 
-  // ----- calendar: what's next -----
+  // ----- calendar: a strip of days and what the chosen one holds -----
+  let chosen = midnight(Date.now());
   async function loadCalendar() {
-    const box = $(".cal");
     if (!prefs.showCalendar) return;
+    const today = midnight(Date.now());
+    const d = new Date(chosen);
+    ($(".my b") as HTMLElement).textContent = MONTHS[d.getMonth()];
+    ($(".my span") as HTMLElement).textContent = String(d.getFullYear());
+    $(".week").innerHTML = [-2, -1, 0, 1, 2, 3]
+      .map((k) => {
+        const day = today + k * DAY;
+        const dd = new Date(day);
+        return `<button data-day="${day}" class="${day === chosen ? "on" : ""}${day === today ? " today" : ""}"><small>${DAYS[dd.getDay()]}</small><b>${String(dd.getDate()).padStart(2, "0")}</b></button>`;
+      })
+      .join("");
+    const body = $(".cal-body");
     const status = await invoke<string>("calendar_status");
     if (status === "none") {
-      box.innerHTML = `<button class="ask">Povolit kalendář</button>`;
-      box.querySelector(".ask")!.addEventListener("click", async () => {
+      body.innerHTML = `<button class="ask">Povolit kalendář</button>`;
+      body.querySelector(".ask")!.addEventListener("click", async () => {
         await invoke("calendar_request");
         void loadCalendar();
       });
       return;
     }
     if (status !== "granted") {
-      box.innerHTML = `<p class="muted">Kalendář je zakázaný v Nastavení systému → Soukromí → Kalendáře.</p>`;
+      body.innerHTML = `<p class="muted">Kalendář je zakázaný v Nastavení systému → Soukromí → Kalendáře.</p>`;
       return;
     }
+    const events = await invoke<CalEvent[]>("calendar_events", { fromMs: chosen, toMs: chosen + DAY }).catch(() => []);
     const t = Date.now();
-    const next = (await invoke<CalEvent[]>("calendar_events").catch(() => [])).filter((e) => e.endMs > t).slice(0, 2);
-    const today = new Date().toDateString();
-    box.innerHTML = next.length
-      ? next
+    body.innerHTML = events.length
+      ? `<div class="evs">${events
           .map((e) => {
-            const on = e.startMs <= t;
-            const day = new Date(e.startMs).toDateString() === today ? "" : "zítra ";
-            return `<div class="ev${on ? " now" : ""}"><span class="time">${on ? "teď" : e.allDay ? `${day}celý den` : `${day}${hm(e.startMs)}`}</span><b>${escHtml(e.title)}</b></div>`;
+            const on = e.startMs <= t && e.endMs > t;
+            const past = e.endMs <= t;
+            return `<div class="ev${on ? " now" : ""}${past ? " past" : ""}"><span class="time">${e.allDay ? "celý den" : hm(e.startMs)}</span><b>${escHtml(e.title)}</b></div>`;
           })
-          .join("")
-      : `<p class="muted">Dnes a zítra nic v kalendáři.</p>`;
+          .join("")}</div>`
+      : `<div class="empty">${CAL_EMPTY}<b>Žádné události</b><span>${chosen === today ? "Dneska máš volno." : "Ten den máš volno."}</span></div>`;
   }
+  $(".week").addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-day]");
+    if (!b) return;
+    chosen = Number(b.dataset.day);
+    void loadCalendar();
+  });
   void loadCalendar();
   setInterval(() => void loadCalendar(), 60_000);
 
-  // ----- mirror: the camera over the cards, only while it is open -----
+  // ----- camera: one more card in the row -----
   let stream: MediaStream | null = null;
   const mirror = $(".mirror");
-  $("[data-act=mirror]").addEventListener("click", () => (stream || !mirror.hidden ? closeMirror() : void openMirror()));
-  mirror.querySelector(".close")!.addEventListener("click", () => closeMirror());
+  $("[data-act=mirror]").addEventListener("click", () => (mirror.hidden ? void openMirror() : closeMirror()));
   async function openMirror() {
     mirror.hidden = false;
-    $(".cards").hidden = true;
+    $("[data-act=mirror]").classList.add("on");
     const note = mirror.querySelector(".muted") as HTMLElement;
     if (!navigator.mediaDevices?.getUserMedia) {
       note.textContent = "Kamera tady není k dispozici.";
       return;
     }
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 640 }, audio: false });
       (mirror.querySelector("video") as HTMLVideoElement).srcObject = stream;
       note.textContent = "";
     } catch (err) {
-      note.textContent = `Kamera nejde zapnout (${(err as Error).name}). Povol ji v Nastavení systému → Soukromí → Kamera.`;
+      note.textContent = `Kamera nejde zapnout (${(err as Error).name}).`;
     }
   }
   function closeMirror() {
     stream?.getTracks().forEach((t) => t.stop());
     stream = null;
-    (mirror.querySelector("video") as HTMLVideoElement).srcObject = null;
+    const video = mirror.querySelector("video") as HTMLVideoElement;
+    video.srcObject = null;
     mirror.hidden = true;
-    $(".cards").hidden = false;
+    $("[data-act=mirror]").classList.remove("on");
   }
 
   applyPrefs();

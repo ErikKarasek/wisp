@@ -272,8 +272,13 @@ async fn calendar_request() -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn calendar_events() -> Result<Vec<calendar::Event>, String> {
-    blocking(calendar::upcoming).await
+async fn calendar_events(from_ms: f64, to_ms: f64) -> Result<Vec<calendar::Event>, String> {
+    blocking(move || calendar::between(from_ms, to_ms)).await
+}
+
+#[tauri::command]
+fn notch_set_close_delay(millis: u64) {
+    notch::set_close_delay(millis);
 }
 
 #[tauri::command]
@@ -380,6 +385,7 @@ pub fn run() {
             notch_peek,
             notch_geometry,
             notch_set_width,
+            notch_set_close_delay,
             cloudflare_snapshot,
             github_snapshot,
             github_discover,

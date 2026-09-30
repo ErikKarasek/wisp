@@ -54,9 +54,12 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       <div class="prow"><span>Šířka po rozbalení</span><div class="seg">${(["s", "m", "l"] as const)
         .map((w) => `<button data-width="${w}" class="${ctx.cfg.notchPrefs.width === w ? "on" : ""}">${{ s: "Úzká", m: "Střední", l: "Široká" }[w]}</button>`)
         .join("")}</div></div>
+      <div class="prow"><span>Po odjetí myši</span><div class="seg">${[0.5, 1.5, 3, 6]
+        .map((d) => `<button data-delay="${d}" class="${ctx.cfg.notchPrefs.closeDelay === d ? "on" : ""}">${String(d).replace(".", ",")} s</button>`)
+        .join("")}</div></div>
       <div class="prow top"><span>Ukazovat</span><div class="checks">
-        ${np("showOthers", "Ostatní agenty a úlohy (pilulky)")}${np("showMusic", "Co hraje (Spotify, Hudba)")}
-        ${np("showCalendar", "Další události z kalendáře")}${np("showMirror", "Tlačítko zrcátka (kamera)")}
+        ${np("showOthers", "Ostatní agenty a úlohy (malé postavičky pod botem)")}${np("showMusic", "Co hraje (Spotify, Hudba)")}
+        ${np("showCalendar", "Další události z kalendáře")}${np("showMirror", "Tlačítko kamery (zrcátko)")}
       </div></div>
       <div class="prow top"><span>Chování</span><div class="checks">
         ${np("follow", "Oči sledují myš")}${np("dance", "Tancuje, když hraje hudba")}${np("peek", "Vykoukne, když se něco stane")}
@@ -282,6 +285,13 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       const key = input.dataset.np as keyof NotchPrefs;
       const prefs = ctx.cfg.notchPrefs as Record<string, unknown>;
       prefs[key] = input instanceof HTMLInputElement && input.type === "checkbox" ? input.checked : input.value || null;
+      await ctx.notchChanged();
+    }),
+  );
+  el.querySelectorAll<HTMLButtonElement>("[data-delay]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      ctx.cfg.notchPrefs.closeDelay = Number(b.dataset.delay);
+      el.querySelectorAll("[data-delay]").forEach((x) => x.classList.toggle("on", x === b));
       await ctx.notchChanged();
     }),
   );

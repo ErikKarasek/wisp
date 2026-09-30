@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::ffi::{c_char, CStr};
 use std::sync::mpsc;
 use std::sync::OnceLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 #[link(name = "EventKit", kind = "framework")]
 extern "C" {}
@@ -89,17 +89,16 @@ unsafe fn millis(date: *mut AnyObject) -> f64 {
     s * 1000.0
 }
 
-/// Events from the start of today until the end of tomorrow, sorted by start.
-pub fn upcoming() -> Vec<Event> {
+/// Events overlapping the given time range (milliseconds), sorted by start.
+pub fn between(from_ms: f64, to_ms: f64) -> Vec<Event> {
     if status() != "granted" {
         return vec![];
     }
     let Some(store) = store() else { return vec![] };
     autoreleasepool(|_| unsafe {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
         let date_cls = AnyClass::get(c"NSDate").expect("Foundation");
-        let start: *mut AnyObject = msg_send![date_cls, dateWithTimeIntervalSince1970: now - 12.0 * 3600.0];
-        let end: *mut AnyObject = msg_send![date_cls, dateWithTimeIntervalSince1970: now + 48.0 * 3600.0];
+        let start: *mut AnyObject = msg_send![date_cls, dateWithTimeIntervalSince1970: from_ms / 1000.0];
+        let end: *mut AnyObject = msg_send![date_cls, dateWithTimeIntervalSince1970: to_ms / 1000.0];
         let pred: *mut AnyObject =
             msg_send![store, predicateForEventsWithStartDate: start, endDate: end, calendars: std::ptr::null_mut::<AnyObject>()];
         let list: *mut AnyObject = msg_send![store, eventsMatchingPredicate: pred];

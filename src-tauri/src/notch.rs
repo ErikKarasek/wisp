@@ -23,6 +23,8 @@ pub const LABEL: &str = "notch";
 const WING: f64 = 46.0;
 /// The expanded view: wide under the notch, like a shelf. The width is a setting.
 static OPEN_W: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(820);
+/// How long it stays open after the cursor leaves. A setting.
+static CLOSE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1500);
 const OPEN_H: f64 = 250.0;
 /// Without a notch, a pill this wide sits at the top centre of the menu bar.
 const NO_NOTCH_W: f64 = 180.0;
@@ -257,7 +259,8 @@ pub fn setup(app: &AppHandle) {
                 s.peek_until = None; // the user took over; stay open while they look
             } else if !peeking {
                 let since = *s.outside_since.get_or_insert(now);
-                if now.duration_since(since) > Duration::from_millis(380) {
+                let wait = CLOSE_MS.load(std::sync::atomic::Ordering::Relaxed);
+                if now.duration_since(since) > Duration::from_millis(wait) {
                     s.open = false;
                     s.outside_since = None;
                     s.peek_until = None;
@@ -318,4 +321,8 @@ pub fn set_width(app: &AppHandle, width: f64) {
     OPEN_W.store(width.clamp(520.0, 1100.0) as u32, std::sync::atomic::Ordering::Relaxed);
     let g = STATE.lock().map(|s| s.geometry).unwrap_or_default();
     place(app, g.open());
+}
+
+pub fn set_close_delay(millis: u64) {
+    CLOSE_MS.store(millis.clamp(200, 10_000), std::sync::atomic::Ordering::Relaxed);
 }

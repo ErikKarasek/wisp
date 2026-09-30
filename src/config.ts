@@ -21,9 +21,11 @@ export type NotchPrefs = {
   /** Eyes follow the mouse. */
   follow: boolean;
   width: "s" | "m" | "l";
+  /** Seconds it stays open after the mouse leaves. */
+  closeDelay: number;
 };
 
-export const NOTCH_WIDTH = { s: 640, m: 760, l: 880 } as const;
+export const NOTCH_WIDTH = { s: 820, m: 960, l: 1100 } as const;
 
 export const defaultNotchPrefs = (): NotchPrefs => ({
   showOthers: true,
@@ -35,6 +37,7 @@ export const defaultNotchPrefs = (): NotchPrefs => ({
   peek: true,
   follow: true,
   width: "l",
+  closeDelay: 1.5,
 });
 
 export type Config = {
