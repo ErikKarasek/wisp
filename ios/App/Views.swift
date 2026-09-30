@@ -69,6 +69,7 @@ struct OverviewView: View {
     private var headline: String {
         guard let s = store.state else { return "Načítám…" }
         if s.counts.attention > 0 { return s.counts.attention == 1 ? "1 věc na tebe čeká" : "\(s.counts.attention) věci na tebe čekají" }
+        if let p = s.perms?.first { return "\(p.project) · Claude chce povolit" }
         if let l = s.live?.first { return "\(l.name) pracuje" }
         if s.counts.run > 0 { return "\(s.counts.run) pracuje" }
         return "Všechno v pořádku"

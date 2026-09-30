@@ -97,6 +97,36 @@ async function loadLocal() {
   localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now)];
 }
 
+// ---------- Claude Code sessions (from its hooks), for the phone ----------
+
+/** What each Claude Code session is doing, like the notch keeps it. */
+const ccSessions = new Map<string, { project: string; lines: string[]; busy: boolean; at: number }>();
+void listen<{ session: string; project: string; kind: string; text: string }>("cc-event", (e) => {
+  const { session, project, kind, text } = e.payload;
+  if (kind === "end") return void ccSessions.delete(session);
+  const cur = ccSessions.get(session) ?? { project, lines: [], busy: false, at: Date.now() };
+  cur.project = project;
+  cur.at = Date.now();
+  if (kind === "prompt") {
+    cur.busy = true;
+    cur.lines = text ? [`› ${text}`] : [];
+  } else if (kind === "step") {
+    cur.busy = true;
+    cur.lines = [...cur.lines, text].slice(-6);
+  } else if (kind === "done" || kind === "waiting") {
+    cur.busy = false;
+  }
+  ccSessions.set(session, cur);
+});
+/** Claude Code sessions working right now, as "live" entries. */
+function ccLive() {
+  const now = Date.now();
+  return [...ccSessions.values()]
+    .filter((s) => s.busy && now - s.at < 120_000)
+    .sort((a, b) => b.at - a.at)
+    .map((s) => ({ name: `${s.project} · Claude`, lines: s.lines.slice(-3) }));
+}
+
 // ---------- Focus (a Shortcuts automation tells us) and messages from local scripts ----------
 
 let focus = false;
@@ -1243,7 +1273,7 @@ async function start() {
   setInterval(() => void loadGemini(), GEMINI_MS);
   window.addEventListener("dispecink-tray", () => void invoke("set_tray_title", { title: trayTitle() }));
   setInterval(() => void morning(), 60_000);
-  startRelay({
+  const relay = startRelay({
     companies: () => (paperclip?.online ? paperclip.companies : []),
     overview: () => {
       const s = snapshot();
@@ -1264,7 +1294,7 @@ async function start() {
           job: i.id.startsWith("job:") ? i.id.slice(4) : null,
         })),
         bot: cfg.notchPrefs.bot ? cfg.characters.find((c) => c.id === cfg.notchPrefs.bot)?.character ?? null : null,
-        live: s.live.map((l) => ({ name: l.name, lines: l.lines })),
+        live: [...s.live.map((l) => ({ name: l.name, lines: l.lines })), ...ccLive()],
         limits: {
           claude: usage ? { session: usage.session?.percent ?? null, week: usage.week?.percent ?? null, resets: usage.session?.resets ?? "" } : null,
           gpt: gptQuota.map((w) => ({ percent: w.percent, windowSecs: w.windowSecs, resetsAtMs: w.resetsAtMs })),
@@ -1275,6 +1305,9 @@ async function start() {
     character: (id) => allItems().find((i) => i.id === id)?.character ?? {},
     toast: (t) => toast(t),
   });
+  // A permission prompt, or its answer, goes to the phone at once, not at the next minute.
+  void listen("cc-permission", () => void relay.push());
+  void listen("cc-permission-done", () => void relay.push());
   void healCodex();
   setInterval(() => void healCodex(), 60 * 60_000);
   startPhone({

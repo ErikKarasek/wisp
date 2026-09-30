@@ -28,6 +28,8 @@ struct DispecinkActivity: ActivityAttributes {
         var bot: MascotCharacter?
         var crew: [CrewChip]
         var updated: Date
+        /// The first permission prompt waiting, answered with the card's buttons.
+        var permId: String? = nil
     }
 }
 
@@ -55,12 +57,14 @@ extension PhoneState {
 
     var activityState: DispecinkActivity.ContentState {
         var mode = "idle", title = "Všechno v pořádku", detail = "", steps: [String] = []
-        if let l = live?.first {
+        if let p = perms?.first {
+            mode = "ask"; title = "\(p.project) · Claude chce \(p.tool == "Bash" ? "spustit" : "použít \(p.tool)")"; detail = p.detail
+        } else if let l = live?.first {
             mode = "working"; title = l.name; steps = Array(l.lines.suffix(3))
         } else if let bad = items.first(where: { $0.state == "bad" }) {
             mode = "error"; title = "\(bad.name) selhal"; detail = bad.doing
         } else if let p = perms?.first {
-            mode = "ask"; title = "\(p.project) · Claude chce povolit"; detail = p.detail
+            mode = "ask"; title = "\(p.project) · Claude chce \(p.tool == "Bash" ? "spustit" : "použít \(p.tool)")"; detail = p.detail
         } else if let w = waiting.first {
             mode = "ask"; title = "\(w.name) na tebe čeká"; detail = w.doing
         } else if let d = items.first(where: { $0.state == "done" }) {
@@ -71,6 +75,7 @@ extension PhoneState {
         return .init(mode: mode, title: title, detail: detail, steps: steps, worst: worst,
                      waiting: waiting.count, perms: perms?.count ?? 0,
                      claude: limits.claude?.session, claudeWeek: limits.claude?.week,
-                     gpt: limits.gpt.first?.percent, gemini: gemini5h, bot: bot, crew: crew, updated: Date())
+                     gpt: limits.gpt.first?.percent, gemini: gemini5h, bot: bot, crew: crew, updated: Date(),
+                     permId: perms?.first?.id)
     }
 }

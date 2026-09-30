@@ -60,7 +60,7 @@ async function threads(companies: { company: Obj; agents: Obj[] }[], character: 
 /** Quick questions from the phone and Gemini's answers, newest first. */
 const answers: Obj[] = [];
 
-export function startRelay(ctx: RelayContext) {
+export function startRelay(ctx: RelayContext): { push: () => Promise<void> } {
   let busy = false;
   const push = async () => {
     if (busy) return;
@@ -122,4 +122,5 @@ export function startRelay(ctx: RelayContext) {
     }
     void push();
   });
+  return { push };
 }

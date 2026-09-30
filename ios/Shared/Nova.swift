@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 
 // The Grok-Bot look shared by the Dynamic Island, the lock-screen card, the
@@ -150,6 +151,16 @@ struct ActivityBody: View {
         switch s.mode {
         case "working":
             StepTicker(steps: s.steps, fallback: s.title, big: big)
+        case "ask" where s.permId != nil:
+            VStack(alignment: .leading, spacing: 6) {
+                Text(s.title).font(.system(size: big * 0.85, weight: .semibold)).foregroundStyle(Palette.amber).lineLimit(1)
+                Text(s.detail).font(.system(size: big * 0.8).monospaced()).foregroundStyle(.white).lineLimit(2)
+                HStack(spacing: 6) {
+                    permButton("Zamítnout", "deny", Palette.bad)
+                    permButton("Vždy", "always", Palette.accent)
+                    permButton("Povolit", "allow", .green)
+                }
+            }
         case "error", "ask":
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -163,6 +174,15 @@ struct ActivityBody: View {
         default:
             CrewGrid(crew: s.crew, size: big * 0.8)
         }
+    }
+}
+
+extension ActivityBody {
+    func permButton(_ title: String, _ answer: String, _ color: Color) -> some View {
+        Button(intent: PermissionIntent(permId: s.permId ?? "", answer: answer)) {
+            Text(title).font(.system(size: big * 0.8, weight: .semibold)).frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent).tint(color.opacity(0.85))
     }
 }
 
