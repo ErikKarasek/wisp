@@ -154,7 +154,8 @@ export async function startNotch() {
         <div class="side r">
           <span class="closed-only rw"><span class="lstep"></span><span class="st"></span><span class="lim" hidden></span></span>
           <div class="open-only icons">
-            <span class="ring" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
+            <span class="ring cl" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
+            <span class="ring gem" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
             <span class="ring gpt" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
             <button data-act="mirror" title="Kamera">${CAMERA}</button>
             <button data-act="settings" title="Nastavení notche">${GEAR}</button>
@@ -261,12 +262,15 @@ export async function startNotch() {
   const steps = $(".steps");
   const crew = $(".crew");
   const crewMascots = new Map<string, MountedMascot>();
-  const LIVE_WING = 190;
+  const LIVE_WING = 170;
   const arc = (r: number, pct: number) => {
     const len = 2 * Math.PI * r;
     return `stroke-dasharray="${((Math.min(100, pct) / 100) * len).toFixed(2)} ${len.toFixed(2)}"`;
   };
   const ahead = (used: number, elapsed: number | null) => elapsed != null && used > elapsed + 10;
+  // Beside the closed notch space is short (the menu-bar icons live there), so
+  // a number shows only once a limit gets close; the open notch has them all.
+  const num = (pct: number) => (pct >= 80 ? `<b>${pct}</b>` : "");
   function limitsHtml(s: Snapshot): string {
     const out: string[] = [];
     const ses = s.usage?.session;
@@ -276,7 +280,7 @@ export async function startNotch() {
       out.push(`<span class="li cl${sesAhead ? " fast" : ""}"><svg viewBox="0 0 20 20">
         ${week ? `<circle cx="10" cy="10" r="8.5" class="tr"/><circle cx="10" cy="10" r="8.5" class="fl wk" ${arc(8.5, week.percent)}/>` : ""}
         ${ses ? `<circle cx="10" cy="10" r="5" class="tr"/><circle cx="10" cy="10" r="5" class="fl" ${arc(5, ses.percent)}/>` : ""}
-      </svg><b>${ses?.percent ?? week?.percent}</b></span>`);
+      </svg>${num(ses?.percent ?? week?.percent ?? 0)}</span>`);
     }
     // Gemini (Antigravity): like Claude, the 5 h window inside the week.
     const g5 = s.gemini?.find((w) => w.group === "Gemini" && w.windowSecs === 5 * 3600);
@@ -286,12 +290,12 @@ export async function startNotch() {
       out.push(`<span class="li gm${gemAhead ? " fast" : ""}"><svg viewBox="0 0 20 20">
         ${gw ? `<circle cx="10" cy="10" r="8.5" class="tr"/><circle cx="10" cy="10" r="8.5" class="fl wk" ${arc(8.5, gw.percent)}/>` : ""}
         ${g5 ? `<circle cx="10" cy="10" r="5" class="tr"/><circle cx="10" cy="10" r="5" class="fl" ${arc(5, g5.percent)}/>` : ""}
-      </svg><b>${g5?.percent ?? gw?.percent}</b></span>`);
+      </svg>${num(g5?.percent ?? gw?.percent ?? 0)}</span>`);
     }
     const g = s.gpt?.[0];
     if (g) {
       const gAhead = ahead(g.percent, elapsedPercent(g.resetsAtMs, g.windowSecs));
-      out.push(`<span class="li gp${gAhead ? " fast" : ""}"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" class="tr"/><circle cx="10" cy="10" r="7" class="fl" ${arc(7, g.percent)}/></svg><b>${g.percent}</b></span>`);
+      out.push(`<span class="li gp${gAhead ? " fast" : ""}"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" class="tr"/><circle cx="10" cy="10" r="7" class="fl" ${arc(7, g.percent)}/></svg>${num(g.percent)}</span>`);
     }
     return out.join("");
   }
@@ -434,8 +438,9 @@ export async function startNotch() {
     const bad = s.items.filter((i) => i.state === "bad").length;
     const st = $(".st");
     const music = dancing && prefs.showMusic;
-    st.className = `st s-${music ? "music" : bad ? "bad" : s.counts.attention ? "you" : s.counts.run ? "run" : "ok"}`;
-    st.innerHTML = music ? `<i></i><i></i><i></i><i></i>` : bad ? `${bad}` : s.counts.attention ? `${s.counts.attention}` : s.counts.run ? `<i></i><i></i><i></i>` : "✓";
+    const running = s.counts.run > 0 || !!ccWorking();
+    st.className = `st s-${music ? "music" : bad ? "bad" : s.counts.attention ? "you" : running ? "run" : "ok"}`;
+    st.innerHTML = music ? `<i></i><i></i><i></i><i></i>` : bad ? `${bad}` : s.counts.attention ? `${s.counts.attention}` : running ? `<i></i><i></i><i></i>` : "✓";
     $(".sum").textContent = headline(s);
 
     const working = s.live?.[0] ?? ccWorking();
@@ -449,22 +454,25 @@ export async function startNotch() {
     const limits = limitsHtml(s);
     lim.hidden = !prefs.showLimits || !limits;
     if (!lim.hidden && lim.innerHTML !== limits) lim.innerHTML = limits;
-    // Each ring with its number takes ~38 px.
-    const extra = lim.hidden ? 0 : (limits.match(/class="li /g)?.length ?? 0) * 38 + 4;
-    const wing = (working ? LIVE_WING : 46) + extra;
+    // A ring takes ~21 px, and ~17 more with its number.
+    const extra = lim.hidden ? 0 : (limits.match(/class="li /g)?.length ?? 0) * 21 + (limits.match(/<b>/g)?.length ?? 0) * 17 + 4;
+    // Only Paperclip agents widen the notch with their step; Claude Code in a
+    // terminal shows its dots here and the steps in the open notch.
+    const wide = !!s.live?.[0];
+    const wing = (wide ? LIVE_WING : 46) + extra;
     if (wing !== lastWing) {
       lastWing = wing;
       root.style.setProperty("--wing", `${wing}px`);
-      root.classList.toggle("live", !!working);
+      root.classList.toggle("live", wide);
       void invoke("notch_set_wing", { width: wing });
     }
-    if (working) {
+    if (wide && working) {
       $(".lname").textContent = working.name;
       $(".lstep").textContent = working.lines.at(-1) ?? "";
     }
     const fresh = s.news && Date.now() - s.at < 15_000 ? s.news : null;
     // Claude's limit as a ring: the session, with the week in the tooltip.
-    const ring = $(".ring:not(.gpt)");
+    const ring = $(".ring.cl");
     ring.hidden = !s.usage?.session;
     if (s.usage?.session) {
       const pct = s.usage.session.percent;
@@ -472,6 +480,18 @@ export async function startNotch() {
       ring.classList.toggle("hot", pct >= 85);
       (ring.querySelector("b") as HTMLElement).textContent = `${pct}`;
       ring.title = `Claude: ${pct} % relace (obnoví se ${s.usage.session.resets})` + (s.usage.week ? `\nTýden: ${s.usage.week.percent} % (obnoví se ${s.usage.week.resets})` : "");
+    }
+    // Gemini (Antigravity) in blue: its 5 h window, the week and AI Pro's Claude in the tooltip.
+    const gem = $(".ring.gem");
+    const gem5 = s.gemini?.find((w) => w.group === "Gemini" && w.windowSecs === 5 * 3600);
+    gem.hidden = !gem5;
+    if (gem5) {
+      gem.querySelector<SVGCircleElement>(".fill")!.style.strokeDasharray = `${(gem5.percent / 100) * 88} 88`;
+      gem.classList.toggle("hot", gem5.percent >= 85);
+      (gem.querySelector("b") as HTMLElement).textContent = `${gem5.percent}`;
+      gem.title = s.gemini
+        .map((w) => `${w.group === "Gemini" ? "Gemini" : "Claude v AI Pro"} ${windowName(w.windowSecs)}: ${w.percent} %${w.resetsAtMs ? ` (obnoví se ${resetText(w.resetsAtMs)})` : ""}`)
+        .join("\n");
     }
     // ChatGPT's limit next to it, in its green.
     const gpt = $(".ring.gpt");

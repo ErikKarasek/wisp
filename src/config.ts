@@ -105,7 +105,7 @@ export function defaults(): Config {
     githubRepos: null,
     notifications: true,
     sounds: true,
-    trayLimits: true,
+    trayLimits: false,
     notch: true,
     notchPrefs: defaultNotchPrefs(),
     telegram: { enabled: false, chat: "" },

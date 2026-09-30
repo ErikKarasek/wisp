@@ -227,10 +227,10 @@ body.mini button { font: inherit; color: inherit; }
 .nt .ring.gpt.hot .fill { stroke: #e0605a; }
 
 /* The limits beside the closed notch: Claude (session inside the week), ChatGPT. */
-.nt .rw .lim { display: flex; gap: 7px; flex: none; }
+.nt .rw .lim { display: flex; gap: 5px; flex: none; }
 .nt .rw .lim[hidden] { display: none; }
 .nt .li { display: flex; align-items: center; gap: 3px; }
-.nt .li svg { width: 17px; height: 17px; transform: rotate(-90deg); fill: none; stroke-width: 2.6; }
+.nt .li svg { width: 16px; height: 16px; transform: rotate(-90deg); fill: none; stroke-width: 2.6; }
 .nt .li .tr { stroke: rgba(255, 255, 255, .13); }
 .nt .li .fl { stroke-linecap: round; transition: stroke-dasharray .6s; }
 .nt .li.cl .fl { stroke: #d97757; }

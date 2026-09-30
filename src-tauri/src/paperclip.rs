@@ -111,6 +111,7 @@ const ALLOWED: &[(&str, &str)] = &[
     ("GET", "/issues/{id}/comments"),
     ("POST", "/issues/{id}/comments"),
     ("POST", "/companies/{id}/issues"),
+    ("GET", "/companies/{id}/issues"),
     // what an agent is doing: its runs and their logs
     ("GET", "/companies/{id}/heartbeat-runs"),
     ("GET", "/heartbeat-runs/{id}"),

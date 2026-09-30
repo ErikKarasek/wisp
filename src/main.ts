@@ -3,6 +3,10 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { openAgentForm } from "./agentform";
 import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type QuotaWindow, type AgyWindow, type Snapshot, windowName, resetText } from "./broadcast";
 import { renderReviews } from "./reviews";
+import { focusAgent, renderChat } from "./chat";
+
+/** Sidebar entries that replace the cards with a view of their own. */
+const VIEWS = ["settings", "tasks", "reviews", "chat"];
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { fullCharacter, loadConfig, NOTCH_WIDTH, saveConfig, type Config } from "./config";
@@ -239,7 +243,9 @@ function renderMain() {
   const settings = $("settings");
   const tasks = $("tasks");
   const reviews = $("reviews");
-  if (filter === "settings" || filter === "tasks" || filter === "reviews") {
+  const chat = $("chat");
+  chat.hidden = filter !== "chat";
+  if (VIEWS.includes(filter)) {
     groupEls.forEach((s) => (s.hidden = true));
     settings.hidden = filter !== "settings";
     tasks.hidden = filter !== "tasks";
@@ -398,6 +404,7 @@ function renderSide() {
     where.map(btn).join("") +
     gauge +
     `<h6>Tvoje</h6>` +
+    btn(["chat", "Chat s agenty", null]) +
     btn(["tasks", "Úkoly", paperclip?.online ? paperclip.companies.reduce((n, c) => n + c.issues.length, 0) : null]) +
     btn(["reviews", "Ke kontrole", prCount]) +
     `<button data-act="studio">Postavičky<span>${cfg.characters.length}</span></button>` +
@@ -406,7 +413,7 @@ function renderSide() {
   side.querySelectorAll<HTMLButtonElement>("button[data-f]").forEach((b) =>
     b.addEventListener("click", () => {
       filter = b.dataset.f!;
-      if (filter === "settings" || filter === "tasks" || filter === "reviews") selected = null;
+      if (VIEWS.includes(filter)) selected = null;
       $("main").scrollTop = 0;
       render();
     }),
@@ -658,6 +665,13 @@ async function runCommand(a: ActionSpec) {
   const c = a.command;
   if (c.type === "editJob") return jobForm(jobs.find((j) => j.label === c.label));
   if (c.type === "editAgent") return agentForm(c.companyId, c.agentId);
+  if (c.type === "chatAgent") {
+    focusAgent(c.agentId);
+    filter = "chat";
+    selected = null;
+    chatShown = false;
+    return render();
+  }
   if (c.type === "editRoutine") return routineForm(c.companyId, c.routineId);
   try {
     if (c.type === "open") {
@@ -933,6 +947,23 @@ function render() {
     void renderReviews($("reviews"), cfg.githubRepos ?? [], toast, () => void refresh(true));
   }
   if (filter !== "reviews") reviewsShown = false;
+  if (filter === "chat" && !chatShown) showChat();
+  if (filter !== "chat") chatShown = false;
+}
+
+let chatShown = false;
+function showChat() {
+  chatShown = true;
+  if (!paperclip?.online) {
+    $("chat").innerHTML = `<p class="muted">Paperclip neodpovídá.</p>`;
+    return;
+  }
+  renderChat($("chat"), {
+    companies: paperclip.companies.filter((c) => c.agents.length),
+    character: (id) => allItems().find((i) => i.id === `agent:${id}`)?.character ?? {},
+    toast,
+    changed: () => void refresh(),
+  });
 }
 
 let settingsShown = false;

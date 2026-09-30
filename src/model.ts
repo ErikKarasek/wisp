@@ -27,6 +27,7 @@ export type Command =
   | { type: "github"; repo: string; workflowId: number; action: "run" | "enable" | "disable" }
   | { type: "editJob"; label: string }
   | { type: "editAgent"; companyId: string; agentId: string }
+  | { type: "chatAgent"; agentId: string }
   | { type: "editRoutine"; companyId: string; routineId?: string }
   | { type: "open"; target: string };
 
@@ -331,6 +332,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
   } else {
     actions.push({ label: "Obnovit", primary: true, command: { type: "paperclip", kind: "agentResume", id: a.id } });
   }
+  actions.push({ label: "Napsat", command: { type: "chatAgent", agentId: a.id } });
   actions.push({ label: "Upravit", command: { type: "editAgent", companyId: a.companyId, agentId: a.id } });
 
   const facts: [string, string][] = [["Role", a.title ?? "–"], ["Motor", a.adapterType === "codex_local" ? "ChatGPT" : "Claude"]];
