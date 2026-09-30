@@ -20,7 +20,11 @@ use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager};
 
 pub const LABEL: &str = "notch";
 /// Width of each black wing beside the notch, where the mascot and status sit.
-const WING: f64 = 46.0;
+/// Wider while an agent works, to show what it is doing (like a live activity).
+static WING: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(46);
+fn wing() -> f64 {
+    WING.load(std::sync::atomic::Ordering::Relaxed) as f64
+}
 /// The expanded view: wide under the notch, like a shelf. The width is a setting.
 static OPEN_W: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(820);
 /// How long it stays open after the cursor leaves. A setting.
@@ -44,12 +48,17 @@ pub struct Geometry {
 
 impl Geometry {
     fn closed(&self) -> (f64, f64, f64, f64) {
-        let w = if self.has_notch { self.notch_width + 2.0 * WING } else { NO_NOTCH_W };
+        let w = if self.has_notch { self.notch_width + 2.0 * wing() } else { NO_NOTCH_W.max(2.0 * wing()) };
         (self.screen_x + (self.screen_width - w) / 2.0, self.screen_y, w, self.bar_height)
     }
     fn open(&self) -> (f64, f64, f64, f64) {
         let want = OPEN_W.load(std::sync::atomic::Ordering::Relaxed) as f64;
-        let w = want.min(self.screen_width - 40.0).max(self.closed().2);
+        let mut w = want.min(self.screen_width - 40.0).round();
+        // Whole points on both sides of the notch: a half-point edge leaves a
+        // hairline seam in the webview right where the wing meets the notch.
+        if (w - self.notch_width) as i64 % 2 != 0 {
+            w += 1.0;
+        }
         (self.screen_x + (self.screen_width - w) / 2.0, self.screen_y, w, OPEN_H)
     }
 }
@@ -84,7 +93,7 @@ pub fn geometry() -> Option<Geometry> {
         if has_notch {
             let left: NSRect = msg_send![screen, auxiliaryTopLeftArea];
             let right: NSRect = msg_send![screen, auxiliaryTopRightArea];
-            notch_width = frame.size.width - left.size.width - right.size.width;
+            notch_width = (frame.size.width - left.size.width - right.size.width).round();
         }
         let top = frame.origin.y + frame.size.height;
         let bar = if has_notch { insets.top } else { (top - (visible.origin.y + visible.size.height)).max(24.0) };
@@ -325,4 +334,9 @@ pub fn set_width(app: &AppHandle, width: f64) {
 
 pub fn set_close_delay(millis: u64) {
     CLOSE_MS.store(millis.clamp(200, 10_000), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Wider wings while an agent works; back to the plain notch when it's done.
+pub fn set_wing(width: f64) {
+    WING.store(width.clamp(40.0, 320.0) as u32, std::sync::atomic::Ordering::Relaxed);
 }

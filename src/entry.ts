@@ -2,6 +2,9 @@
 const view = new URLSearchParams(location.search).get("view");
 
 if (view === "panel" || view === "notch") {
+  // The small windows have their own styles; the main window's (.side, .card,
+  // .live…) would otherwise leak in and draw borders where there should be none.
+  document.querySelectorAll('link[rel="stylesheet"], style').forEach((el) => el.remove());
   document.body.className = "mini";
   const mini = await import("./mini");
   if (view === "panel") mini.startPanel();

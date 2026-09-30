@@ -146,12 +146,12 @@ export async function startNotch() {
     <div class="nt">
       <div class="bar">
         <div class="side l">
-          <div class="closed-only"><div class="m tiny"></div></div>
+          <div class="closed-only lw"><div class="m tiny"></div><span class="lname"></span></div>
           <div class="open-only sum"></div>
         </div>
         <div class="gap"></div>
         <div class="side r">
-          <span class="closed-only"><span class="st"></span></span>
+          <span class="closed-only rw"><span class="lstep"></span><span class="st"></span></span>
           <div class="open-only icons">
             <button data-act="mirror" title="Kamera">${CAMERA}</button>
             <button data-act="settings" title="Nastavení notche">${GEAR}</button>
@@ -171,8 +171,7 @@ export async function startNotch() {
     </div>`;
   const root = document.querySelector(".nt") as HTMLElement;
   root.style.setProperty("--bar-h", `${g.barHeight}px`);
-  root.style.setProperty("--gap", g.hasNotch ? `${g.notchWidth}px` : "0px");
-  root.style.setProperty("--closed-w", g.hasNotch ? `${g.notchWidth + 92}px` : "180px");
+  root.style.setProperty("--gap", g.hasNotch ? `${Math.round(g.notchWidth)}px` : "88px");
   const $ = <T extends HTMLElement>(sel: string) => root.querySelector(sel) as T;
   const panes = $(".panes");
 
@@ -259,6 +258,8 @@ export async function startNotch() {
   const steps = $(".steps");
   const crew = $(".crew");
   const crewMascots = new Map<string, MountedMascot>();
+  const LIVE_WING = 190;
+  let lastWing = 46;
   subscribe((s) => {
     base = faceFor(worst(s));
     face();
@@ -271,6 +272,19 @@ export async function startNotch() {
 
     const working = s.live?.[0];
     ($(".dots") as HTMLElement).hidden = !working;
+
+    // Live activity: while an agent works, the closed notch widens to show it.
+    const wing = working ? LIVE_WING : 46;
+    if (wing !== lastWing) {
+      lastWing = wing;
+      root.style.setProperty("--wing", `${wing}px`);
+      root.classList.toggle("live", !!working);
+      void invoke("notch_set_wing", { width: wing });
+    }
+    if (working) {
+      $(".lname").textContent = working.name;
+      $(".lstep").textContent = working.lines.at(-1) ?? "";
+    }
     const fresh = s.news && Date.now() - s.at < 15_000 ? s.news : null;
     if (working) {
       const lines = working.lines.slice(-3);

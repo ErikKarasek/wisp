@@ -277,6 +277,11 @@ async fn calendar_events(from_ms: f64, to_ms: f64) -> Result<Vec<calendar::Event
 }
 
 #[tauri::command]
+fn notch_set_wing(width: f64) {
+    notch::set_wing(width);
+}
+
+#[tauri::command]
 fn notch_set_close_delay(millis: u64) {
     notch::set_close_delay(millis);
 }
@@ -386,6 +391,7 @@ pub fn run() {
             notch_geometry,
             notch_set_width,
             notch_set_close_delay,
+            notch_set_wing,
             cloudflare_snapshot,
             github_snapshot,
             github_discover,

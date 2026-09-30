@@ -43,18 +43,27 @@ body.mini button { font: inherit; color: inherit; }
 /* The window is always the open size. The closed notch is the same black
    shape clipped down to the notch, so opening only animates the clip: no
    window resize, no layout, just the compositor. */
-.nt { --ease: cubic-bezier(.32, 1.25, .42, 1); position: absolute; inset: 0; background: #000;
+.nt { --ease: cubic-bezier(.32, 1.25, .42, 1); --wing: 46px; --closed-w: calc(var(--gap) + 2 * var(--wing));
+  position: absolute; inset: 0; background: #000;
   --side: calc((100% - var(--closed-w)) / 2);
   clip-path: inset(0 var(--side) calc(100% - var(--bar-h)) var(--side) round 0 0 12px 12px);
-  transition: clip-path .42s var(--ease); will-change: clip-path; }
+  transition: clip-path .42s var(--ease); }
 .nt.is-open { clip-path: inset(0 0 0 0 round 0 0 26px 26px); transition: clip-path .46s var(--ease); }
-.nt .bar { height: var(--bar-h); display: flex; align-items: center; }
-.nt .gap { width: var(--gap); flex: none; }
-.nt .side { flex: 1; height: 100%; position: relative; }
+.nt .bar { height: var(--bar-h); display: flex; align-items: center; background: #000; }
+.nt .gap { width: var(--gap); flex: none; height: 100%; background: #000; }
+.nt .side { flex: 1; height: 100%; position: relative; background: #000; }
 /* Closed: the bot and the status sit in the wings right beside the notch. */
 .nt .side .closed-only { position: absolute; top: 50%; transform: translateY(-50%); transition: opacity .18s; }
-.nt .side.l .closed-only { right: 11px; }
-.nt .side.r .closed-only { left: 11px; }
+/* The wings are exactly --wing wide; a live agent widens them. */
+.nt .side .lw, .nt .side .rw { width: var(--wing); height: 100%; top: 0; transform: none; display: flex; align-items: center; gap: 8px;
+  box-sizing: border-box; padding: 0 11px; overflow: hidden; transition: width .42s var(--ease), opacity .18s; }
+.nt .side.l .lw { right: 0; }
+.nt .side.r .rw { left: 0; justify-content: flex-end; }
+.nt .lw .m.tiny { flex: none; }
+.nt .lname, .nt .lstep { display: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nt.live .lname { display: block; font-size: 12px; font-weight: 600; color: #fff; }
+.nt.live .lstep { display: block; flex: 1; min-width: 0; font: 11px ui-monospace, "SF Mono", Menlo, monospace; color: #b9c4ff; }
+.nt .rw .st { flex: none; }
 /* Open: tabs on the far left, status on the far right. */
 .nt .side .open-only { position: absolute; top: 50%; display: flex; opacity: 0; pointer-events: none;
   transform: translateY(-50%) scale(.96); transition: opacity .18s, transform .3s var(--ease); }
