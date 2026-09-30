@@ -142,6 +142,8 @@ export type Job = {
 
 const JOBS: Record<string, { name: string; doing: string }> = {
   "com.erikkarasek.devlog": { name: "Devlog", doing: "V noci sepíše, co se za den commitlo" },
+  "com.erikkarasek.posta": { name: "Pošta mimo práci", doing: "Ráno pošle do Telegramu, co důležitého přišlo do Centra (platby, termíny, úřady…)" },
+  "com.erikkarasek.letenky": { name: "Hlídač letenek", doing: "Dvakrát denně hlídá ceny letů z letenky.json a ozve se pod tvoji cenu" },
   "com.erikkarasek.hlidac-prace": { name: "Hlídač neuložené práce", doing: "Každý večer zkontroluje, co v ~/Developer není na GitHubu" },
   "com.erikkarasek.mac-uklid": { name: "Úklid Macu", doing: "V neděli najde, co zbytečně zabírá místo; uklidí až na tvoje tlačítko" },
   "com.erikkarasek.gemini-deps": { name: "Hlídač závislostí", doing: "Každé úterý projde závislosti všech projektů a hlásí zranitelnosti" },
