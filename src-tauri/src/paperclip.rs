@@ -136,7 +136,6 @@ const ALLOWED: &[(&str, &str)] = &[
     ("GET", "/companies/{id}/skills"),
     ("GET", "/companies/{id}/adapters/claude_local/models"),
     ("GET", "/companies/{id}/adapters/codex_local/models"),
-    ("GET", "/companies/{id}/adapters/gemini_local/models"),
     // how much of the ChatGPT (and Claude) subscription is used
     ("GET", "/companies/{id}/costs/quota-windows"),
 ];

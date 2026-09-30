@@ -173,7 +173,7 @@ function cardFor(item: Item, seed: number): Card {
   q(".when").textContent = item.when;
   if (item.engine) {
     const tag = document.createElement("b");
-    tag.className = `eng ${{ ChatGPT: "gpt", Gemini: "gem", Claude: "cl" }[item.engine]}`;
+    tag.className = `eng ${item.engine === "ChatGPT" ? "gpt" : "cl"}`;
     tag.textContent = item.engine;
     q(".when").prepend(tag);
   }
@@ -221,7 +221,6 @@ function matches(item: Item) {
     case "sleep":
       return item.state === "sleep";
     case "engine:ChatGPT":
-    case "engine:Gemini":
     case "engine:Claude":
       return item.engine === filter.slice(7);
     default:
@@ -334,7 +333,7 @@ function renderSide() {
   ];
   const where: [string, string, number | null][] = groups.map((g) => [g.id, groupLabel(g), g.items.length]);
   // Agents and their routines, by the subscription they run on.
-  for (const engine of ["ChatGPT", "Gemini", "Claude"] as const) {
+  for (const engine of ["ChatGPT", "Claude"] as const) {
     const count = n((i) => i.engine === engine);
     if (count) where.push([`engine:${engine}`, engine, count]);
   }

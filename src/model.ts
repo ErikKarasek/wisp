@@ -52,7 +52,7 @@ export type Item = {
   chip?: string;
   bubble?: string;
   /** Agents: the subscription they run on. */
-  engine?: "Claude" | "ChatGPT" | "Gemini";
+  engine?: "Claude" | "ChatGPT";
   character: Partial<MascotCharacter>;
   facts: [string, string][];
   /** A job's log label, an agent's live runs, or static lines to show instead. */
@@ -254,11 +254,6 @@ export function jobItem(j: Job, now = Date.now()): Item {
 // ---------- Paperclip ----------
 
 type Obj = Record<string, any>;
-/** The subscription an agent's adapter runs on. */
-export function engineOf(adapterType: string): "Claude" | "ChatGPT" | "Gemini" {
-  return adapterType === "codex_local" ? "ChatGPT" : adapterType === "gemini_local" ? "Gemini" : "Claude";
-}
-
 export type PaperclipSnapshot =
   | { online: false; error: string }
   | { online: true; baseUrl: string; companies: { company: Obj; agents: Obj[]; routines: Obj[]; issues: Obj[] }[] };
@@ -313,7 +308,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
       actions.push({
         label: "Probudit",
         primary: true,
-        confirm: `Spustí agenta přes tvoje ${engineOf(a.adapterType)} předplatné. Pokračovat?`,
+        confirm: `Spustí agenta přes tvoje ${a.adapterType === "codex_local" ? "ChatGPT" : "Claude"} předplatné. Pokračovat?`,
         command: { type: "paperclip", kind: "agentInvoke", id: a.id },
       });
     }
@@ -323,7 +318,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
   }
   actions.push({ label: "Upravit", command: { type: "editAgent", companyId: a.companyId, agentId: a.id } });
 
-  const facts: [string, string][] = [["Role", a.title ?? "–"], ["Motor", engineOf(a.adapterType)]];
+  const facts: [string, string][] = [["Role", a.title ?? "–"], ["Motor", a.adapterType === "codex_local" ? "ChatGPT" : "Claude"]];
   if (a.adapterConfig?.model) facts.push(["Model", a.adapterConfig.model]);
   if (spent != null) facts.push(["Tento měsíc", budget ? `$${spent.toFixed(2)} z $${budget.toFixed(0)}` : `$${spent.toFixed(2)}`]);
 
@@ -338,7 +333,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
     state,
     chip,
     bubble,
-    engine: engineOf(a.adapterType),
+    engine: a.adapterType === "codex_local" ? "ChatGPT" : "Claude",
     character: characterFor(`agent:${a.name}`),
     facts: tasks ? [...facts, ["Úkoly", tasks]] : facts,
     log: { agent: { companyId: a.companyId, agentId: a.id } },
@@ -400,7 +395,7 @@ function routineItem(r: Obj, agents: Obj[], groupId: string, now: number): Item 
     state,
     chip: state === "sleep" ? "čeká" : undefined,
     bubble,
-    ...(agent ? { engine: engineOf(agent.adapterType) } : {}),
+    ...(agent ? { engine: agent.adapterType === "codex_local" ? ("ChatGPT" as const) : ("Claude" as const) } : {}),
     character: characterFor(`routine:${r.title}`),
     facts: [
       ["Kdo", agent?.name ?? "–"],
