@@ -8,6 +8,10 @@ export const EV_STATE = "dispecink-state";
 export const EV_REQUEST = "dispecink-state-request";
 export const EV_OPEN = "dispecink-open";
 export const EV_REFRESH = "dispecink-refresh";
+/** The notch's settings changed; it reloads them. */
+export const EV_NOTCH_PREFS = "dispecink-notch-prefs";
+/** Open the main window on its settings. */
+export const EV_OPEN_SETTINGS = "dispecink-open-settings";
 
 export type MiniItem = {
   id: string;

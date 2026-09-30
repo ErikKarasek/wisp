@@ -6,6 +6,37 @@ import type { MascotCharacter } from "./mascot/mascot";
 
 export type SavedCharacter = { id: string; name: string; character: MascotCharacter };
 
+export type NotchPrefs = {
+  /** Pills with the other agents and jobs. */
+  showOthers: boolean;
+  showMusic: boolean;
+  showCalendar: boolean;
+  showMirror: boolean;
+  /** A character from the gallery for the bot; null for the plain white one. */
+  bot: string | null;
+  /** Dance while music plays. */
+  dance: boolean;
+  /** Open for a moment when something happens. */
+  peek: boolean;
+  /** Eyes follow the mouse. */
+  follow: boolean;
+  width: "s" | "m" | "l";
+};
+
+export const NOTCH_WIDTH = { s: 640, m: 760, l: 880 } as const;
+
+export const defaultNotchPrefs = (): NotchPrefs => ({
+  showOthers: true,
+  showMusic: true,
+  showCalendar: true,
+  showMirror: true,
+  bot: null,
+  dance: true,
+  peek: true,
+  follow: true,
+  width: "l",
+});
+
 export type Config = {
   characters: SavedCharacter[];
   /** Item id → character id. Items without one get their automatic face. */
@@ -20,6 +51,7 @@ export type Config = {
   sounds: boolean;
   /** The mascot in the MacBook notch. */
   notch: boolean;
+  notchPrefs: NotchPrefs;
   telegram: { enabled: boolean; chat: string };
 };
 
@@ -62,6 +94,7 @@ export function defaults(): Config {
     notifications: true,
     sounds: true,
     notch: true,
+    notchPrefs: defaultNotchPrefs(),
     telegram: { enabled: false, chat: "" },
   };
 }
@@ -75,6 +108,7 @@ export async function loadConfig(): Promise<Config> {
   const fresh = !raw || !Array.isArray(raw.characters);
   // Settings added in later versions get their defaults.
   const cfg = { ...defaults(), ...(fresh ? {} : raw) } as Config;
+  cfg.notchPrefs = { ...defaultNotchPrefs(), ...(raw?.notchPrefs ?? {}) };
   if (fresh) await saveConfig(cfg);
   return cfg;
 }

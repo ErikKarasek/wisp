@@ -1,10 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { openAgentForm } from "./agentform";
-import { EV_OPEN, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot } from "./broadcast";
+import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot } from "./broadcast";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import { fullCharacter, loadConfig, saveConfig, type Config } from "./config";
+import { fullCharacter, loadConfig, NOTCH_WIDTH, saveConfig, type Config } from "./config";
 import { EXPRESSIONS, type MascotCharacter } from "./mascot/mascot";
 import { mascotSvg, mountMascot, type MountedMascot } from "./mascot/svg";
 import {
@@ -644,7 +644,7 @@ async function onChanges() {
     };
     newsAt = Date.now();
     broadcast();
-    if (cfg.notch) void invoke("notch_peek", { millis: 4500 });
+    if (cfg.notch && cfg.notchPrefs.peek) void invoke("notch_peek", { millis: 4500 });
   }
   if (cfg.sounds) {
     if (changed.some((i) => i.state === "bad")) sounds.bad();
@@ -761,6 +761,12 @@ const broadcast = () => void emit(EV_STATE, snapshot());
 
 void listen(EV_REQUEST, broadcast);
 void listen(EV_REFRESH, () => void refresh(true));
+void listen(EV_OPEN_SETTINGS, () => {
+  filter = "settings";
+  selected = null;
+  render();
+  void invoke("show_main_window");
+});
 void listen<{ id: string }>(EV_OPEN, (e) => {
   filter = "all";
   selected = e.payload.id;
@@ -863,6 +869,11 @@ async function showSettings() {
     refreshCloud: () => refreshCloud(),
     openStudio: () => studio(),
     setNotch: (on: boolean) => void invoke("notch_set_enabled", { enabled: on }),
+    notchChanged: async () => {
+      await saveConfig(cfg);
+      await invoke("notch_set_width", { width: NOTCH_WIDTH[cfg.notchPrefs.width] });
+      await emit(EV_NOTCH_PREFS);
+    },
     toast,
   });
 }
@@ -910,7 +921,7 @@ async function refreshCloud() {
 async function start() {
   cfg = await loadConfig();
   history = await invoke<HistoryEntry[]>("history_load").catch(() => []);
-  void invoke("notch_set_enabled", { enabled: cfg.notch });
+  void invoke("notch_set_width", { width: NOTCH_WIDTH[cfg.notchPrefs.width] }).then(() => invoke("notch_set_enabled", { enabled: cfg.notch }));
   // The Mac and Paperclip answer at once; the cloud fills in when it arrives.
   await refresh(false);
   void refresh(true);

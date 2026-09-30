@@ -5,7 +5,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { EXPRESSIONS, type ExpressionName, type MascotCharacter } from "./mascot/mascot";
 import { mountMascot, type MountedMascot } from "./mascot/svg";
-import { EV_OPEN, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot } from "./broadcast";
+import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot } from "./broadcast";
+import { defaultNotchPrefs, type NotchPrefs, type SavedCharacter } from "./config";
 import { SEVERITY, STATES, type State } from "./model";
 import { sounds } from "./sounds";
 import "./mini.css";
@@ -119,45 +120,44 @@ export function startPanel() {
 
 type NowPlaying = { app: string; playing: boolean; title: string; artist: string; album: string; artworkUrl: string | null; position: number; duration: number };
 type CalEvent = { title: string; startMs: number; endMs: number; allDay: boolean; calendar: string; location: string };
-type Tab = "home" | "music" | "calendar" | "mirror";
+type Cfg = { sounds?: boolean; characters?: SavedCharacter[]; notchPrefs?: Partial<NotchPrefs> };
 
-const ICONS: Record<Tab, string> = {
-  home: `<svg viewBox="0 0 24 24"><path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/></svg>`,
-  music: `<svg viewBox="0 0 24 24"><path d="M9 17.5V6l10-2v11.5"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="15.5" r="2.5"/></svg>`,
-  calendar: `<svg viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/></svg>`,
-  mirror: `<svg viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="13" height="11" rx="2.5"/><path d="m16.5 10.5 4-2.5v8l-4-2.5z"/></svg>`,
-};
+const CAMERA = `<svg viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="13" height="11" rx="2.5"/><path d="m16.5 10.5 4-2.5v8l-4-2.5z"/></svg>`;
 const GEAR = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>`;
 const hm = (ms: number) => new Date(ms).toLocaleTimeString("cs-CZ", { hour: "numeric", minute: "2-digit" });
-const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+const WHITE_BOT: Partial<MascotCharacter> = { color: "#e6e8ef", eyeColor: "#15161a" };
 
 export async function startNotch() {
   const g = await invoke<{ notchWidth: number; barHeight: number; hasNotch: boolean }>("notch_geometry");
-  const cfg = await invoke<{ sounds?: boolean }>("config_load").catch(() => ({ sounds: true }));
+  let cfg = await invoke<Cfg>("config_load").catch(() => ({}) as Cfg);
+  let prefs: NotchPrefs = { ...defaultNotchPrefs(), ...(cfg.notchPrefs ?? {}) };
+
   document.body.innerHTML = `
     <div class="nt">
       <div class="bar">
         <div class="side l">
-          <div class="closed-only m tiny"></div>
-          <nav class="open-only tabs">${(Object.keys(ICONS) as Tab[]).map((t) => `<button data-tab="${t}" title="${{ home: "Domů", music: "Hudba", calendar: "Kalendář", mirror: "Zrcátko" }[t]}">${ICONS[t]}</button>`).join("")}</nav>
+          <div class="closed-only"><div class="m tiny"></div></div>
+          <div class="open-only sum"></div>
         </div>
         <div class="gap"></div>
         <div class="side r">
-          <span class="closed-only st"></span>
-          <div class="open-only status"><span class="sum"></span><button data-act="main" title="Otevřít Dispečink">${GEAR}</button></div>
+          <span class="closed-only"><span class="st"></span></span>
+          <div class="open-only icons">
+            <button data-act="mirror" title="Zrcátko">${CAMERA}</button>
+            <button data-act="settings" title="Nastavení notche">${GEAR}</button>
+          </div>
         </div>
       </div>
       <div class="panes">
-        <section class="pane" data-pane="home">
+        <div class="cards">
           <div class="card hero">
             <div class="big-wrap"><div class="m big"></div><span class="dots" hidden><i></i><i></i><i></i></span></div>
             <div class="steps"></div>
           </div>
           <div class="card pills"></div>
-        </section>
-        <section class="pane" data-pane="music" hidden><div class="card music"></div></section>
-        <section class="pane" data-pane="calendar" hidden><div class="card cal"></div></section>
-        <section class="pane" data-pane="mirror" hidden><div class="card mirror"><video autoplay playsinline muted></video><p class="muted"></p></div></section>
+          <div class="card side-card"><div class="music"></div><div class="cal"></div></div>
+        </div>
+        <div class="mirror" hidden><video autoplay playsinline muted></video><p class="muted"></p><button class="close" title="Zavřít">✕</button></div>
       </div>
     </div>`;
   const root = document.querySelector(".nt") as HTMLElement;
@@ -166,26 +166,29 @@ export async function startNotch() {
   root.style.setProperty("--closed-w", g.hasNotch ? `${g.notchWidth + 92}px` : "180px");
   const $ = <T extends HTMLElement>(sel: string) => root.querySelector(sel) as T;
 
-  // ----- the bot: small in the wing, big in the open notch; both watch the cursor -----
-  const botCharacter: Partial<MascotCharacter> = { color: "#e6e8ef", eyeColor: "#15161a" };
-  const tiny = mountMascot($(".m.tiny"), { character: botCharacter, expression: "happy", transition: 140, seed: 21 });
-  const big = mountMascot($(".m.big"), { character: botCharacter, expression: "happy", transition: 160, seed: 22 });
+  // ----- the bot: small in the wing, big in the open notch -----
+  const botLook = () => {
+    const saved = prefs.bot ? cfg.characters?.find((c) => c.id === prefs.bot) : null;
+    return saved ? saved.character : WHITE_BOT;
+  };
+  const tiny = mountMascot($(".m.tiny"), { character: botLook(), expression: "happy", transition: 180, seed: 21 });
+  const big = mountMascot($(".m.big"), { character: botLook(), expression: "happy", transition: 200, seed: 22 });
   let base: ExpressionName = "happy";
   let look: [number, number] = [0, 0];
   let reacting = 0;
   let dancing = false;
   const face = () => {
     if (Date.now() < reacting) return;
-    const ex = { ...EXPRESSIONS[dancing && base === "happy" ? "thriving" : base], lookX: look[0], lookY: look[1] * 0.85, wander: 0 };
-    tiny.setExpression(ex);
-    big.setExpression(ex);
+    const ex = EXPRESSIONS[dancing && base === "happy" ? "thriving" : base];
+    const shaped = prefs.follow ? { ...ex, lookX: look[0], lookY: look[1] * 0.85, wander: 0 } : ex;
+    tiny.setExpression(shaped);
+    big.setExpression(shaped);
   };
   void listen<[number, number]>("notch-look", (e) => {
     look = e.payload;
-    face();
+    if (prefs.follow) face();
   });
 
-  // Poking either of them: a jump, then happy, then dizzy and cross.
   let pokes: number[] = [];
   for (const el of [$(".m.tiny"), $(".m.big")]) {
     el.addEventListener("click", () => {
@@ -205,32 +208,34 @@ export async function startNotch() {
     });
   }
 
-  // ----- tabs -----
-  let tab: Tab = "home";
-  let stream: MediaStream | null = null;
-  const showTab = (t: Tab) => {
-    tab = t;
-    root.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
-    root.querySelectorAll<HTMLElement>("[data-pane]").forEach((p) => (p.hidden = p.dataset.pane !== t));
-    if (t === "mirror") void startMirror();
-    else stopMirror();
-    if (t === "calendar") void loadCalendar();
-    if (t === "music") renderMusic();
+  // ----- settings: which cards, which bot, how it behaves -----
+  const applyPrefs = () => {
+    $(".pills").hidden = !prefs.showOthers;
+    $(".music").hidden = !prefs.showMusic;
+    $(".cal").hidden = !prefs.showCalendar;
+    $(".side-card").hidden = !prefs.showMusic && !prefs.showCalendar;
+    ($("[data-act=mirror]") as HTMLElement).hidden = !prefs.showMirror;
+    if (!prefs.showMirror) closeMirror();
+    const look = botLook();
+    tiny.setCharacter(look);
+    big.setCharacter(look);
+    root.classList.toggle("dancing", dancing && prefs.dance);
+    face();
   };
-  root.querySelector(".tabs")!.addEventListener("click", (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]");
-    if (b) showTab(b.dataset.tab as Tab);
+  void listen(EV_NOTCH_PREFS, async () => {
+    cfg = await invoke<Cfg>("config_load").catch(() => cfg);
+    prefs = { ...defaultNotchPrefs(), ...(cfg.notchPrefs ?? {}) };
+    applyPrefs();
+    void loadCalendar();
   });
-  $("[data-act=main]").addEventListener("click", () => void invoke("show_main_window"));
-  showTab("home");
+  $("[data-act=settings]").addEventListener("click", () => void emit(EV_OPEN_SETTINGS));
 
   void listen<boolean>("notch-open", (e) => {
     root.classList.toggle("is-open", e.payload);
-    if (!e.payload) stopMirror();
-    else if (tab === "mirror") void startMirror();
+    if (!e.payload) closeMirror();
   });
 
-  // ----- home: the working agent's steps, and everyone else as pills -----
+  // ----- the working agent's steps, and everyone else as pills -----
   const steps = $(".steps");
   const pills = $(".pills");
   const pillMascots = new Map<string, MountedMascot>();
@@ -239,8 +244,9 @@ export async function startNotch() {
     face();
     const bad = s.items.filter((i) => i.state === "bad").length;
     const st = $(".st");
-    st.className = `closed-only st s-${dancing ? "music" : bad ? "bad" : s.counts.attention ? "you" : s.counts.run ? "run" : "ok"}`;
-    st.innerHTML = dancing ? `<i></i><i></i><i></i><i></i>` : bad ? `${bad}` : s.counts.attention ? `${s.counts.attention}` : s.counts.run ? `<i></i><i></i><i></i>` : "✓";
+    const music = dancing && prefs.showMusic;
+    st.className = `st s-${music ? "music" : bad ? "bad" : s.counts.attention ? "you" : s.counts.run ? "run" : "ok"}`;
+    st.innerHTML = music ? `<i></i><i></i><i></i><i></i>` : bad ? `${bad}` : s.counts.attention ? `${s.counts.attention}` : s.counts.run ? `<i></i><i></i><i></i>` : "✓";
     $(".sum").textContent = headline(s);
 
     const working = s.live?.[0];
@@ -255,7 +261,7 @@ export async function startNotch() {
     } else if (fresh) {
       steps.innerHTML = `<small class="who">${escHtml(fresh.name)}</small><div class="step now">${escHtml(fresh.chip)}</div><div class="step past">${escHtml(fresh.doing)}</div>`;
     } else {
-      steps.innerHTML = `<small class="who">Dispečink</small><div class="step now">${escHtml(headline(s))}</div><div class="step past">${s.counts.sleep} spí · ${s.counts.run} pracuje · ${s.counts.off} vypnuto</div>`;
+      steps.innerHTML = `<small class="who">Dispečink</small><div class="step now big-text">${escHtml(headline(s))}</div><div class="step past">${s.counts.sleep} spí · ${s.counts.run} pracuje · ${s.counts.off} vypnuto</div>`;
     }
 
     const others = [...s.items].filter((i) => i.id !== working?.id).sort(byUrgency).slice(0, 4);
@@ -272,8 +278,7 @@ export async function startNotch() {
         pillMascots.set(i.id, mountMascot(pill.querySelector(".m") as HTMLElement, { character: i.character, expression: STATES[i.state].expr, seed: 30 + n }));
       }
       pillMascots.get(i.id)!.setExpression(STATES[i.state].expr);
-      const color = (i.character.color as string) ?? "#8b9cff";
-      pill.style.setProperty("--c", color);
+      pill.style.setProperty("--c", (i.character.color as string) ?? "#8b9cff");
       (pill.querySelector(".t") as HTMLElement).textContent = `${i.name}: ${i.chip}`;
       pill.title = i.doing;
       pills.appendChild(pill);
@@ -287,50 +292,48 @@ export async function startNotch() {
     });
   });
 
-  // ----- music: what plays, the buttons, and a bot that dances along -----
+  // ----- music: a small player, and a bot that dances along -----
   let now: NowPlaying | null = null;
   let notes = 0;
   const pollMusic = async () => {
-    now = await invoke<NowPlaying | null>("media_now").catch(() => null);
+    now = prefs.showMusic || prefs.dance ? await invoke<NowPlaying | null>("media_now").catch(() => null) : null;
     const was = dancing;
     dancing = !!now?.playing;
-    root.classList.toggle("dancing", dancing);
+    root.classList.toggle("dancing", dancing && prefs.dance);
     if (was !== dancing) face();
-    if (tab === "music") renderMusic();
+    renderMusic();
   };
   void pollMusic();
   setInterval(() => void pollMusic(), 2500);
-  // A note floats up from the bot now and then while music plays.
   setInterval(() => {
-    if (!dancing) return;
-    const host = root.classList.contains("is-open") ? $(".big-wrap") : $(".side.l");
+    if (!dancing || !prefs.dance) return;
+    const host = root.classList.contains("is-open") ? $(".big-wrap") : $(".side.l .closed-only");
     const n = document.createElement("span");
     n.className = "note";
     n.textContent = ["♪", "♫", "♩"][notes++ % 3];
-    n.style.left = `${40 + Math.random() * 30}%`;
+    n.style.left = `${30 + Math.random() * 40}%`;
     host.appendChild(n);
     setTimeout(() => n.remove(), 1600);
   }, 900);
 
   function renderMusic() {
     const box = $(".music");
+    if (!prefs.showMusic) return;
     if (!now) {
-      box.innerHTML = `<p class="muted">Nic nehraje. Pusť něco ve Spotify nebo v Hudbě.</p>`;
+      box.innerHTML = `<div class="mini-empty">♪ <span>Nic nehraje</span></div>`;
       return;
     }
     const pct = now.duration ? Math.min(100, (now.position / now.duration) * 100) : 0;
     box.innerHTML = `
-      ${now.artworkUrl ? `<img class="art" src="${escHtml(now.artworkUrl)}" alt="">` : `<div class="art none">♪</div>`}
-      <div class="meta">
-        <small>${escHtml(now.app === "Music" ? "Hudba" : now.app)}${now.playing ? " · hraje" : " · pozastaveno"}</small>
-        <b>${escHtml(now.title)}</b><span>${escHtml(now.artist)}</span>
-        <div class="progress"><i style="width:${pct.toFixed(1)}%"></i></div>
-        <div class="times"><span>${mmss(now.position)}</span><span>${mmss(now.duration)}</span></div>
-        <div class="controls">
-          <button data-media="previous" title="Předchozí">⏮</button>
-          <button data-media="playpause" class="pp" title="${now.playing ? "Pozastavit" : "Přehrát"}">${now.playing ? "⏸" : "▶"}</button>
-          <button data-media="next" title="Další">⏭</button>
-        </div>
+      <div class="player">
+        ${now.artworkUrl ? `<img class="art" src="${escHtml(now.artworkUrl)}" alt="">` : `<div class="art none">♪</div>`}
+        <div class="meta"><b>${escHtml(now.title)}</b><span>${escHtml(now.artist)}</span></div>
+      </div>
+      <div class="progress"><i style="width:${pct.toFixed(1)}%"></i></div>
+      <div class="controls">
+        <button data-media="previous" title="Předchozí">⏮</button>
+        <button data-media="playpause" class="pp" title="${now.playing ? "Pozastavit" : "Přehrát"}">${now.playing ? "⏸" : "▶"}</button>
+        <button data-media="next" title="Další">⏭</button>
       </div>`;
     box.querySelectorAll<HTMLElement>("[data-media]").forEach((b) =>
       b.addEventListener("click", async () => {
@@ -340,12 +343,13 @@ export async function startNotch() {
     );
   }
 
-  // ----- calendar: today and tomorrow -----
+  // ----- calendar: what's next -----
   async function loadCalendar() {
     const box = $(".cal");
+    if (!prefs.showCalendar) return;
     const status = await invoke<string>("calendar_status");
     if (status === "none") {
-      box.innerHTML = `<p class="muted">Dispečink zatím nesmí do kalendáře.</p><button class="ask">Povolit kalendář</button>`;
+      box.innerHTML = `<button class="ask">Povolit kalendář</button>`;
       box.querySelector(".ask")!.addEventListener("click", async () => {
         await invoke("calendar_request");
         void loadCalendar();
@@ -353,50 +357,53 @@ export async function startNotch() {
       return;
     }
     if (status !== "granted") {
-      box.innerHTML = `<p class="muted">Kalendář je zakázaný. Povolíš ho v Nastavení systému → Soukromí a zabezpečení → Kalendáře.</p>`;
+      box.innerHTML = `<p class="muted">Kalendář je zakázaný v Nastavení systému → Soukromí → Kalendáře.</p>`;
       return;
     }
-    const events = await invoke<CalEvent[]>("calendar_events").catch(() => []);
     const t = Date.now();
+    const next = (await invoke<CalEvent[]>("calendar_events").catch(() => [])).filter((e) => e.endMs > t).slice(0, 2);
     const today = new Date().toDateString();
-    const tomorrow = new Date(t + 86_400_000).toDateString();
-    const upcoming = events.filter((e) => e.endMs > t);
-    const day = (label: string, list: CalEvent[]) =>
-      `<div class="day"><h4>${label}</h4>${
-        list.length
-          ? list
-              .map((e) => {
-                const on = e.startMs <= t && e.endMs > t;
-                return `<div class="ev${on ? " now" : ""}"><span class="time">${e.allDay ? "celý den" : `${hm(e.startMs)}–${hm(e.endMs)}`}</span><b>${escHtml(e.title)}</b>${e.location ? `<small>${escHtml(e.location)}</small>` : ""}</div>`;
-              })
-              .join("")
-          : `<p class="muted">Nic.</p>`
-      }</div>`;
-    box.innerHTML =
-      day("Dnes", upcoming.filter((e) => new Date(e.startMs).toDateString() === today || (e.startMs < t && e.endMs > t))) +
-      day("Zítra", upcoming.filter((e) => new Date(e.startMs).toDateString() === tomorrow));
+    box.innerHTML = next.length
+      ? next
+          .map((e) => {
+            const on = e.startMs <= t;
+            const day = new Date(e.startMs).toDateString() === today ? "" : "zítra ";
+            return `<div class="ev${on ? " now" : ""}"><span class="time">${on ? "teď" : e.allDay ? `${day}celý den` : `${day}${hm(e.startMs)}`}</span><b>${escHtml(e.title)}</b></div>`;
+          })
+          .join("")
+      : `<p class="muted">Dnes a zítra nic v kalendáři.</p>`;
   }
-  setInterval(() => {
-    if (tab === "calendar") void loadCalendar();
-  }, 60_000);
+  void loadCalendar();
+  setInterval(() => void loadCalendar(), 60_000);
 
-  // ----- mirror: the camera, only while the tab is open -----
-  async function startMirror() {
-    const video = $(".mirror video") as HTMLVideoElement;
-    const note = $(".mirror .muted");
-    if (stream || !root.classList.contains("is-open")) return;
+  // ----- mirror: the camera over the cards, only while it is open -----
+  let stream: MediaStream | null = null;
+  const mirror = $(".mirror");
+  $("[data-act=mirror]").addEventListener("click", () => (stream || !mirror.hidden ? closeMirror() : void openMirror()));
+  mirror.querySelector(".close")!.addEventListener("click", () => closeMirror());
+  async function openMirror() {
+    mirror.hidden = false;
+    $(".cards").hidden = true;
+    const note = mirror.querySelector(".muted") as HTMLElement;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      note.textContent = "Kamera tady není k dispozici.";
+      return;
+    }
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 }, audio: false });
-      video.srcObject = stream;
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+      (mirror.querySelector("video") as HTMLVideoElement).srcObject = stream;
       note.textContent = "";
     } catch (err) {
-      note.textContent = `Kamera nejde zapnout: ${String(err)}`;
+      note.textContent = `Kamera nejde zapnout (${(err as Error).name}). Povol ji v Nastavení systému → Soukromí → Kamera.`;
     }
   }
-  function stopMirror() {
+  function closeMirror() {
     stream?.getTracks().forEach((t) => t.stop());
     stream = null;
-    const video = root.querySelector<HTMLVideoElement>(".mirror video");
-    if (video) video.srcObject = null;
+    (mirror.querySelector("video") as HTMLVideoElement).srcObject = null;
+    mirror.hidden = true;
+    $(".cards").hidden = false;
   }
+
+  applyPrefs();
 }

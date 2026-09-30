@@ -21,8 +21,8 @@ use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager};
 pub const LABEL: &str = "notch";
 /// Width of each black wing beside the notch, where the mascot and status sit.
 const WING: f64 = 46.0;
-/// The expanded view: wide under the notch, like a shelf.
-const OPEN_MAX_W: f64 = 860.0;
+/// The expanded view: wide under the notch, like a shelf. The width is a setting.
+static OPEN_W: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(820);
 const OPEN_H: f64 = 250.0;
 /// Without a notch, a pill this wide sits at the top centre of the menu bar.
 const NO_NOTCH_W: f64 = 180.0;
@@ -46,7 +46,8 @@ impl Geometry {
         (self.screen_x + (self.screen_width - w) / 2.0, self.screen_y, w, self.bar_height)
     }
     fn open(&self) -> (f64, f64, f64, f64) {
-        let w = OPEN_MAX_W.min(self.screen_width * 0.62).max(self.closed().2);
+        let want = OPEN_W.load(std::sync::atomic::Ordering::Relaxed) as f64;
+        let w = want.min(self.screen_width - 40.0).max(self.closed().2);
         (self.screen_x + (self.screen_width - w) / 2.0, self.screen_y, w, OPEN_H)
     }
 }
@@ -150,6 +151,8 @@ struct State {
     outside_since: Option<Instant>,
     peek_until: Option<Instant>,
     last_look: (f64, f64),
+    /// Whether the window currently lets clicks through to what is below it.
+    click_through: bool,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -160,6 +163,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     outside_since: None,
     peek_until: None,
     last_look: (0.0, 0.0),
+    click_through: false,
 });
 
 fn inside(p: (f64, f64), r: (f64, f64, f64, f64), margin: f64) -> bool {
@@ -176,23 +180,20 @@ fn place(app: &AppHandle, rect: (f64, f64, f64, f64)) {
     });
 }
 
-fn set_open(app: &AppHandle, open: bool, geometry: Geometry) {
-    if open {
-        // Grow the window first, then let the page animate into it.
-        place(app, geometry.open());
-        let _ = app.emit_to(LABEL, "notch-open", true);
-    } else {
-        // Let the page animate back, then shrink the window.
-        let _ = app.emit_to(LABEL, "notch-open", false);
-        let app2 = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(260));
-            let still_closed = STATE.lock().map(|s| !s.open).unwrap_or(true);
-            if still_closed {
-                place(&app2, geometry.closed());
-            }
-        });
-    }
+/// The window always has the open size; the page draws the closed or open
+/// shape inside it, so opening never resizes a window (which is what stutters).
+fn set_open(app: &AppHandle, open: bool, _geometry: Geometry) {
+    let _ = app.emit_to(LABEL, "notch-open", open);
+}
+
+/// Let clicks through everywhere except where the notch is actually drawn.
+fn set_click_through(app: &AppHandle, through: bool) {
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(w) = app2.get_webview_window(LABEL) {
+            let _ = w.set_ignore_cursor_events(through);
+        }
+    });
 }
 
 /// Create the notch window's behaviour and start watching the cursor.
@@ -201,14 +202,14 @@ pub fn setup(app: &AppHandle) {
     float_over_menu_bar(&window);
     if let Some(g) = geometry() {
         STATE.lock().unwrap().geometry = g;
-        let (x, y, w, h) = g.closed();
+        let (x, y, w, h) = g.open();
         let _ = window.set_size(LogicalSize::new(w, h));
         let _ = window.set_position(LogicalPosition::new(x, y));
     }
 
     let app = app.clone();
     std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(33));
         let Some(p) = cursor() else { continue };
         let mut s = STATE.lock().unwrap();
         if !s.enabled {
@@ -229,10 +230,17 @@ pub fn setup(app: &AppHandle) {
             let _ = app.emit_to(LABEL, "notch-look", look);
         }
 
+        // Only the drawn notch takes clicks; the rest of the window is see-through.
+        let wants_clicks = s.open || inside(p, closed, 3.0);
+        if wants_clicks == s.click_through {
+            s.click_through = !wants_clicks;
+            set_click_through(&app, !wants_clicks);
+        }
+
         if !s.open {
             if inside(p, closed, 2.0) {
                 let since = *s.hover_since.get_or_insert(now);
-                if now.duration_since(since) > Duration::from_millis(140) {
+                if now.duration_since(since) > Duration::from_millis(100) {
                     s.open = true;
                     s.hover_since = None;
                     s.outside_since = None;
@@ -274,7 +282,7 @@ pub fn set_enabled(app: &AppHandle, enabled: bool) {
     };
     if let Some(w) = app.get_webview_window(LABEL) {
         if enabled {
-            place(app, g.closed());
+            place(app, g.open());
             let _ = w.show();
             float_over_menu_bar(&w);
         } else {
@@ -303,4 +311,11 @@ pub fn peek(app: &AppHandle, millis: u64) {
 
 pub fn current_geometry() -> Geometry {
     STATE.lock().map(|s| s.geometry).unwrap_or_default()
+}
+
+/// A new width for the open notch (from the widget's settings).
+pub fn set_width(app: &AppHandle, width: f64) {
+    OPEN_W.store(width.clamp(520.0, 1100.0) as u32, std::sync::atomic::Ordering::Relaxed);
+    let g = STATE.lock().map(|s| s.geometry).unwrap_or_default();
+    place(app, g.open());
 }

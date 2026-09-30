@@ -292,6 +292,11 @@ fn notch_peek(app: AppHandle, millis: u64) {
 }
 
 #[tauri::command]
+fn notch_set_width(app: AppHandle, width: f64) {
+    notch::set_width(&app, width);
+}
+
+#[tauri::command]
 fn notch_geometry() -> notch::Geometry {
     notch::current_geometry()
 }
@@ -306,6 +311,12 @@ fn show_main(app: &AppHandle) {
 
 pub fn run() {
     let app = tauri::Builder::default()
+        // The notch's mirror is the only thing that may use the camera; macOS
+        // still asks the user once.
+        .on_permission_request(|webview, kind| match kind {
+            tauri::webview::PermissionKind::Camera if webview.label() == notch::LABEL => tauri::webview::PermissionResponse::Allow,
+            _ => tauri::webview::PermissionResponse::Default,
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -368,6 +379,7 @@ pub fn run() {
             notch_set_enabled,
             notch_peek,
             notch_geometry,
+            notch_set_width,
             cloudflare_snapshot,
             github_snapshot,
             github_discover,

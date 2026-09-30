@@ -50,9 +50,28 @@ export type MountedMascot = {
   destroy(): void;
 };
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Every living mascot on the page, drawn from one shared animation frame. */
+const living = new Set<(now: number) => void>();
+let loop = 0;
+function tick(now: number) {
+  for (const draw of living) draw(now);
+  loop = living.size ? requestAnimationFrame(tick) : 0;
+}
+function wake() {
+  if (!loop && living.size) loop = requestAnimationFrame(tick);
+}
+
+/** Ease out: quick to start, soft to land. */
+const settle = (k: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, k)), 3);
+
 /**
  * Put a living mascot inside `el`. It breathes, blinks and looks around, eases
  * between expressions, and holds still for people who asked for reduced motion.
+ *
+ * Frames update the attributes of the shapes already on the page instead of
+ * rewriting the SVG, and a mascot that is scrolled out of view isn't drawn.
  */
 export function mountMascot(
   el: HTMLElement,
@@ -75,39 +94,98 @@ export function mountMascot(
   const still =
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 100 100");
   svg.setAttribute("width", "100%");
   svg.setAttribute("height", "100%");
   svg.setAttribute("role", "img");
+  const group = document.createElementNS(SVG_NS, "g");
+  svg.appendChild(group);
   el.appendChild(svg);
 
-  let frame = 0;
-  const draw = (now: number) => {
-    const k = transition > 0 ? (now - changedAt) / transition : 1;
+  let shapes: SVGElement[] = [];
+  let kinds = "";
+  const set = (node: Element, name: string, value: string | number) => {
+    const v = String(value);
+    if (node.getAttribute(name) !== v) node.setAttribute(name, v);
+  };
+
+  const paint = (now: number) => {
+    const k = transition > 0 ? settle((now - changedAt) / transition) : 1;
     const ex = k >= 1 ? to : blendExpressions(from, to, k);
     const pose = still ? stillPose(ex) : mascotPose(ex, now, seed);
-    svg.innerHTML = geometryInnerSvg(mascotFrame(character, pose));
-    if (!still) frame = requestAnimationFrame(draw);
+    const g = mascotFrame(character, pose);
+    set(group, "transform", `rotate(${g.tilt} ${g.pivot.x} ${g.pivot.y})`);
+    const nextKinds = g.primitives.map((p) => p.kind).join(",");
+    if (nextKinds !== kinds) {
+      // The set of shapes changed (a blink, the Zs): build them afresh.
+      group.replaceChildren();
+      shapes = g.primitives.map((p) => {
+        const node = document.createElementNS(SVG_NS, p.kind === "ellipse" ? "ellipse" : "path");
+        if (p.kind === "stroke") {
+          node.setAttribute("fill", "none");
+          node.setAttribute("stroke-linecap", "round");
+          node.setAttribute("stroke-linejoin", "round");
+        }
+        group.appendChild(node);
+        return node;
+      });
+      kinds = nextKinds;
+    }
+    g.primitives.forEach((p, i) => {
+      const node = shapes[i];
+      if (p.kind === "ellipse") {
+        set(node, "cx", p.cx);
+        set(node, "cy", p.cy);
+        set(node, "rx", p.rx);
+        set(node, "ry", p.ry);
+        set(node, "fill", p.fill);
+      } else if (p.kind === "path") {
+        set(node, "d", p.d);
+        set(node, "fill", p.fill);
+      } else {
+        set(node, "d", p.d);
+        set(node, "stroke", p.stroke);
+        set(node, "stroke-width", p.width);
+      }
+    });
   };
-  frame = requestAnimationFrame(draw);
+
+  let visible = true;
+  const draw = (now: number) => {
+    if (visible) paint(now);
+  };
+  const seen =
+    typeof IntersectionObserver === "function"
+      ? new IntersectionObserver((entries) => {
+          visible = entries.some((e) => e.isIntersecting);
+        })
+      : null;
+  seen?.observe(el);
+
+  paint(performance.now());
+  if (!still) {
+    living.add(draw);
+    wake();
+  }
 
   return {
     setExpression(next) {
       const now = performance.now();
-      const k = transition > 0 ? (now - changedAt) / transition : 1;
+      const k = transition > 0 ? settle((now - changedAt) / transition) : 1;
       // Start from wherever the face is right now, not from the last target.
       from = k >= 1 ? to : blendExpressions(from, to, k);
       to = resolve(next);
       changedAt = now;
-      if (still) draw(now);
+      if (still) paint(now);
     },
     setCharacter(next) {
       character = { ...character, ...next };
-      if (still) draw(performance.now());
+      if (still) paint(performance.now());
     },
     destroy() {
-      cancelAnimationFrame(frame);
+      living.delete(draw);
+      seen?.disconnect();
       svg.remove();
     },
   };

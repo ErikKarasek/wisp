@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { Config } from "./config";
+import type { Config, NotchPrefs } from "./config";
 import type { CloudflareSnapshot } from "./model";
 
 export type SettingsContext = {
@@ -12,6 +12,8 @@ export type SettingsContext = {
   refreshCloud: () => Promise<void>;
   openStudio: () => void;
   setNotch: (on: boolean) => void;
+  /** Save and pass the notch's settings on to it. */
+  notchChanged: () => Promise<void>;
   toast: (text: string, ok?: boolean) => void;
 };
 
@@ -37,8 +39,30 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
   const repos = Array.from(new Set([...(ctx.cfg.githubRepos ?? []), ...(discovered ?? [])])).sort();
   const on = new Set(ctx.cfg.githubRepos ?? []);
 
+  const np = (key: keyof NotchPrefs, label: string) =>
+    `<label class="toggle"><input type="checkbox" data-np="${key}" ${ctx.cfg.notchPrefs[key] ? "checked" : ""}> ${label}</label>`;
   el.innerHTML = `
   <div class="settings">
+    <section class="notch-prefs">
+      <h3>Notch</h3>
+      <label class="toggle"><input type="checkbox" data-f="notch" ${ctx.cfg.notch ? "checked" : ""}>
+        Postavička v notchi (na Macu bez výřezu uprostřed horní lišty)</label>
+      <div class="prow"><span>Postavička</span><select data-np="bot">
+        <option value="">Bílá (výchozí)</option>
+        ${ctx.cfg.characters.map((c) => `<option value="${esc(c.id)}" ${ctx.cfg.notchPrefs.bot === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+      </select></div>
+      <div class="prow"><span>Šířka po rozbalení</span><div class="seg">${(["s", "m", "l"] as const)
+        .map((w) => `<button data-width="${w}" class="${ctx.cfg.notchPrefs.width === w ? "on" : ""}">${{ s: "Úzká", m: "Střední", l: "Široká" }[w]}</button>`)
+        .join("")}</div></div>
+      <div class="prow top"><span>Ukazovat</span><div class="checks">
+        ${np("showOthers", "Ostatní agenty a úlohy (pilulky)")}${np("showMusic", "Co hraje (Spotify, Hudba)")}
+        ${np("showCalendar", "Další události z kalendáře")}${np("showMirror", "Tlačítko zrcátka (kamera)")}
+      </div></div>
+      <div class="prow top"><span>Chování</span><div class="checks">
+        ${np("follow", "Oči sledují myš")}${np("dance", "Tancuje, když hraje hudba")}${np("peek", "Vykoukne, když se něco stane")}
+      </div></div>
+    </section>
+
     <section>
       <h3>Postavičky</h3>
       <p>Vyber, uprav nebo vytvoř postavičky. Konkrétní úloze ji dáš v jejím detailu tlačítkem „Postavička“.</p>
@@ -99,8 +123,6 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       <h3>Upozornění, zvuky a spouštění</h3>
       <label class="toggle"><input type="checkbox" data-f="notify" ${ctx.cfg.notifications ? "checked" : ""}>
         Upozornit, když něco selže nebo na mě čeká</label>
-      <label class="toggle"><input type="checkbox" data-f="notch" ${ctx.cfg.notch ? "checked" : ""}>
-        Postavička v notchi (na Macu bez výřezu uprostřed horní lišty)</label>
       <label class="toggle"><input type="checkbox" data-f="sounds" ${ctx.cfg.sounds ? "checked" : ""}>
         Zvuky, když něco doběhne, selže nebo šťouchnu do postavičky</label>
       <label class="toggle"><input type="checkbox" data-f="autostart" ${autostart ? "checked" : ""}>
@@ -255,6 +277,21 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
     await ctx.save();
     await again();
   });
+  el.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-np]").forEach((input) =>
+    input.addEventListener("change", async () => {
+      const key = input.dataset.np as keyof NotchPrefs;
+      const prefs = ctx.cfg.notchPrefs as Record<string, unknown>;
+      prefs[key] = input instanceof HTMLInputElement && input.type === "checkbox" ? input.checked : input.value || null;
+      await ctx.notchChanged();
+    }),
+  );
+  el.querySelectorAll<HTMLButtonElement>("[data-width]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      ctx.cfg.notchPrefs.width = b.dataset.width as NotchPrefs["width"];
+      el.querySelectorAll("[data-width]").forEach((x) => x.classList.toggle("on", x === b));
+      await ctx.notchChanged();
+    }),
+  );
   el.querySelector<HTMLInputElement>('[data-f="notch"]')!.addEventListener("change", async (e) => {
     ctx.cfg.notch = (e.target as HTMLInputElement).checked;
     ctx.setNotch(ctx.cfg.notch);
