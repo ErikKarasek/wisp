@@ -262,3 +262,14 @@ body.mini button { font: inherit; color: inherit; }
 .nt.asking .hero .big-wrap { display: none; }
 .nt .clip { color: #9aa0ab; font-size: 11.5px; }
 .nt .clip button, .nt .reply .copy { margin-left: 6px; border: 0; border-radius: 6px; padding: 1px 7px; background: rgba(255, 255, 255, .1); color: #cfd3da; font-size: 11px; cursor: pointer; }
+/* A macOS Focus is on: a quiet ring around the bot in the closed notch. */
+.nt.focus .lw .m.tiny { filter: drop-shadow(0 0 4px rgba(139, 156, 255, .9)); }
+/* Quick question and a dropped file get the whole card, like a permission prompt. */
+.nt.asking .hero .steps { min-width: 0; flex: 1; }
+.nt .clip { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.nt .clip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.nt .clip button { flex: none; }
+.nt .answer input { min-width: 0; }
+.nt .answer button { flex: none; white-space: nowrap; }
+.nt .who { display: flex; align-items: center; min-width: 0; }
+.nt .who .x { margin-left: auto; }

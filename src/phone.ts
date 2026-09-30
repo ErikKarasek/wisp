@@ -82,12 +82,26 @@ export function startPhone(ctx: PhoneContext) {
   });
 
   // The agents' answers on tasks you gave them (from the app or the phone) come to the phone.
-  let since = new Date().toISOString();
+  // Where forwarding got to survives a restart; a first start looks an hour back.
+  const KEY = "dispecink.phone.since";
+  const load = () => {
+    try {
+      return localStorage.getItem(KEY);
+    } catch {
+      return null;
+    }
+  };
+  let since = load() ?? new Date(Date.now() - 60 * 60_000).toISOString();
   const forward = async () => {
     const chat = ctx.chat();
     if (!chat) return;
     const from = since;
     since = new Date().toISOString();
+    try {
+      localStorage.setItem(KEY, since);
+    } catch {
+      /* private storage off: forwarding still works while the app runs */
+    }
     for (const c of ctx.companies()) {
       const all = await pc<Obj[] | { items: Obj[] }>("GET", `/companies/${c.company.id}/issues`).catch(() => []);
       const mine = (Array.isArray(all) ? all : all.items).filter(
@@ -105,4 +119,5 @@ export function startPhone(ctx: PhoneContext) {
     }
   };
   setInterval(() => void forward(), 60_000);
+  setTimeout(() => void forward(), 10_000);
 }

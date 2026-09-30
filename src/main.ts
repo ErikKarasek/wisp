@@ -96,6 +96,30 @@ async function loadLocal() {
   localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now)];
 }
 
+// ---------- Focus (a Shortcuts automation tells us) and messages from local scripts ----------
+
+let focus = false;
+/** What came in while Erik was focused; it waits until the Focus ends. */
+let held: string[] = [];
+void listen<boolean>("focus", (e) => {
+  focus = e.payload;
+  broadcast();
+  if (!focus && held.length) {
+    const text = `Během soustředění:\n${held.map((h) => `• ${h}`).join("\n")}`;
+    held = [];
+    toast(text.replace(/\n/g, " "));
+    if (cfg.telegram.enabled && cfg.telegram.chat) void invoke("telegram_send", { chat: cfg.telegram.chat, text }).catch(() => {});
+  }
+});
+void listen<{ title?: string; text?: string; urgent?: boolean }>("notify", async (e) => {
+  const title = e.payload.title ?? "Dispečink";
+  const text = (e.payload.text ?? "").slice(0, 3500);
+  if (focus && !e.payload.urgent) return void held.push(`${title}: ${text.split("\n")[0]}`);
+  toast(`${title}: ${text.split("\n")[0]}`);
+  if (cfg.notifications && (await isPermissionGranted().catch(() => false))) sendNotification({ title, body: text.split("\n").slice(0, 3).join(" ") });
+  if (cfg.telegram.enabled && cfg.telegram.chat) void invoke("telegram_send", { chat: cfg.telegram.chat, text: `${title}\n\n${text}` }).catch(() => {});
+});
+
 // ---------- safety nets ----------
 
 /** Tell Erik on the screen and, when Telegram is on, on the phone. */
@@ -699,6 +723,10 @@ async function runCommand(a: ActionSpec) {
   const c = a.command;
   if (c.type === "editJob") return jobForm(jobs.find((j) => j.label === c.label));
   if (c.type === "editAgent") return agentForm(c.companyId, c.agentId);
+  if (c.type === "cleanup") {
+    await invoke("run_cleanup");
+    return toast("Uklízím. Až to bude hotové, dám vědět, kolik se uvolnilo.", true);
+  }
   if (c.type === "chatAgent") {
     focusAgent(c.agentId);
     filter = "chat";
@@ -756,9 +784,14 @@ async function onChanges() {
   history.push(...entries);
   void invoke("history_append", { entries }).catch(() => {});
 
-  const alarming = changed.filter((i) => i.state === "bad" || i.state === "you");
+  let alarming = changed.filter((i) => i.state === "bad" || i.state === "you");
   // The notch peeks out with the most important change.
   const headline = alarming[0] ?? changed.find((i) => i.state === "done") ?? changed.find((i) => i.state === "run" && i.log && "agent" in i.log);
+  if (focus) {
+    for (const i of alarming.filter((x) => x.state !== "bad")) held.push(`${i.name} na tebe čeká`);
+    alarming = alarming.filter((x) => x.state === "bad");
+    if (!alarming.length) return;
+  }
   if (headline) {
     news = {
       id: headline.id,
@@ -886,6 +919,7 @@ function snapshot(): Snapshot {
     usage,
     gpt: gptQuota,
     gemini: geminiQuota,
+    focus,
   };
 }
 let newsAt = 0;

@@ -94,6 +94,7 @@ pub fn ask_quick(question: &str, context: &str) -> Result<String, String> {
 
 /// What is on the clipboard as text (at most 8000 characters).
 pub fn clipboard() -> String {
-    let out = Command::new("/usr/bin/pbpaste").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    // Without a UTF-8 locale (an app has none) pbpaste turns š and ř into garbage.
+    let out = Command::new("/usr/bin/pbpaste").env("LANG", "en_US.UTF-8").env("LC_ALL", "en_US.UTF-8").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
     out.chars().take(8000).collect()
 }

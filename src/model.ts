@@ -29,7 +29,8 @@ export type Command =
   | { type: "editAgent"; companyId: string; agentId: string }
   | { type: "chatAgent"; agentId: string }
   | { type: "editRoutine"; companyId: string; routineId?: string }
-  | { type: "open"; target: string };
+  | { type: "open"; target: string }
+  | { type: "cleanup" };
 
 export type ActionSpec = {
   label: string;
@@ -141,6 +142,8 @@ export type Job = {
 
 const JOBS: Record<string, { name: string; doing: string }> = {
   "com.erikkarasek.devlog": { name: "Devlog", doing: "V noci sepíše, co se za den commitlo" },
+  "com.erikkarasek.hlidac-prace": { name: "Hlídač neuložené práce", doing: "Každý večer zkontroluje, co v ~/Developer není na GitHubu" },
+  "com.erikkarasek.mac-uklid": { name: "Úklid Macu", doing: "V neděli najde, co zbytečně zabírá místo; uklidí až na tvoje tlačítko" },
   "com.erikkarasek.gemini-deps": { name: "Hlídač závislostí", doing: "Každé úterý projde závislosti všech projektů a hlásí zranitelnosti" },
   "com.erikkarasek.gemini-repos": { name: "Přehled repozitářů", doing: "V pátek odpoledne shrne pull requesty, CI a staré větve na GitHubu" },
   "com.erikkarasek.gemini-portfolio": { name: "Kontrola portfolia", doing: "Každou středu projde erikkarasek.cz: odkazy, texty, chybějící projekty" },
@@ -230,6 +233,14 @@ export function jobItem(j: Job, now = Date.now()): Item {
     actions.push({ label: "Zapnout", primary: true, command: { type: "job", label: j.label, action: "resume" } });
   }
   if (j.logPath) actions.push({ label: "Otevřít log", command: { type: "open", target: j.logPath } });
+  if (j.label === "com.erikkarasek.mac-uklid") {
+    actions.unshift({
+      label: "Uklidit",
+      primary: true,
+      confirm: "Přesune nalezené složky do koše a vyčistí cache npm, pnpm a Homebrew. Pokračovat?",
+      command: { type: "cleanup" },
+    });
+  }
   if (j.managed) actions.push({ label: "Upravit", command: { type: "editJob", label: j.label } });
 
   const facts: [string, string][] = [

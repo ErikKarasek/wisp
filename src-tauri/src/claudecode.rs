@@ -215,6 +215,16 @@ pub fn start(app: &AppHandle) {
                         respond(req, out);
                     });
                 }
+                // Local scripts (the watchers in ~/Developer/hlidaci): a message for Erik.
+                "/notify" => {
+                    let _ = app.emit_to("main", "notify", v.clone());
+                    respond(req, String::new());
+                }
+                // A Shortcuts automation when a macOS Focus turns on or off.
+                "/focus/on" | "/focus/off" => {
+                    let _ = app.emit("focus", req.url() == "/focus/on");
+                    respond(req, String::new());
+                }
                 _ => respond(req, String::new()),
             }
         }

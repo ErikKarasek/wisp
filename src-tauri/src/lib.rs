@@ -352,6 +352,19 @@ async fn ask_quick(question: String, context: String) -> Result<String, String> 
     blocking(move || ask::ask_quick(&question, &context)).await?
 }
 
+/// The Mac cleanup, only on Erik's button: ~/Developer/hlidaci/uklid.py --apply,
+/// which reports back through /notify when it's done.
+#[tauri::command]
+fn run_cleanup() -> Result<(), String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    std::process::Command::new("/usr/bin/python3")
+        .arg(format!("{home}/Developer/hlidaci/uklid.py"))
+        .arg("--apply")
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn gemini_usage() -> Result<Vec<usage::AgyWindow>, String> {
     blocking(usage::gemini_usage).await?
@@ -517,6 +530,7 @@ pub fn run() {
             ask_file,
             ask_report,
             ask_quick,
+            run_cleanup,
             heal_codex,
             signing_cert_days,
             github_prs,

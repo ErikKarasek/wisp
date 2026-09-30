@@ -55,6 +55,8 @@ export type Snapshot = {
   usage: ClaudeUsage | null;
   gpt: QuotaWindow[];
   gemini: AgyWindow[];
+  /** A macOS Focus is on: the bot works quietly. */
+  focus: boolean;
 };
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];

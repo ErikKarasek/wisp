@@ -394,6 +394,7 @@ export async function startNotch() {
     const name = path.split("/").pop() ?? path;
     fileAsk = { path, name };
     quickAsk = false;
+    root.classList.add("asking");
     permShown = null;
     steps.innerHTML = `<small class="who">${escHtml(name)}<button class="x" title="Zavřít">✕</button></small>
       <div class="step past wrap reply">Na co se chceš zeptat? Odpoví Gemini z tvého AI Pro.</div>
@@ -438,12 +439,13 @@ export async function startNotch() {
     quickAsk = true;
     fileAsk = null;
     permShown = null;
+    root.classList.add("asking");
     let clip = e.payload.trim();
     const preview = clip.replace(/\s+/g, " ").slice(0, 90);
     steps.innerHTML = `<small class="who">Rychlá otázka · Gemini<button class="x" title="Zavřít (Esc)">✕</button></small>
-      ${clip ? `<div class="step past clip">Zkopírováno: „${escHtml(preview)}${clip.length > 90 ? "…" : ""}“ <button class="drop-clip">nepoužít</button></div>` : ""}
+      ${clip ? `<div class="step past clip"><span>Zkopírováno: „${escHtml(preview)}${clip.length > 90 ? "…" : ""}“</span><button class="drop-clip">nepoužít</button></div>` : ""}
       <div class="step past wrap reply"></div>
-      <div class="answer"><input type="text" placeholder="${clip ? "Třeba: přelož do angličtiny, vysvětli, shrň" : "Na co se chceš zeptat?"}" spellcheck="false"><button>Zeptat se</button></div>`;
+      <div class="answer"><input type="text" placeholder="${clip ? "Třeba: přelož, vysvětli, shrň" : "Na co se chceš zeptat?"}" spellcheck="false"><button>Zeptat</button></div>`;
     const input = steps.querySelector("input") as HTMLInputElement;
     const go = steps.querySelector(".answer button") as HTMLButtonElement;
     const reply = steps.querySelector(".reply") as HTMLElement;
@@ -488,7 +490,8 @@ export async function startNotch() {
   };
   const draw = (s: Snapshot) => {
     lastSnap = s;
-    base = faceFor(worst(s));
+    root.classList.toggle("focus", !!s.focus);
+    base = s.focus && worst(s) !== "bad" ? "thriving" : faceFor(worst(s));
     face();
     const bad = s.items.filter((i) => i.state === "bad").length;
     const st = $(".st");
@@ -561,7 +564,7 @@ export async function startNotch() {
     }
 
     // Claude Code asking for permission comes first, then a dropped file.
-    root.classList.toggle("asking", perms.length > 0);
+    root.classList.toggle("asking", perms.length > 0 || !!fileAsk || quickAsk);
     if (perms.length) {
       renderPerm();
       return renderCrew(s, working);
