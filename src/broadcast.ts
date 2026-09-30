@@ -22,7 +22,10 @@ export type MiniItem = {
   when: string;
   where: string;
   character: Partial<MascotCharacter>;
+  ask?: { companyId: string; agentId: string; issueId: string; title: string };
 };
+
+export type ClaudeUsage = { session?: { percent: number; resets: string }; week?: { percent: number; resets: string } };
 
 export type Snapshot = {
   items: MiniItem[];
@@ -32,4 +35,5 @@ export type Snapshot = {
   at: number;
   /** Agents working right now and their last few steps. */
   live: { id: string; name: string; character: Partial<MascotCharacter>; lines: string[] }[];
+  usage: ClaudeUsage | null;
 };

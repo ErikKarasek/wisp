@@ -45,6 +45,8 @@ export type Item = {
   doing: string;
   /** What it is for, when that differs from what it is doing right now. */
   about?: string;
+  /** An agent waiting on Erik: the task it is stuck on, so he can answer it. */
+  ask?: { companyId: string; agentId: string; issueId: string; title: string };
   when: string;
   state: State;
   chip?: string;
@@ -266,6 +268,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
   let state: State;
   let chip: string | undefined;
   let bubble: string | undefined;
+  let ask: Item["ask"];
   let doing = a.title ?? "Agent";
 
   if (paused) {
@@ -282,6 +285,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
     state = "you";
     bubble = "?";
     doing = `${blocked.identifier}: ${blocked.title}`;
+    ask = { companyId: a.companyId, agentId: a.id, issueId: blocked.id, title: `${blocked.identifier}: ${blocked.title}` };
   } else if (active) {
     state = "ok";
     chip = "má úkol";
@@ -312,7 +316,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
   }
   actions.push({ label: "Upravit", command: { type: "editAgent", companyId: a.companyId, agentId: a.id } });
 
-  const facts: [string, string][] = [["Role", a.title ?? "–"]];
+  const facts: [string, string][] = [["Role", a.title ?? "–"], ["Motor", a.adapterType === "codex_local" ? "ChatGPT" : "Claude"]];
   if (a.adapterConfig?.model) facts.push(["Model", a.adapterConfig.model]);
   if (spent != null) facts.push(["Tento měsíc", budget ? `$${spent.toFixed(2)} z $${budget.toFixed(0)}` : `$${spent.toFixed(2)}`]);
 
@@ -330,6 +334,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, now: number): Item {
     character: characterFor(`agent:${a.name}`),
     facts: tasks ? [...facts, ["Úkoly", tasks]] : facts,
     log: { agent: { companyId: a.companyId, agentId: a.id } },
+    ask,
     actions,
   };
 }

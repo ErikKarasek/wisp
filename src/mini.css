@@ -204,3 +204,22 @@ body.mini button { font: inherit; color: inherit; }
 
 @media (prefers-reduced-motion: reduce) { .nt, .nt .panes, .nt .side .open-only, .nt .side .closed-only { transition: none; } .nt .hop, .nt .dizzy, .nt.dancing .m.tiny, .nt.dancing .m.big { animation: none; } }
 .nt .card.mirror[hidden] { display: none; }
+
+/* Claude's limit as a small ring beside the icons */
+.nt .ring { position: relative; width: 26px; height: 26px; display: grid; place-items: center; margin-right: 2px; }
+.nt .ring[hidden] { display: none; }
+.nt .ring svg { position: absolute; inset: 0; width: 26px; height: 26px; transform: rotate(-90deg); fill: none; stroke-width: 3.5; stroke: none; }
+.nt .ring .track { stroke: rgba(255, 255, 255, .12); }
+.nt .ring .fill { stroke: #d97757; stroke-linecap: round; stroke-dasharray: 0 88; transition: stroke-dasharray .6s; }
+.nt .ring.hot .fill { stroke: #e0605a; }
+.nt .ring b { font-size: 8.5px; color: #cfd3da; font-variant-numeric: tabular-nums; }
+
+/* longer text: the morning summary, an agent's question */
+.nt .step.past.wrap { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; line-height: 1.35; }
+.nt .step.now.big-text.small { font-size: 14px; }
+.nt .answer { display: flex; gap: 6px; margin-top: 4px; }
+.nt .answer input { flex: 1; min-width: 0; background: #111215; border: 1px solid rgba(255, 255, 255, .12); border-radius: 9px; color: #fff;
+  font: inherit; font-size: 12.5px; padding: 6px 9px; -webkit-user-select: text; user-select: text; }
+.nt .answer input:focus { outline: none; border-color: #8b9cff; }
+.nt .answer button { border: 0; border-radius: 9px; padding: 0 12px; background: #8b9cff; color: #11131c; font-weight: 600; font-size: 12px; cursor: pointer; }
+.nt .answer button:disabled { opacity: .5; }

@@ -368,3 +368,28 @@ button { font: inherit; color: inherit; }
 .notch-prefs .seg button { border: 1px solid var(--line); background: var(--panel-2); border-radius: 7px; font-size: 12px; padding: 4px 10px; color: var(--muted); }
 .notch-prefs .seg button.on { border-color: var(--accent); color: var(--text); }
 .notch-prefs .seg { display: flex; gap: 4px; }
+
+/* ---------- reviews ---------- */
+#reviews[hidden] { display: none; }
+.reviews { max-width: 980px; display: grid; gap: 8px; }
+.pr { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.pr.on { border-color: var(--accent); }
+.pr-head { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; gap: 12px; align-items: center; text-align: left;
+  background: none; border: 0; padding: 10px 12px; }
+.pr-head code { font: 11.5px ui-monospace, Menlo, monospace; color: var(--faint); }
+.pr-head b { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-head .who, .pr-head .size { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.pr .add { color: #8fdcae; font-style: normal; } .pr .del { color: #f3a19c; font-style: normal; }
+.pr-body { border-top: 1px solid var(--line); padding: 12px; display: grid; gap: 10px; background: var(--side); }
+.pr-body .desc { white-space: pre-wrap; font-size: 13px; color: var(--muted); max-height: 140px; overflow-y: auto; }
+.pr-body .facts { display: flex; gap: 16px; font-size: 12px; color: var(--faint); }
+.pr-body .facts b { color: var(--muted); font-weight: 500; }
+.pr-body details { background: #0f1013; border: 1px solid var(--line); border-radius: 8px; }
+.pr-body summary { cursor: pointer; padding: 6px 10px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
+.pr-body pre.diff { margin: 0; padding: 6px 10px 10px; font: 11.5px/1.5 ui-monospace, Menlo, monospace; color: #9aa1ad; white-space: pre; overflow-x: auto;
+  max-height: 360px; overflow-y: auto; -webkit-user-select: text; user-select: text; }
+.pr-body .diff .add { color: #8fdcae; background: rgba(79, 191, 125, .08); display: inline-block; min-width: 100%; }
+.pr-body .diff .del { color: #f3a19c; background: rgba(224, 96, 90, .08); display: inline-block; min-width: 100%; }
+.pr-body .diff .hunk { color: #8b9cff; }
+.empty-state { display: grid; gap: 4px; padding: 30px 0; color: var(--muted); font-size: 13px; }
+.empty-state b { color: var(--text); font-size: 15px; }

@@ -4,6 +4,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
 type Obj = Record<string, any>;
+type Engine = "claude_local" | "codex_local";
+
+const CHATGPT_MODELS = [
+  { id: "gpt-6-luna", label: "GPT-6 Luna (výchozí v Codexu)" },
+  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+];
 
 const ROLES: [string, string][] = [
   ["general", "Obecný"],
@@ -92,13 +99,17 @@ export async function openAgentForm(o: AgentFormOptions) {
 
   let agent: Obj | null = null;
   let instructions = "";
-  let models: { id: string; label: string }[] = [];
+  type Model = { id: string; label: string };
+  const models: Record<Engine, Model[]> = { claude_local: [], codex_local: [] };
   let skills: Obj[] = [];
   try {
-    [models, skills] = await Promise.all([
+    [models.claude_local, skills] = await Promise.all([
       request(`GET`, `/companies/${o.companyId}/adapters/claude_local/models`).catch(() => []),
       request(`GET`, `/companies/${o.companyId}/skills`).catch(() => []),
     ]);
+    // Codex signed in with a ChatGPT account accepts only these (tried one by one);
+    // the rest of Paperclip's list needs an OpenAI API key.
+    models.codex_local = CHATGPT_MODELS;
     if (o.agentId) {
       agent = await request("GET", `/agents/${o.agentId}`);
       const file = await request("GET", `/agents/${o.agentId}/instructions-bundle/file?path=AGENTS.md`).catch(() => null);
@@ -110,8 +121,12 @@ export async function openAgentForm(o: AgentFormOptions) {
   }
 
   const cfg = agent?.adapterConfig ?? {};
-  const model = cfg.model ?? "claude-sonnet-5";
-  if (!models.some((m) => m.id === model)) models.unshift({ id: model, label: model });
+  let engine: Engine = agent?.adapterType === "codex_local" ? "codex_local" : "claude_local";
+  const startEngine = engine;
+  const model = cfg.model ?? (engine === "codex_local" ? models.codex_local[0]?.id : "claude-sonnet-5") ?? "";
+  if (model && !models[engine].some((m) => m.id === model)) models[engine].unshift({ id: model, label: model });
+  const modelOptions = (e: Engine, current: string) =>
+    models[e].map((m) => `<option value="${esc(m.id)}" ${m.id === current ? "selected" : ""}>${esc(m.label)}</option>`).join("");
   const heartbeat = agent?.runtimeConfig?.heartbeat ?? {};
   const chosen = new Set<string>(cfg.paperclipSkillSync?.desiredSkills ?? ["paperclip"]);
   // Stored keys are short ("paperclip", "company/<id>/<slug>"); the list gives long ones.
@@ -127,7 +142,11 @@ export async function openAgentForm(o: AgentFormOptions) {
     <label class="row">Nadřízený<select data-f="reportsTo"><option value="">nikdo</option>${others
       .map((a) => `<option value="${a.id}" ${agent?.reportsTo === a.id ? "selected" : ""}>${esc(a.name)}</option>`)
       .join("")}</select></label>
-    <label class="row">Model<select data-f="model">${models.map((m) => `<option value="${esc(m.id)}" ${m.id === model ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></label>
+    <label class="row">Motor<select data-f="engine">
+      <option value="claude_local" ${engine === "claude_local" ? "selected" : ""}>Claude (tvoje předplatné Claude)</option>
+      <option value="codex_local" ${engine === "codex_local" ? "selected" : ""}>ChatGPT (tvoje předplatné ChatGPT, přes Codex)</option>
+    </select></label>
+    <label class="row">Model<select data-f="model">${modelOptions(engine, model)}</select></label>
     <label class="row">Rozpočet<span class="inline"><input type="number" data-f="budget" min="0" step="1" value="${Math.round((agent?.budgetMonthlyCents ?? 500) / 100)}"> $ měsíčně, pak se sám pozastaví</span></label>
     <div class="row"><span>Probouzení</span><span class="inline"><label class="check"><input type="checkbox" data-f="hb" ${heartbeat.enabled ? "checked" : ""}> samo každých</label>
       <input type="number" data-f="hbMin" min="5" step="5" value="${Math.max(5, Math.round((heartbeat.intervalSec ?? 3600) / 60))}"> min <small>jinak jen když dostane úkol</small></span></div>
@@ -146,6 +165,10 @@ export async function openAgentForm(o: AgentFormOptions) {
       <button class="btn primary" data-act="save">${agent ? "Uložit" : "Založit agenta"}</button>
     </div>`;
   const q = <T extends HTMLElement>(s: string) => form.querySelector(s) as T;
+  q('[data-f="engine"]').addEventListener("change", (e) => {
+    engine = (e.target as HTMLSelectElement).value as Engine;
+    q<HTMLSelectElement>('[data-f="model"]').innerHTML = modelOptions(engine, engine === startEngine ? model : models[engine][0]?.id ?? "");
+  });
   q<HTMLTextAreaElement>('[data-f="instructions"]').value = agent ? instructions : starterInstructions("", "");
   if (!agent) {
     // Keep the starter text in step with the name until the user edits it.
@@ -175,8 +198,15 @@ export async function openAgentForm(o: AgentFormOptions) {
         return;
       }
       try {
-        await request("DELETE", `/agents/${agent.id}`);
-        o.toast(`${agent.name} smazaný.`, true);
+        try {
+          await request("DELETE", `/agents/${agent.id}`);
+          o.toast(`${agent.name} smazaný.`, true);
+        } catch {
+          // An agent that has already run can't be deleted (its runs and costs
+          // keep it); ending it removes it from the company all the same.
+          await request("POST", `/agents/${agent.id}/terminate`, {});
+          o.toast(`${agent.name} ukončený a odebraný.`, true);
+        }
         o.changed();
         close();
       } catch (err) {
@@ -232,8 +262,14 @@ export async function openAgentForm(o: AgentFormOptions) {
     q(".note").textContent = "";
     try {
       if (agent) {
-        // adapterConfig is merged key by key, so env and the rest stay as they are.
-        await request("PATCH", `/agents/${agent.id}`, { ...common, adapterConfig: { model, paperclipSkillSync: { desiredSkills } } });
+        if (engine !== startEngine) {
+          // A new engine: Paperclip starts the adapter config afresh but keeps env.
+          // Everything else (instructions path, env) is carried over explicitly.
+          await request("PATCH", `/agents/${agent.id}`, { ...common, adapterType: engine, adapterConfig: { ...cfg, model, paperclipSkillSync: { desiredSkills } } });
+        } else {
+          // adapterConfig is merged key by key, so env and the rest stay as they are.
+          await request("PATCH", `/agents/${agent.id}`, { ...common, adapterConfig: { model, paperclipSkillSync: { desiredSkills } } });
+        }
         if (text !== instructions) await request("PUT", `/agents/${agent.id}/instructions-bundle/file`, { path: "AGENTS.md", content: text });
         await setToken(agent.id, name);
         o.toast(`${name} uložený.`, true);
@@ -242,7 +278,7 @@ export async function openAgentForm(o: AgentFormOptions) {
       } else {
         const made = await request<Obj>("POST", `/companies/${o.companyId}/agents`, {
           ...common,
-          adapterType: "claude_local",
+          adapterType: engine,
           adapterConfig: {
             model,
             paperclipSkillSync: { desiredSkills },

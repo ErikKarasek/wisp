@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { openAgentForm } from "./agentform";
-import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot } from "./broadcast";
+import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type Snapshot } from "./broadcast";
+import { renderReviews } from "./reviews";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { fullCharacter, loadConfig, NOTCH_WIDTH, saveConfig, type Config } from "./config";
@@ -51,6 +52,8 @@ let filter = "all";
 let selected: string | null = null;
 let jobs: Job[] = [];
 let paperclip: PaperclipSnapshot | null = null;
+let usage: ClaudeUsage | null = null;
+let prCount = 0;
 /** The last item that changed in a way worth showing in the notch. */
 let news: MiniItem | null = null;
 
@@ -80,6 +83,9 @@ async function loadCloud() {
   ]);
   cloudflare = cf;
   cloudGroups = [cloudflareGroup(cf, now), gh && githubGroup(gh, now)].filter((g): g is Group => !!g);
+  if (cfg.githubRepos?.length) {
+    prCount = (await invoke<unknown[]>("github_prs", { repos: cfg.githubRepos }).catch(() => [])).length;
+  }
 }
 
 /** Apply the user's names and characters on top of what the sources report. */
@@ -205,14 +211,17 @@ function renderMain() {
   const main = $("main");
   const settings = $("settings");
   const tasks = $("tasks");
-  if (filter === "settings" || filter === "tasks") {
+  const reviews = $("reviews");
+  if (filter === "settings" || filter === "tasks" || filter === "reviews") {
     groupEls.forEach((s) => (s.hidden = true));
     settings.hidden = filter !== "settings";
     tasks.hidden = filter !== "tasks";
+    reviews.hidden = filter !== "reviews";
     return;
   }
   settings.hidden = true;
   tasks.hidden = true;
+  reviews.hidden = true;
   const seen = new Set<string>();
   groups.forEach((g, gi) => {
     let sec = groupEls.get(g.id);
@@ -305,12 +314,25 @@ function renderSide() {
   const btn = ([id, label, count]: [string, string, number | null]) =>
     `<button data-f="${esc(id)}" class="${filter === id ? "on" : ""}">${esc(label)}${count == null ? "" : `<span>${count}</span>`}</button>`;
 
+  const claude =
+    usage?.session || usage?.week
+      ? `<h6>Limit Claude</h6>` +
+        [["relace", usage.session], ["týden", usage.week]]
+          .filter(([, w]) => w)
+          .map(([label, w]) => {
+            const win = w as { percent: number; resets: string };
+            return `<div class="gauge${win.percent >= 85 ? " hot" : ""}" title="obnoví se ${esc(win.resets)}"><div class="bar"><i style="width:${win.percent}%"></i></div>
+              <small>${label}: ${win.percent} %</small></div>`;
+          })
+          .join("")
+      : "";
   const neurons = cloudflare ? cloudflareNeurons(cloudflare) : null;
   const gauge =
-    neurons == null
+    claude +
+    (neurons == null
       ? ""
       : `<h6>Workers AI dnes</h6><div class="gauge${neurons >= NEURONS_PER_DAY * 0.9 ? " hot" : ""}"><div class="bar"><i style="width:${Math.min(100, (neurons / NEURONS_PER_DAY) * 100).toFixed(1)}%"></i></div>
-         <small>${Math.round(neurons).toLocaleString("cs-CZ")} z ${NEURONS_PER_DAY.toLocaleString("cs-CZ")} neuronů</small></div>`;
+         <small>${Math.round(neurons).toLocaleString("cs-CZ")} z ${NEURONS_PER_DAY.toLocaleString("cs-CZ")} neuronů</small></div>`);
 
   const side = $("side");
   side.innerHTML =
@@ -320,13 +342,14 @@ function renderSide() {
     gauge +
     `<h6>Tvoje</h6>` +
     btn(["tasks", "Úkoly", paperclip?.online ? paperclip.companies.reduce((n, c) => n + c.issues.length, 0) : null]) +
+    btn(["reviews", "Ke kontrole", prCount]) +
     `<button data-act="studio">Postavičky<span>${cfg.characters.length}</span></button>` +
     `<button data-act="newJob">Nová úloha</button>` +
     btn(["settings", "Nastavení", null]);
   side.querySelectorAll<HTMLButtonElement>("button[data-f]").forEach((b) =>
     b.addEventListener("click", () => {
       filter = b.dataset.f!;
-      if (filter === "settings" || filter === "tasks") selected = null;
+      if (filter === "settings" || filter === "tasks" || filter === "reviews") selected = null;
       $("main").scrollTop = 0;
       render();
     }),
@@ -746,6 +769,7 @@ function snapshot(): Snapshot {
     when: i.when,
     where: groups.find((g) => g.items.includes(i))?.title ?? "",
     character: i.character,
+    ask: i.ask,
   });
   const n = (states: State[]) => items.filter((i) => states.includes(i.state)).length;
   return {
@@ -754,6 +778,7 @@ function snapshot(): Snapshot {
     news,
     at: newsAt,
     live: liveNow,
+    usage,
   };
 }
 let newsAt = 0;
@@ -787,6 +812,8 @@ async function updateTray() {
   const lines = attention.slice(0, 8).map((i) => `${i.name}: ${i.chip ?? STATES[i.state].chip}`);
   const neurons = cloudflare ? cloudflareNeurons(cloudflare) : null;
   if (neurons != null && neurons >= NEURONS_PER_DAY * 0.9) lines.push(`Workers AI: ${Math.round((neurons / NEURONS_PER_DAY) * 100)} % denního limitu`);
+  if (usage?.session && usage.session.percent >= 85) lines.push(`Claude: ${usage.session.percent} % relace, obnoví se ${usage.session.resets}`);
+  if (prCount) lines.push(`Ke kontrole: ${prCount} PR`);
   if (!lines.length) lines.push("Všechno v pořádku");
   const tooltip = attention.length ? `Dispečink: ${attention.length} potřebuje pozornost` : "Dispečink: všechno v pořádku";
   const sig = `${face}|${lines.join("|")}`;
@@ -842,10 +869,16 @@ function render() {
   if (filter !== "settings") settingsShown = false;
   if (filter === "tasks" && !tasksShown) showTasks();
   if (filter !== "tasks") tasksShown = false;
+  if (filter === "reviews" && !reviewsShown) {
+    reviewsShown = true;
+    void renderReviews($("reviews"), cfg.githubRepos ?? [], toast, () => void refresh(true));
+  }
+  if (filter !== "reviews") reviewsShown = false;
 }
 
 let settingsShown = false;
 let tasksShown = false;
+let reviewsShown = false;
 function showTasks() {
   tasksShown = true;
   if (!paperclip?.online) {
@@ -869,6 +902,7 @@ async function showSettings() {
     refreshCloud: () => refreshCloud(),
     openStudio: () => studio(),
     setNotch: (on: boolean) => void invoke("notch_set_enabled", { enabled: on }),
+    morningNow: () => void morning(true),
     notchChanged: async () => {
       await saveConfig(cfg);
       await invoke("notch_set_width", { width: NOTCH_WIDTH[cfg.notchPrefs.width] });
@@ -919,6 +953,56 @@ async function refreshCloud() {
   }
 }
 
+// ---------- morning summary ----------
+
+async function morning(force = false) {
+  const m = cfg.morning;
+  const now = new Date();
+  const today = now.toDateString();
+  if (!force && (!m.enabled || now.getHours() < m.hour || m.last === today)) return;
+  m.last = today;
+  await saveConfig(cfg);
+
+  // Since yesterday evening: what finished and what failed.
+  const since = new Date(now);
+  since.setDate(since.getDate() - 1);
+  since.setHours(20, 0, 0, 0);
+  const night = history.filter((h) => h.at >= since.getTime());
+  const done = new Set(night.filter((h) => h.state === "done").map((h) => h.name));
+  const failed = new Set(night.filter((h) => h.state === "bad").map((h) => h.name));
+  const waiting = allItems().filter((i) => i.state === "you" || i.state === "bad");
+  let events: { title: string; startMs: number; allDay: boolean }[] = [];
+  if ((await invoke<string>("calendar_status").catch(() => "none")) === "granted") {
+    const start = new Date(today).getTime();
+    events = await invoke<typeof events>("calendar_events", { fromMs: start, toMs: start + 86_400_000 }).catch(() => []);
+  }
+  const hm = (ms: number) => new Date(ms).toLocaleTimeString("cs-CZ", { hour: "numeric", minute: "2-digit" });
+  const parts: string[] = [];
+  parts.push(done.size ? `Přes noc doběhlo: ${[...done].join(", ")}.` : "Přes noc se nic nedělo.");
+  if (failed.size) parts.push(`Selhalo: ${[...failed].join(", ")}.`);
+  if (waiting.length) parts.push(`Čeká na tebe: ${waiting.map((i) => i.name).join(", ")}.`);
+  parts.push(events.length ? `Dnes: ${events.slice(0, 3).map((e) => `${e.allDay ? "" : hm(e.startMs) + " "}${e.title}`).join(", ")}.` : "V kalendáři dnes nic.");
+  if (usage?.week) parts.push(`Claude tento týden ${usage.week.percent} %.`);
+  if (prCount) parts.push(`Ke kontrole ${prCount} PR.`);
+
+  news = {
+    id: "morning",
+    name: "Dobré ráno",
+    state: failed.size || waiting.length ? "you" : "ok",
+    chip: failed.size ? `${failed.size} selhalo` : waiting.length ? `${waiting.length} čeká na tebe` : "všechno v pořádku",
+    doing: parts.join(" "),
+    when: "",
+    where: "",
+    character: {},
+  };
+  newsAt = Date.now();
+  broadcast();
+  if (cfg.notch) void invoke("notch_peek", { millis: 12_000 });
+  if (m.telegram && cfg.telegram.enabled && cfg.telegram.chat) {
+    void invoke("telegram_send", { chat: cfg.telegram.chat, text: `Dobré ráno\n${parts.join("\n")}` }).catch(() => {});
+  }
+}
+
 async function start() {
   cfg = await loadConfig();
   history = await invoke<HistoryEntry[]>("history_load").catch(() => []);
@@ -937,6 +1021,14 @@ async function start() {
       })
       .catch(() => {});
   }
+  const loadUsage = async () => {
+    usage = await invoke<ClaudeUsage>("claude_usage").catch(() => usage);
+    render();
+    broadcast();
+  };
+  void loadUsage();
+  setInterval(() => void loadUsage(), 5 * 60_000);
+  setInterval(() => void morning(), 60_000);
   setInterval(() => void refresh(false), LOCAL_MS);
   setInterval(() => void refresh(true), CLOUD_MS);
 }

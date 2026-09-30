@@ -7,6 +7,7 @@ mod notch;
 mod paperclip;
 mod store;
 mod telegram;
+mod usage;
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -287,6 +288,26 @@ fn notch_set_close_delay(millis: u64) {
 }
 
 #[tauri::command]
+async fn claude_usage() -> Result<usage::Usage, String> {
+    blocking(usage::claude_usage).await?
+}
+
+#[tauri::command]
+async fn github_prs(repos: Vec<String>) -> Result<Vec<serde_json::Value>, String> {
+    blocking(move || github::pull_requests(&repos)).await
+}
+
+#[tauri::command]
+async fn github_pr_diff(repo: String, number: u64) -> Result<String, String> {
+    blocking(move || github::pr_diff(&repo, number)).await?
+}
+
+#[tauri::command]
+async fn github_pr_action(repo: String, number: u64, action: String) -> Result<(), String> {
+    blocking(move || github::pr_action(&repo, number, &action)).await?
+}
+
+#[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
 }
@@ -381,6 +402,10 @@ pub fn run() {
             paperclip_request,
             show_main_window,
             quit_app,
+            claude_usage,
+            github_prs,
+            github_pr_diff,
+            github_pr_action,
             media_now,
             media_control,
             calendar_status,

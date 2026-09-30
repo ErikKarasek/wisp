@@ -153,6 +153,7 @@ export async function startNotch() {
         <div class="side r">
           <span class="closed-only rw"><span class="lstep"></span><span class="st"></span></span>
           <div class="open-only icons">
+            <span class="ring" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
             <button data-act="mirror" title="Kamera">${CAMERA}</button>
             <button data-act="settings" title="Nastavení notche">${GEAR}</button>
           </div>
@@ -286,6 +287,23 @@ export async function startNotch() {
       $(".lstep").textContent = working.lines.at(-1) ?? "";
     }
     const fresh = s.news && Date.now() - s.at < 15_000 ? s.news : null;
+    // Claude's limit as a ring: the session, with the week in the tooltip.
+    const ring = $(".ring");
+    ring.hidden = !s.usage?.session;
+    if (s.usage?.session) {
+      const pct = s.usage.session.percent;
+      ring.querySelector<SVGCircleElement>(".fill")!.style.strokeDasharray = `${(pct / 100) * 88} 88`;
+      ring.classList.toggle("hot", pct >= 85);
+      (ring.querySelector("b") as HTMLElement).textContent = `${pct}`;
+      ring.title = `Claude: ${pct} % relace (obnoví se ${s.usage.session.resets})` + (s.usage.week ? `\nTýden: ${s.usage.week.percent} % (obnoví se ${s.usage.week.resets})` : "");
+    }
+
+    const asking = !working && !(fresh && fresh.id === "morning") ? s.items.find((i) => i.ask) : undefined;
+    if (asking?.ask) {
+      if (askFor !== asking.ask.issueId) showAsk(asking);
+      return renderCrew(s, working);
+    }
+    askFor = null;
     if (working) {
       const lines = working.lines.slice(-3);
       while (lines.length < 3) lines.unshift("");
@@ -293,11 +311,51 @@ export async function startNotch() {
         `<small class="who">${escHtml(working.name)} pracuje</small>` +
         lines.map((l, i) => `<div class="step ${i === lines.length - 1 ? "now" : "past"}">${i === lines.length - 1 ? "›_ " : ""}${escHtml(l)}</div>`).join("");
     } else if (fresh) {
-      steps.innerHTML = `<small class="who">${escHtml(fresh.name)}</small><div class="step now big-text">${escHtml(fresh.chip)}</div><div class="step past">${escHtml(fresh.doing)}</div>`;
+      steps.innerHTML = `<small class="who">${escHtml(fresh.name)}</small><div class="step now big-text">${escHtml(fresh.chip)}</div><div class="step past${fresh.id === "morning" ? " wrap" : ""}">${escHtml(fresh.doing)}</div>`;
     } else {
       steps.innerHTML = `<small class="who">Dispečink</small><div class="step now big-text">${escHtml(headline(s))}</div><div class="step past">${s.counts.run} pracuje · ${s.counts.sleep} spí</div>`;
     }
 
+    renderCrew(s, working);
+  });
+
+  // An agent that waits on you: its question, and a box to answer it right here.
+  let askFor: string | null = null;
+  async function showAsk(item: MiniItem) {
+    const ask = item.ask!;
+    askFor = ask.issueId;
+    steps.innerHTML = `<small class="who">${escHtml(item.name)} se ptá</small><div class="step now big-text small">${escHtml(ask.title)}</div>
+      <div class="step past wrap q">…</div>
+      <div class="answer"><input type="text" placeholder="Odpověz ${escHtml(item.name)}…" spellcheck="false"><button>Poslat</button></div>`;
+    const comments = await invoke<Record<string, any>[] | { items: Record<string, any>[] }>("paperclip_request", { method: "GET", path: `/issues/${ask.issueId}/comments`, body: null }).catch(() => []);
+    const list = Array.isArray(comments) ? comments : comments.items;
+    const last = [...list].reverse().find((c) => c.authorAgentId);
+    const q = steps.querySelector(".q");
+    if (q) q.textContent = (last?.body ?? "").replace(/[*`#>]/g, "").replace(/\s+/g, " ").slice(0, 240) || "Otevři úkol v Dispečinku.";
+    const input = steps.querySelector("input") as HTMLInputElement;
+    const send = steps.querySelector(".answer button") as HTMLButtonElement;
+    const go = async () => {
+      const text = input.value.trim();
+      if (!text) return;
+      send.disabled = true;
+      try {
+        await invoke("paperclip_request", { method: "POST", path: `/issues/${ask.issueId}/comments`, body: { body: text } });
+        await invoke("paperclip_request", { method: "PATCH", path: `/issues/${ask.issueId}`, body: { status: "todo" } });
+        await invoke("paperclip_action", { kind: "agentInvoke", id: ask.agentId });
+        steps.innerHTML = `<small class="who">${escHtml(item.name)}</small><div class="step now big-text">Posláno</div><div class="step past">${escHtml(item.name)} se k tomu hned vrátí.</div>`;
+        void emit(EV_REFRESH);
+      } catch (err) {
+        send.disabled = false;
+        (steps.querySelector(".q") as HTMLElement).textContent = String(err);
+      }
+    };
+    send.addEventListener("click", () => void go());
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") void go();
+    });
+  }
+
+  function renderCrew(s: Snapshot, working: Snapshot["live"][number] | undefined) {
     const others = [...s.items].filter((i) => i.id !== working?.id).sort(byUrgency).slice(0, 7);
     const seen = new Set<string>();
     others.forEach((i, n) => {
@@ -323,7 +381,7 @@ export async function startNotch() {
         p.remove();
       }
     });
-  });
+  }
 
   // ----- music -----
   let now: NowPlaying | null = null;

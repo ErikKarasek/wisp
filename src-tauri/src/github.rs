@@ -121,3 +121,51 @@ pub fn action(repo: &str, workflow_id: i64, action: &str) -> Result<(), String> 
     };
     gh(&["workflow", verb, &id, "-R", repo]).map(|_| ())
 }
+
+// ---------- pull requests to review ----------
+
+/// Open pull requests in these repos, with their checks, for the review list.
+pub fn pull_requests(repos: &[String]) -> Vec<Value> {
+    repos
+        .iter()
+        .filter(|r| is_repo(r))
+        .flat_map(|repo| {
+            let out = gh(&[
+                "pr", "list", "-R", repo, "--state", "open", "--limit", "30", "--json",
+                "number,title,author,headRefName,createdAt,updatedAt,url,additions,deletions,changedFiles,isDraft,body,statusCheckRollup,mergeable",
+            ]);
+            match out.ok().and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok()) {
+                Some(list) => list
+                    .into_iter()
+                    .map(|mut pr| {
+                        pr["repo"] = json!(repo);
+                        pr
+                    })
+                    .collect(),
+                None => vec![],
+            }
+        })
+        .collect()
+}
+
+pub fn pr_diff(repo: &str, number: u64) -> Result<String, String> {
+    if !is_repo(repo) {
+        return Err("Neplatné repo".into());
+    }
+    let text = gh(&["pr", "diff", &number.to_string(), "-R", repo])?;
+    // Enough to read; a huge diff belongs on GitHub.
+    Ok(text.chars().take(400_000).collect())
+}
+
+/// Merge (squash, then delete the branch) or close. Only ever on a click.
+pub fn pr_action(repo: &str, number: u64, action: &str) -> Result<(), String> {
+    if !is_repo(repo) {
+        return Err("Neplatné repo".into());
+    }
+    let n = number.to_string();
+    match action {
+        "merge" => gh(&["pr", "merge", &n, "-R", repo, "--squash", "--delete-branch"]).map(|_| ()),
+        "close" => gh(&["pr", "close", &n, "-R", repo]).map(|_| ()),
+        other => Err(format!("Neznámá akce {other}")),
+    }
+}

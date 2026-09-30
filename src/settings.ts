@@ -14,6 +14,8 @@ export type SettingsContext = {
   setNotch: (on: boolean) => void;
   /** Save and pass the notch's settings on to it. */
   notchChanged: () => Promise<void>;
+  /** Show the morning summary right away. */
+  morningNow: () => void;
   toast: (text: string, ok?: boolean) => void;
 };
 
@@ -64,6 +66,17 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       <div class="prow top"><span>Chování</span><div class="checks">
         ${np("follow", "Oči sledují myš")}${np("dance", "Tancuje, když hraje hudba")}${np("peek", "Vykoukne, když se něco stane")}
       </div></div>
+    </section>
+
+    <section class="notch-prefs">
+      <h3>Ranní shrnutí</h3>
+      <p>Ráno bot v notchi řekne, co se přes noc stalo, co na tebe čeká a co máš dnes v kalendáři.</p>
+      <label class="toggle"><input type="checkbox" data-m="enabled" ${ctx.cfg.morning.enabled ? "checked" : ""}> Zapnuté</label>
+      <div class="prow"><span>Kdy</span><select data-m="hour">${[5, 6, 7, 8, 9, 10, 11]
+        .map((h) => `<option value="${h}" ${ctx.cfg.morning.hour === h ? "selected" : ""}>od ${h}:00 (první chvíle, kdy je Mac vzhůru)</option>`)
+        .join("")}</select></div>
+      <label class="toggle"><input type="checkbox" data-m="telegram" ${ctx.cfg.morning.telegram ? "checked" : ""}> Poslat i do Telegramu</label>
+      <button class="btn" data-act="morningNow" style="margin-top:8px">Ukázat teď</button>
     </section>
 
     <section>
@@ -288,6 +301,15 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       await ctx.notchChanged();
     }),
   );
+  el.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-m]").forEach((input) =>
+    input.addEventListener("change", async () => {
+      const m = ctx.cfg.morning as Record<string, unknown>;
+      const key = input.dataset.m!;
+      m[key] = key === "hour" ? Number(input.value) : (input as HTMLInputElement).checked;
+      await ctx.save();
+    }),
+  );
+  el.querySelector('[data-act="morningNow"]')!.addEventListener("click", () => ctx.morningNow());
   el.querySelectorAll<HTMLButtonElement>("[data-delay]").forEach((b) =>
     b.addEventListener("click", async () => {
       ctx.cfg.notchPrefs.closeDelay = Number(b.dataset.delay);

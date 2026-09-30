@@ -128,12 +128,14 @@ const ALLOWED: &[(&str, &str)] = &[
     ("GET", "/agents/{id}"),
     ("PATCH", "/agents/{id}"),
     ("DELETE", "/agents/{id}"),
+    ("POST", "/agents/{id}/terminate"),
     ("GET", "/agents/{id}/instructions-bundle"),
     ("GET", "/agents/{id}/instructions-bundle/file"),
     ("PUT", "/agents/{id}/instructions-bundle/file"),
     ("POST", "/companies/{id}/agents"),
     ("GET", "/companies/{id}/skills"),
     ("GET", "/companies/{id}/adapters/claude_local/models"),
+    ("GET", "/companies/{id}/adapters/codex_local/models"),
 ];
 
 fn allowed(method: &str, path: &str) -> bool {

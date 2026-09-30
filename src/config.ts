@@ -56,6 +56,8 @@ export type Config = {
   notch: boolean;
   notchPrefs: NotchPrefs;
   telegram: { enabled: boolean; chat: string };
+  /** The bot's morning summary: when, whether to Telegram too, and the last day shown. */
+  morning: { enabled: boolean; hour: number; telegram: boolean; last: string };
 };
 
 const base = (c: Partial<MascotCharacter>): MascotCharacter => ({
@@ -99,6 +101,7 @@ export function defaults(): Config {
     notch: true,
     notchPrefs: defaultNotchPrefs(),
     telegram: { enabled: false, chat: "" },
+    morning: { enabled: true, hour: 8, telegram: false, last: "" },
   };
 }
 
