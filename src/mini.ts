@@ -154,6 +154,7 @@ export async function startNotch() {
           <span class="closed-only rw"><span class="lstep"></span><span class="st"></span></span>
           <div class="open-only icons">
             <span class="ring" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
+            <span class="ring gpt" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
             <button data-act="mirror" title="Kamera">${CAMERA}</button>
             <button data-act="settings" title="Nastavení notche">${GEAR}</button>
           </div>
@@ -288,7 +289,7 @@ export async function startNotch() {
     }
     const fresh = s.news && Date.now() - s.at < 15_000 ? s.news : null;
     // Claude's limit as a ring: the session, with the week in the tooltip.
-    const ring = $(".ring");
+    const ring = $(".ring:not(.gpt)");
     ring.hidden = !s.usage?.session;
     if (s.usage?.session) {
       const pct = s.usage.session.percent;
@@ -296,6 +297,19 @@ export async function startNotch() {
       ring.classList.toggle("hot", pct >= 85);
       (ring.querySelector("b") as HTMLElement).textContent = `${pct}`;
       ring.title = `Claude: ${pct} % relace (obnoví se ${s.usage.session.resets})` + (s.usage.week ? `\nTýden: ${s.usage.week.percent} % (obnoví se ${s.usage.week.resets})` : "");
+    }
+    // ChatGPT's limit next to it, in its green.
+    const gpt = $(".ring.gpt");
+    const win = s.gpt?.[0];
+    gpt.hidden = win?.usedPercent == null;
+    if (win?.usedPercent != null) {
+      const pct = win.usedPercent;
+      gpt.querySelector<SVGCircleElement>(".fill")!.style.strokeDasharray = `${(pct / 100) * 88} 88`;
+      gpt.classList.toggle("hot", pct >= 85);
+      (gpt.querySelector("b") as HTMLElement).textContent = `${pct}`;
+      const when = (w: { resetsAt: string | null }) =>
+        w.resetsAt ? ` (obnoví se ${new Date(w.resetsAt).toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })})` : "";
+      gpt.title = s.gpt.map((w, i) => `${i ? "" : "ChatGPT: "}${w.label.replace(/^5h limit$/i, "5 h")} ${w.usedPercent} %${when(w)}`).join("\n");
     }
 
     const asking = !working && !(fresh && fresh.id === "morning") ? s.items.find((i) => i.ask) : undefined;

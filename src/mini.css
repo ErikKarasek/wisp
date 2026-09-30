@@ -223,3 +223,5 @@ body.mini button { font: inherit; color: inherit; }
 .nt .answer input:focus { outline: none; border-color: #8b9cff; }
 .nt .answer button { border: 0; border-radius: 9px; padding: 0 12px; background: #8b9cff; color: #11131c; font-weight: 600; font-size: 12px; cursor: pointer; }
 .nt .answer button:disabled { opacity: .5; }
+.nt .ring.gpt .fill { stroke: #10a37f; }
+.nt .ring.gpt.hot .fill { stroke: #e0605a; }

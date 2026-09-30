@@ -27,6 +27,9 @@ export type MiniItem = {
 
 export type ClaudeUsage = { session?: { percent: number; resets: string }; week?: { percent: number; resets: string } };
 
+/** One of the ChatGPT subscription's limits, as Paperclip reads them from Codex. */
+export type QuotaWindow = { label: string; usedPercent: number | null; resetsAt: string | null };
+
 export type Snapshot = {
   items: MiniItem[];
   counts: { attention: number; run: number; sleep: number; ok: number; off: number };
@@ -36,4 +39,5 @@ export type Snapshot = {
   /** Agents working right now and their last few steps. */
   live: { id: string; name: string; character: Partial<MascotCharacter>; lines: string[] }[];
   usage: ClaudeUsage | null;
+  gpt: QuotaWindow[];
 };

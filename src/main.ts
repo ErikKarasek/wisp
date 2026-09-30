@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { openAgentForm } from "./agentform";
-import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type Snapshot } from "./broadcast";
+import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type QuotaWindow, type Snapshot } from "./broadcast";
 import { renderReviews } from "./reviews";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
@@ -53,8 +53,6 @@ let selected: string | null = null;
 let jobs: Job[] = [];
 let paperclip: PaperclipSnapshot | null = null;
 let usage: ClaudeUsage | null = null;
-/** The ChatGPT subscription's limits, as Paperclip reads them from Codex. */
-type QuotaWindow = { label: string; usedPercent: number | null; resetsAt: string | null };
 let gptQuota: QuotaWindow[] = [];
 let prCount = 0;
 /** The last item that changed in a way worth showing in the notch. */
@@ -809,6 +807,7 @@ function snapshot(): Snapshot {
     at: newsAt,
     live: liveNow,
     usage,
+    gpt: gptQuota,
   };
 }
 let newsAt = 0;
