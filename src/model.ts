@@ -438,8 +438,9 @@ export function paperclipGroups(snap: PaperclipSnapshot, now = Date.now()): Grou
       note: company.name,
       company: { id: company.id, name: company.name, prefix },
       items: [
-        ...agents.map((a) => agentItem(a, issues, id, now)),
-        ...routines.map((r) => routineItem(r, agents, id, now)),
+        // Ended agents and archived routines are history, not something to watch.
+        ...agents.filter((a) => a.status !== "terminated").map((a) => agentItem(a, issues, id, now)),
+        ...routines.filter((r) => r.status !== "archived").map((r) => routineItem(r, agents, id, now)),
       ],
     };
   });
