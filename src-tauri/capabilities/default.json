@@ -3,7 +3,9 @@
   "identifier": "default",
   "description": "The main window",
   "windows": [
-    "main"
+    "main",
+    "panel",
+    "notch"
   ],
   "permissions": [
     "core:default",

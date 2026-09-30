@@ -18,6 +18,8 @@ export type Config = {
   githubRepos: string[] | null;
   notifications: boolean;
   sounds: boolean;
+  /** The mascot in the MacBook notch. */
+  notch: boolean;
   telegram: { enabled: boolean; chat: string };
 };
 
@@ -59,6 +61,7 @@ export function defaults(): Config {
     githubRepos: null,
     notifications: true,
     sounds: true,
+    notch: true,
     telegram: { enabled: false, chat: "" },
   };
 }

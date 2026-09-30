@@ -286,3 +286,26 @@ button { font: inherit; color: inherit; }
 .settings .bot { margin-top: 10px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .settings .bot b { color: var(--text); }
 .settings .bot .err { flex-basis: 100%; }
+
+/* ---------- agent form ---------- */
+.studio.agentform { width: min(760px, 100%); height: min(760px, 100%); }
+.agentform .form { padding: 16px 18px; overflow-y: auto; flex: 1; min-height: 0; }
+.agentform .form .row { grid-template-columns: 100px minmax(0, 1fr); }
+.agentform .row.top { align-items: start; }
+.agentform .row.top > span { padding-top: 6px; }
+.agentform input[type="text"], .agentform input[type="number"], .agentform select, .agentform textarea {
+  background: #121317; border: 1px solid var(--line); border-radius: 7px; color: var(--text); font: inherit; font-size: 13px;
+  padding: 6px 10px; -webkit-user-select: text; user-select: text; color-scheme: dark; min-width: 0;
+}
+.agentform select { -webkit-appearance: none; appearance: none; padding-right: 28px; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%; background-size: 5px 5px; background-repeat: no-repeat; }
+.agentform input[type="number"] { width: 70px; }
+.agentform textarea { font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; resize: vertical; min-height: 220px; }
+.agentform input:focus, .agentform select:focus, .agentform textarea:focus { outline: none; border-color: var(--accent); }
+.agentform .inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+.agentform .inline small { color: var(--faint); }
+.agentform .check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+.agentform .skills { display: flex; flex-wrap: wrap; gap: 4px 14px; padding-top: 5px; }
+.agentform .note { color: var(--bad); }
+.agentform .muted { color: var(--faint); }

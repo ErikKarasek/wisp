@@ -11,6 +11,7 @@ export type SettingsContext = {
   /** Reload the cloud sources (Cloudflare, GitHub) now. */
   refreshCloud: () => Promise<void>;
   openStudio: () => void;
+  setNotch: (on: boolean) => void;
   toast: (text: string, ok?: boolean) => void;
 };
 
@@ -98,6 +99,8 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       <h3>Upozornění, zvuky a spouštění</h3>
       <label class="toggle"><input type="checkbox" data-f="notify" ${ctx.cfg.notifications ? "checked" : ""}>
         Upozornit, když něco selže nebo na mě čeká</label>
+      <label class="toggle"><input type="checkbox" data-f="notch" ${ctx.cfg.notch ? "checked" : ""}>
+        Postavička v notchi (na Macu bez výřezu uprostřed horní lišty)</label>
       <label class="toggle"><input type="checkbox" data-f="sounds" ${ctx.cfg.sounds ? "checked" : ""}>
         Zvuky, když něco doběhne, selže nebo šťouchnu do postavičky</label>
       <label class="toggle"><input type="checkbox" data-f="autostart" ${autostart ? "checked" : ""}>
@@ -251,6 +254,11 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
     ctx.cfg.telegram.enabled = (e.target as HTMLInputElement).checked;
     await ctx.save();
     await again();
+  });
+  el.querySelector<HTMLInputElement>('[data-f="notch"]')!.addEventListener("change", async (e) => {
+    ctx.cfg.notch = (e.target as HTMLInputElement).checked;
+    ctx.setNotch(ctx.cfg.notch);
+    await ctx.save();
   });
   el.querySelector<HTMLInputElement>('[data-f="sounds"]')!.addEventListener("change", async (e) => {
     ctx.cfg.sounds = (e.target as HTMLInputElement).checked;

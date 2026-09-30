@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Dispečink",
+  "productName": "Dispe\u010dink",
   "version": "0.1.0",
   "identifier": "cz.erikkarasek.dispecink",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Dispečink",
+        "title": "Dispe\u010dink",
         "width": 1180,
         "height": 800,
         "minWidth": 720,
@@ -21,15 +21,61 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "backgroundColor": "#16171b"
+      },
+      {
+        "label": "panel",
+        "url": "index.html?view=panel",
+        "title": "Dispe\u010dink",
+        "width": 340,
+        "height": 440,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false,
+        "shadow": true,
+        "acceptFirstMouse": true
+      },
+      {
+        "label": "notch",
+        "url": "index.html?view=notch",
+        "title": "Dispe\u010dink notch",
+        "width": 300,
+        "height": 34,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false,
+        "shadow": false,
+        "acceptFirstMouse": true,
+        "visibleOnAllWorkspaces": true
       }
     ],
-    "security": { "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:" }
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:"
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": [
+      "app"
+    ],
     "category": "DeveloperTool",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
-    "macOS": { "minimumSystemVersion": "13.0" }
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
   }
 }

@@ -1,4 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
+import { openAgentForm } from "./agentform";
+import { EV_OPEN, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot } from "./broadcast";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { fullCharacter, loadConfig, saveConfig, type Config } from "./config";
@@ -44,6 +47,9 @@ const automatic = new Map<string, { name: string; character: Partial<MascotChara
 let filter = "all";
 let selected: string | null = null;
 let jobs: Job[] = [];
+let paperclip: PaperclipSnapshot | null = null;
+/** The last item that changed in a way worth showing in the notch. */
+let news: MiniItem | null = null;
 
 type HistoryEntry = { id: string; name: string; state: State; at: number; text: string };
 let history: HistoryEntry[] = [];
@@ -57,6 +63,7 @@ async function loadLocal() {
     invoke<PaperclipSnapshot>("paperclip_snapshot").catch((e) => ({ online: false, error: String(e) }) as PaperclipSnapshot),
   ]);
   jobs = jobList;
+  paperclip = snap;
   localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now)];
 }
 
@@ -211,7 +218,12 @@ function renderMain() {
     }
     main.appendChild(sec); // keeps group order; moving keeps the mascots alive
     sec.querySelector("h3")!.innerHTML =
-      `${esc(g.title)} <em>${esc(g.note)}</em>` + (g.id === "mac" ? `<button class="add-job" data-act="newJob">+ Nová úloha</button>` : "");
+      `${esc(g.title)} <em>${esc(g.note)}</em>` +
+      (g.id === "mac"
+        ? `<button class="add-job" data-act="newJob">+ Nová úloha</button>`
+        : g.company
+          ? `<button class="add-job" data-act="newAgent" data-company="${esc(g.company.id)}">+ Nový agent</button>`
+          : "");
     const list = sec.querySelector(".cards") as HTMLElement;
     let notice = sec.querySelector(".notice") as HTMLElement | null;
     if (g.notice && !notice) {
@@ -482,6 +494,7 @@ function actionButton(a: ActionSpec): HTMLButtonElement {
 async function runCommand(a: ActionSpec) {
   const c = a.command;
   if (c.type === "editJob") return jobForm(jobs.find((j) => j.label === c.label));
+  if (c.type === "editAgent") return agentForm(c.companyId, c.agentId);
   try {
     if (c.type === "open") {
       if (/^https?:/.test(c.target)) await openUrl(c.target);
@@ -532,6 +545,23 @@ async function onChanges() {
   void invoke("history_append", { entries }).catch(() => {});
 
   const alarming = changed.filter((i) => i.state === "bad" || i.state === "you");
+  // The notch peeks out with the most important change.
+  const headline = alarming[0] ?? changed.find((i) => i.state === "done");
+  if (headline) {
+    news = {
+      id: headline.id,
+      name: headline.name,
+      state: headline.state,
+      chip: headline.chip ?? STATES[headline.state].chip,
+      doing: headline.doing,
+      when: headline.when,
+      where: "",
+      character: headline.character,
+    };
+    newsAt = Date.now();
+    broadcast();
+    if (cfg.notch) void invoke("notch_peek", { millis: 4500 });
+  }
   if (cfg.sounds) {
     if (changed.some((i) => i.state === "bad")) sounds.bad();
     else if (alarming.length) sounds.you();
@@ -573,7 +603,69 @@ function jobForm(job?: Job) {
 }
 
 document.addEventListener("click", (e) => {
-  if ((e.target as HTMLElement).closest('[data-act="newJob"]')) jobForm();
+  const el = e.target as HTMLElement;
+  if (el.closest('[data-act="newJob"]')) jobForm();
+  const hire = el.closest<HTMLElement>('[data-act="newAgent"]');
+  if (hire) agentForm(hire.dataset.company!);
+});
+
+// ---------- agent form ----------
+
+function agentForm(companyId: string, agentId?: string) {
+  if (!paperclip?.online) return toast("Paperclip neodpovídá.");
+  const c = paperclip.companies.find((x) => x.company.id === companyId);
+  if (!c) return;
+  void openAgentForm({
+    companyId,
+    companyName: c.company.name,
+    companyPrefix: c.company.issuePrefix ?? "",
+    agentId,
+    agents: c.agents,
+    paperclipUrl: paperclip.baseUrl,
+    toast,
+    changed: () => void refresh(),
+    created: (id) => {
+      selected = id;
+      void refresh().then(() => {
+        const item = allItems().find((i) => i.id === id);
+        if (item) studio(item);
+      });
+    },
+  });
+}
+
+// ---------- panel and notch ----------
+
+function snapshot(): Snapshot {
+  const items = allItems();
+  const mini = (i: Item): MiniItem => ({
+    id: i.id,
+    name: i.name,
+    state: i.state,
+    chip: i.chip ?? STATES[i.state].chip,
+    doing: i.doing,
+    when: i.when,
+    where: groups.find((g) => g.items.includes(i))?.title ?? "",
+    character: i.character,
+  });
+  const n = (states: State[]) => items.filter((i) => states.includes(i.state)).length;
+  return {
+    items: items.map(mini),
+    counts: { attention: n(["bad", "you", "new"]), run: n(["run"]), sleep: n(["sleep"]), ok: n(["ok", "done"]), off: n(["off"]) },
+    news,
+    at: newsAt,
+  };
+}
+let newsAt = 0;
+const broadcast = () => void emit(EV_STATE, snapshot());
+
+void listen(EV_REQUEST, broadcast);
+void listen(EV_REFRESH, () => void refresh(true));
+void listen<{ id: string }>(EV_OPEN, (e) => {
+  filter = "all";
+  selected = e.payload.id;
+  render();
+  void invoke("show_main_window");
 });
 
 // ---------- tray ----------
@@ -634,40 +726,57 @@ async function showSettings() {
       await saveConfig(cfg);
     },
     cloudflare,
-    refreshCloud: () => refresh(true),
+    refreshCloud: () => refreshCloud(),
     openStudio: () => studio(),
+    setNotch: (on: boolean) => void invoke("notch_set_enabled", { enabled: on }),
     toast,
   });
 }
 
-let busy = false;
-let cloudPending = false;
+// The Mac and Paperclip refresh on their own schedule; the cloud (Cloudflare,
+// GitHub) separately, so a slow or waiting cloud call never holds the rest up.
+let localBusy = false;
+let cloudBusy = false;
+const spinner = () => $("refresh").classList.toggle("spin", localBusy || cloudBusy);
+
+async function settle() {
+  compose();
+  render();
+  await Promise.all([updateTray(), onChanges()]);
+  broadcast();
+}
+
 async function refresh(withCloud = false): Promise<void> {
-  if (busy) {
-    // Don't lose a cloud refresh that arrives while a local one runs.
-    cloudPending ||= withCloud;
-    return;
-  }
-  busy = true;
-  $("refresh").classList.add("spin");
+  if (withCloud) void refreshCloud();
+  if (localBusy) return;
+  localBusy = true;
+  spinner();
   try {
-    await Promise.all([loadLocal(), withCloud ? loadCloud() : Promise.resolve()]);
-    compose();
-    render();
-    await Promise.all([updateTray(), onChanges()]);
+    await loadLocal();
+    await settle();
   } finally {
-    busy = false;
-    $("refresh").classList.remove("spin");
+    localBusy = false;
+    spinner();
   }
-  if (cloudPending) {
-    cloudPending = false;
-    await refresh(true);
+}
+
+async function refreshCloud() {
+  if (cloudBusy) return;
+  cloudBusy = true;
+  spinner();
+  try {
+    await loadCloud();
+    await settle();
+  } finally {
+    cloudBusy = false;
+    spinner();
   }
 }
 
 async function start() {
   cfg = await loadConfig();
   history = await invoke<HistoryEntry[]>("history_load").catch(() => []);
+  void invoke("notch_set_enabled", { enabled: cfg.notch });
   // The Mac and Paperclip answer at once; the cloud fills in when it arrives.
   await refresh(false);
   void refresh(true);

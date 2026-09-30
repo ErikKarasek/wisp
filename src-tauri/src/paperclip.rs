@@ -102,3 +102,65 @@ pub async fn action(kind: &str, id: &str) -> Result<(), String> {
         Err(format!("HTTP {status}: {msg}"))
     }
 }
+
+/// The calls the agent editor makes, and only those: reading and saving an
+/// agent and its instructions, hiring one, deleting one, and the lists the
+/// form needs. `{id}` stands for one id segment.
+const ALLOWED: &[(&str, &str)] = &[
+    ("GET", "/agents/{id}"),
+    ("PATCH", "/agents/{id}"),
+    ("DELETE", "/agents/{id}"),
+    ("GET", "/agents/{id}/instructions-bundle"),
+    ("GET", "/agents/{id}/instructions-bundle/file"),
+    ("PUT", "/agents/{id}/instructions-bundle/file"),
+    ("POST", "/companies/{id}/agents"),
+    ("GET", "/companies/{id}/skills"),
+    ("GET", "/companies/{id}/adapters/claude_local/models"),
+];
+
+fn allowed(method: &str, path: &str) -> bool {
+    let path = path.split('?').next().unwrap_or("");
+    let segs: Vec<&str> = path.split('/').collect();
+    ALLOWED.iter().any(|(m, pattern)| {
+        let pat: Vec<&str> = pattern.split('/').collect();
+        *m == method
+            && pat.len() == segs.len()
+            && pat.iter().zip(&segs).all(|(p, s)| if *p == "{id}" { is_id(s) } else { p == s })
+    })
+}
+
+pub async fn request(method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+    if !allowed(method, path) {
+        return Err(format!("{method} {path} Dispečink nesmí volat"));
+    }
+    // The only query the editor uses: which instructions file to read.
+    if let Some(q) = path.split_once('?').map(|(_, q)| q) {
+        if !q.starts_with("path=") || q.contains('&') || q.contains("..") {
+            return Err("Neplatný dotaz".into());
+        }
+    }
+    let url = format!("{BASE}/api{path}");
+    let c = client()?;
+    let req = match method {
+        "GET" => c.get(&url),
+        "PATCH" => c.patch(&url),
+        "PUT" => c.put(&url),
+        "POST" => c.post(&url),
+        "DELETE" => c.delete(&url),
+        _ => unreachable!(),
+    };
+    let req = match body {
+        Some(b) => req.json(&b),
+        None => req,
+    };
+    let res = req.send().await.map_err(|e| e.to_string())?;
+    let status = res.status();
+    let text = res.text().await.unwrap_or_default();
+    let v: Value = serde_json::from_str(&text).unwrap_or(Value::String(text.clone()));
+    if status.is_success() {
+        Ok(v)
+    } else {
+        let msg = v.get("error").and_then(|e| e.as_str()).map(String::from).unwrap_or(text);
+        Err(format!("HTTP {status}: {msg}"))
+    }
+}

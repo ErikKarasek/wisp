@@ -1,14 +1,16 @@
 mod cloudflare;
 mod github;
 mod launchd;
+mod notch;
 mod paperclip;
 mod store;
 mod telegram;
 
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager, RunEvent, WindowEvent, Wry};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, LogicalPosition, Manager, RunEvent, WindowEvent, Wry};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri_plugin_autostart::MacosLauncher;
 
 const TRAY_ID: &str = "main";
@@ -63,6 +65,11 @@ async fn job_delete(label: String) -> Result<(), String> {
 #[tauri::command]
 async fn paperclip_snapshot() -> serde_json::Value {
     paperclip::snapshot().await
+}
+
+#[tauri::command]
+async fn paperclip_request(method: String, path: String, body: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    paperclip::request(&method, &path, body).await
 }
 
 #[tauri::command]
@@ -188,6 +195,78 @@ fn set_tray(app: AppHandle, png: Vec<u8>, tooltip: String, lines: Vec<String>) -
     Ok(())
 }
 
+// ---------- menu-bar panel and notch ----------
+
+/// When the panel last hid itself. Clicking the tray icon while the panel is
+/// open first takes its focus (which hides it) and then arrives as a click that
+/// would open it straight back; a click right after a hide therefore does nothing.
+static PANEL_HIDDEN_AT: AtomicU64 = AtomicU64::new(0);
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Show or hide the panel, centred under the tray icon and kept on screen.
+fn toggle_panel(app: &AppHandle, icon: tauri::Rect) {
+    let Some(panel) = app.get_webview_window("panel") else { return };
+    if panel.is_visible().unwrap_or(false) {
+        let _ = panel.hide();
+        PANEL_HIDDEN_AT.store(now_millis(), Ordering::Relaxed);
+        return;
+    }
+    if now_millis().saturating_sub(PANEL_HIDDEN_AT.load(Ordering::Relaxed)) < 250 {
+        return;
+    }
+    let scale = panel.scale_factor().unwrap_or(1.0);
+    let pos = icon.position.to_logical::<f64>(scale);
+    let size = icon.size.to_logical::<f64>(scale);
+    let panel_size = panel
+        .outer_size()
+        .map(|s| s.to_logical::<f64>(scale))
+        .unwrap_or(tauri::LogicalSize::new(340.0, 440.0));
+    let mut x = pos.x + size.width / 2.0 - panel_size.width / 2.0;
+    if let Ok(Some(monitor)) = panel.current_monitor() {
+        let area = monitor.size().to_logical::<f64>(monitor.scale_factor());
+        let origin = monitor.position().to_logical::<f64>(monitor.scale_factor());
+        let right = origin.x + area.width - panel_size.width - 8.0;
+        x = x.clamp(origin.x + 8.0, right.max(origin.x + 8.0));
+    }
+    let _ = panel.set_position(LogicalPosition::new(x, pos.y + size.height + 6.0));
+    let _ = panel.show();
+    let _ = panel.set_focus();
+}
+
+#[tauri::command]
+fn show_main_window(app: AppHandle) {
+    if let Some(p) = app.get_webview_window("panel") {
+        let _ = p.hide();
+    }
+    show_main(&app);
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
+fn notch_set_enabled(app: AppHandle, enabled: bool) {
+    notch::set_enabled(&app, enabled);
+}
+
+#[tauri::command]
+fn notch_peek(app: AppHandle, millis: u64) {
+    notch::peek(&app, millis.min(10_000));
+}
+
+#[tauri::command]
+fn notch_geometry() -> notch::Geometry {
+    notch::current_geometry()
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -207,7 +286,13 @@ pub fn run() {
             let mut tray = TrayIconBuilder::with_id(TRAY_ID)
                 .tooltip("Dispečink")
                 .menu(&tray_menu(handle, &[])?)
-                .show_menu_on_left_click(true)
+                // Left click opens the panel; the menu stays on right click.
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, rect, .. } = event {
+                        toggle_panel(tray.app_handle(), rect);
+                    }
+                })
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => show_main(app),
                     "quit" => app.exit(0),
@@ -217,14 +302,22 @@ pub fn run() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            notch::setup(handle);
             Ok(())
         })
         // Closing the window only hides it; the tray keeps watching.
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match (window.label(), event) {
+            // Clicking anywhere else dismisses the panel, the way a menu does.
+            ("panel", WindowEvent::Focused(false)) => {
+                let _ = window.hide();
+                PANEL_HIDDEN_AT.store(now_millis(), Ordering::Relaxed);
+            }
+            // Closing the main window only hides it; the tray and notch keep watching.
+            ("main", WindowEvent::CloseRequested { api, .. }) => {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             list_jobs,
@@ -235,6 +328,12 @@ pub fn run() {
             job_delete,
             paperclip_snapshot,
             paperclip_action,
+            paperclip_request,
+            show_main_window,
+            quit_app,
+            notch_set_enabled,
+            notch_peek,
+            notch_geometry,
             cloudflare_snapshot,
             github_snapshot,
             github_discover,

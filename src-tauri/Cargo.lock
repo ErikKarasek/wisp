@@ -841,6 +841,8 @@ version = "0.1.0"
 dependencies = [
  "keyring",
  "libc",
+ "objc2",
+ "objc2-foundation",
  "plist",
  "reqwest 0.12.28",
  "serde",

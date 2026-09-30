@@ -26,6 +26,7 @@ export type Command =
   | { type: "paperclip"; kind: "agentPause" | "agentResume" | "agentInvoke" | "routineRun"; id: string }
   | { type: "github"; repo: string; workflowId: number; action: "run" | "enable" | "disable" }
   | { type: "editJob"; label: string }
+  | { type: "editAgent"; companyId: string; agentId: string }
   | { type: "open"; target: string };
 
 export type ActionSpec = {
@@ -54,7 +55,15 @@ export type Item = {
   actions: ActionSpec[];
 };
 
-export type Group = { id: string; title: string; note: string; items: Item[]; notice?: string };
+export type Group = {
+  id: string;
+  title: string;
+  note: string;
+  items: Item[];
+  notice?: string;
+  /** Paperclip groups: the company, so a new agent can be hired into it. */
+  company?: { id: string; name: string; prefix: string };
+};
 
 // ---------- characters ----------
 
@@ -300,6 +309,7 @@ function agentItem(a: Obj, issues: Obj[], groupId: string, base: string, prefix:
   } else {
     actions.push({ label: "Obnovit", primary: true, command: { type: "paperclip", kind: "agentResume", id: a.id } });
   }
+  actions.push({ label: "Upravit", command: { type: "editAgent", companyId: a.companyId, agentId: a.id } });
   actions.push({ label: "Otevřít v Paperclipu", command: { type: "open", target: `${base}/${prefix}/agents/${a.urlKey ?? a.id}` } });
 
   const facts: [string, string][] = [["Role", a.title ?? "–"]];
@@ -402,6 +412,7 @@ export function paperclipGroups(snap: PaperclipSnapshot, now = Date.now()): Grou
       id,
       title: "Paperclip",
       note: company.name,
+      company: { id: company.id, name: company.name, prefix },
       items: [
         ...agents.map((a) => agentItem(a, issues, id, snap.baseUrl, prefix, now)),
         ...routines.map((r) => routineItem(r, agents, id, snap.baseUrl, prefix, now)),
