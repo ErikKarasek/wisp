@@ -5,6 +5,7 @@ struct RootView: View {
         TabView {
             OverviewView().tabItem { Label("Přehled", systemImage: "gauge.with.dots.needle.33percent") }
             AgentsView().tabItem { Label("Agenti", systemImage: "bubble.left.and.bubble.right") }
+            AskView().tabItem { Label("Zeptat se", systemImage: "sparkles") }
         }
         .tint(Palette.accent)
     }
@@ -25,18 +26,6 @@ struct OverviewView: View {
                         if let perms = s.perms, !perms.isEmpty {
                             section("Claude chce povolit") { ForEach(perms) { PermCard(perm: $0) } }
                         }
-                        if let live = s.live, !live.isEmpty {
-                            section("Právě pracuje") {
-                                ForEach(live, id: \.name) { l in
-                                    card {
-                                        Text(l.name).font(.subheadline.weight(.semibold))
-                                        ForEach(Array(l.lines.suffix(3).enumerated()), id: \.offset) { _, line in
-                                            Text(line).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
-                                        }
-                                    }
-                                }
-                            }
-                        }
                         section(s.waiting.isEmpty ? "Nic na tebe nečeká" : "Čeká na tebe") {
                             ForEach(s.waiting) { ItemRow(item: $0) }
                         }
@@ -56,22 +45,31 @@ struct OverviewView: View {
         }
     }
 
+    /// The hero card, like the notch: the live bot, its steps or the crew.
     private var header: some View {
-        HStack(spacing: 12) {
-            let s = store.state
-            Mascot(color: s.map { stateColor($0.waiting.contains { $0.state == "bad" } ? "bad" : $0.waiting.isEmpty ? "ok" : "you") } ?? Palette.accent,
-                   size: 46, sleepy: store.macAsleep)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(headline).font(.headline)
-                Text(subline).font(.caption).foregroundStyle(.secondary)
+        let a = store.state?.activityState
+        let mode = store.macAsleep ? "idle" : (a?.mode ?? "idle")
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                BotBadge(character: store.state?.bot ?? .white, mode: mode, size: 70, animated: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(headline).font(.headline)
+                    if let a, a.mode == "working" { StepTicker(steps: a.steps, fallback: a.title, big: 14) }
+                    else if let a, a.mode == "error" || a.mode == "ask" { Text(a.detail).font(.caption).foregroundStyle(modeColor(a.mode)).lineLimit(2) }
+                    Text(subline).font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer()
+            if let crew = store.state?.crew, !crew.isEmpty { CrewGrid(crew: crew, size: 12) }
         }
+        .padding(14)
+        .background(ActivityGlow(mode: mode).clipShape(RoundedRectangle(cornerRadius: 20)))
     }
 
     private var headline: String {
         guard let s = store.state else { return "Načítám…" }
         if s.counts.attention > 0 { return s.counts.attention == 1 ? "1 věc na tebe čeká" : "\(s.counts.attention) věci na tebe čekají" }
+        if let l = s.live?.first { return "\(l.name) pracuje" }
         if s.counts.run > 0 { return "\(s.counts.run) pracuje" }
         return "Všechno v pořádku"
     }
@@ -96,10 +94,18 @@ struct OverviewView: View {
 }
 
 struct ItemRow: View {
+    @EnvironmentObject var store: Store
     let item: PhoneState.Item
+    @State private var sheet = false
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Circle().fill(stateColor(item.state)).frame(width: 9, height: 9).padding(.top, 5)
+        Button { sheet = true } label: { row }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $sheet) { ItemSheet(item: item).environmentObject(store).presentationDetents([.medium]) }
+    }
+    private var row: some View {
+        HStack(alignment: .center, spacing: 10) {
+            MascotView(character: item.character ?? MascotCharacter(), expression: .forState(item.state), seed: Double(item.name.count))
+                .frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(item.name).font(.subheadline.weight(.semibold))
@@ -109,7 +115,54 @@ struct ItemRow: View {
                 Text(item.doing).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+    }
+}
+
+/// An item's details and what the phone can do with it.
+struct ItemSheet: View {
+    @EnvironmentObject var store: Store
+    let item: PhoneState.Item
+    @State private var done: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 14) {
+                MascotView(character: item.character ?? MascotCharacter(), expression: .forState(item.state), seed: 7).frame(width: 72, height: 72)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.name).font(.title3.weight(.semibold))
+                    Text(item.chip ?? "").font(.subheadline).foregroundStyle(stateColor(item.state))
+                    if let e = item.engine { Text(e).font(.caption).foregroundStyle(.secondary) }
+                }
+            }
+            Text(item.doing).font(.callout)
+            if !item.when.isEmpty { Text(item.when).font(.caption).foregroundStyle(.secondary) }
+            if let label = item.job {
+                HStack {
+                    act("Spustit teď", ["kind": "job", "label": label, "action": "run"])
+                    if item.state == "off" { act("Zapnout", ["kind": "job", "label": label, "action": "resume"]) }
+                    else { act("Pozastavit", ["kind": "job", "label": label, "action": "pause"]) }
+                }
+            } else if item.id.hasPrefix("agent:") {
+                let id = String(item.id.dropFirst(6))
+                HStack {
+                    act("Probudit", ["kind": "agent", "agentId": id, "action": "agentInvoke"])
+                    if item.state == "off" { act("Obnovit", ["kind": "agent", "agentId": id, "action": "agentResume"]) }
+                    else { act("Pozastavit", ["kind": "agent", "agentId": id, "action": "agentPause"]) }
+                }
+            }
+            if let done { Text(done).font(.caption).foregroundStyle(.secondary) }
+            Spacer()
+        }
+        .padding(20)
+    }
+
+    private func act(_ title: String, _ cmd: [String: String]) -> some View {
+        Button(title) {
+            Task { if await store.send(cmd) { done = "Odesláno, Mac to udělá do 10 s." } }
+        }
+        .buttonStyle(.borderedProminent).tint(Palette.accent)
     }
 }
 
@@ -157,7 +210,8 @@ struct AgentsView: View {
             List(store.state?.agents ?? []) { a in
                 NavigationLink(value: a) {
                     HStack(spacing: 12) {
-                        Mascot(color: a.engine == "ChatGPT" ? Palette.gpt : Palette.claude, size: 34, sleepy: a.status == "paused")
+                        MascotView(character: a.character ?? MascotCharacter(), expression: .forState(store.state.map { a.state(in: $0) } ?? "ok"), seed: Double(a.name.count))
+                            .frame(width: 44, height: 44)
                         VStack(alignment: .leading) {
                             Text(a.name).font(.headline)
                             Text("\(a.engine)\(a.status == "paused" ? " · pozastavený" : "")").font(.caption).foregroundStyle(.secondary)
@@ -291,4 +345,54 @@ func card<C: View>(@ViewBuilder _ content: () -> C) -> some View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.card, in: RoundedRectangle(cornerRadius: 14))
+}
+
+
+// MARK: - Quick question (Gemini on the Mac, from Google AI Pro)
+
+struct AskView: View {
+    @EnvironmentObject var store: Store
+    @State private var draft = ""
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if (store.state?.answers ?? []).isEmpty {
+                            Text("Zeptej se na cokoli. Otázku převezme Mac a odpoví Gemini z tvého AI Pro.")
+                                .font(.callout).foregroundStyle(.secondary).padding(.top, 8)
+                        }
+                        ForEach(store.state?.answers ?? []) { a in
+                            Bubble(text: a.question, mine: true, system: false)
+                            if let answer = a.answer { Bubble(text: answer, mine: false, system: false) }
+                            else { HStack { ProgressView(); Text("Gemini přemýšlí…").font(.caption).foregroundStyle(.secondary) } }
+                        }
+                    }
+                    .padding(14)
+                }
+                HStack(alignment: .bottom) {
+                    TextField("Na co se chceš zeptat?", text: $draft, axis: .vertical).lineLimit(1...5)
+                        .padding(10).background(Palette.card, in: RoundedRectangle(cornerRadius: 12))
+                    Button {
+                        let q = draft
+                        Task {
+                            if await store.send(["kind": "ask", "askId": UUID().uuidString, "question": q]) {
+                                draft = ""
+                                // The answer takes a few seconds on the Mac; look a few times.
+                                for delay in [12, 10, 10, 15] {
+                                    try? await Task.sleep(for: .seconds(delay))
+                                    await store.refresh()
+                                }
+                            }
+                        }
+                    } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.sending)
+                }
+                .padding(10)
+            }
+            .navigationTitle("Zeptat se")
+            .refreshable { await store.refresh() }
+        }
+    }
 }

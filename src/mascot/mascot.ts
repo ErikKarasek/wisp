@@ -431,6 +431,8 @@ export type MascotGeometry = {
   /** Lean, applied by the renderer as a rotation about `pivot`. */
   tilt: number;
   pivot: { x: number; y: number };
+  /** The body's centre and radii, for renderers that shade it (a glossy highlight). */
+  body: { cx: number; cy: number; rx: number; ry: number; count: number };
 };
 
 /**
@@ -563,6 +565,7 @@ export function mascotFrame(character: Partial<MascotCharacter>, pose: MascotPos
     primitives,
     tilt: ch.lean + ex.tilt,
     pivot: { x: cx, y: groundY },
+    body: { cx, cy, rx, ry, count: cloud ? 6 : 1 },
   };
 }
 

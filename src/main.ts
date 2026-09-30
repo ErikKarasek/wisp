@@ -1250,7 +1250,20 @@ async function start() {
       return {
         focus,
         counts: s.counts,
-        items: s.items.map((i) => ({ id: i.id, name: i.name, state: i.state, chip: i.chip, doing: i.doing, when: i.when })),
+        items: allItems().map((i) => ({
+          id: i.id,
+          name: i.name,
+          state: i.state,
+          chip: i.chip ?? STATES[i.state].chip,
+          doing: i.doing,
+          when: i.when,
+          group: i.group,
+          engine: i.engine ?? null,
+          character: i.character,
+          // What the phone may do with it: run, pause or resume a launchd job.
+          job: i.id.startsWith("job:") ? i.id.slice(4) : null,
+        })),
+        bot: cfg.notchPrefs.bot ? cfg.characters.find((c) => c.id === cfg.notchPrefs.bot)?.character ?? null : null,
         live: s.live.map((l) => ({ name: l.name, lines: l.lines })),
         limits: {
           claude: usage ? { session: usage.session?.percent ?? null, week: usage.week?.percent ?? null, resets: usage.session?.resets ?? "" } : null,
@@ -1259,6 +1272,7 @@ async function start() {
         },
       };
     },
+    character: (id) => allItems().find((i) => i.id === id)?.character ?? {},
     toast: (t) => toast(t),
   });
   void healCodex();

@@ -43,7 +43,7 @@ struct WidgetView: View {
                 }
             } else {
                 VStack(spacing: 6) {
-                    Mascot(size: 34, sleepy: true)
+                    MascotView(character: .white, expression: .sleepy, animated: false).frame(width: 40, height: 40)
                     Text("Bez spojení").font(.caption2).foregroundStyle(.secondary)
                 }
             }
@@ -70,11 +70,13 @@ struct WidgetView: View {
         let (text, color) = status(s)
         return VStack(alignment: .leading, spacing: 8) {
             rings(s, size: 36)
-            HStack(spacing: 5) {
-                Circle().fill(color).frame(width: 7, height: 7)
-                Text(text).font(.caption2.weight(.semibold)).lineLimit(1)
+            HStack(spacing: 6) {
+                MascotView(character: s.bot ?? .white, expression: .forState(s.worst), animated: false).frame(width: 26, height: 26)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(text).font(.caption2.weight(.semibold)).foregroundStyle(color).lineLimit(1)
+                    if let p = entry.pushed { Text(agoText(p)).font(.system(size: 9)).foregroundStyle(.secondary) }
+                }
             }
-            if let p = entry.pushed { Text(agoText(p)).font(.system(size: 9)).foregroundStyle(.secondary) }
         }
     }
 
@@ -116,10 +118,98 @@ struct WidgetView: View {
 }
 
 @main
+struct DispecinkWidgets: WidgetBundle {
+    var body: some Widget {
+        BotWidget()
+        CrewWidget()
+        DispecinkWidget()
+        DispecinkLiveActivity()
+    }
+}
+
+// MARK: - The bot: big, glowing by state, with what it does (like the Grok Bot widget)
+
+struct BotWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "DispecinkBot", provider: Provider()) { entry in
+            BotWidgetView(entry: entry)
+        }
+        .configurationDisplayName("Bot")
+        .description("Tvůj bot z notche: co zrovna dělá, jestli je hotovo, nebo na tebe něco čeká.")
+        .supportedFamilies([.systemSmall])
+    }
+}
+
+struct BotWidgetView: View {
+    let entry: Entry
+    var body: some View {
+        let a = entry.state?.activityState
+        let mode = a?.mode ?? "idle"
+        VStack(spacing: 4) {
+            Text(a.map { $0.mode == "working" ? $0.title : "Dispečink" } ?? "Dispečink")
+                .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.4)).lineLimit(1)
+            BotBadge(character: entry.state?.bot ?? .white, mode: mode, size: 74)
+            Group {
+                switch mode {
+                case "working": StepTicker(steps: Array((a?.steps ?? []).suffix(2)), fallback: a?.title ?? "", big: 10)
+                case "done": Label("Hotovo", systemImage: "checkmark.square.fill").font(.system(size: 11, weight: .medium))
+                case "error": Text("Něco selhalo").font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.bad)
+                case "ask": Text(a?.waiting ?? 0 > 1 ? "\(a?.waiting ?? 0) čekají na tebe" : "Čeká na tebe").font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.amber)
+                default: Text(entry.pushed.map { "Mac \(agoText($0))" } ?? "").font(.system(size: 10)).foregroundStyle(.white.opacity(0.35))
+                }
+            }
+            .frame(height: 26)
+        }
+        .containerBackground(for: .widget) {
+            ZStack {
+                Color(white: 0.05)
+                LinearGradient(colors: [.clear, modeColor(mode).opacity(mode == "idle" ? 0 : 0.45)], startPoint: .center, endPoint: .bottom)
+            }
+        }
+    }
+}
+
+// MARK: - The crew: the agents as coloured pills, or their faces
+
+struct CrewWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "DispecinkCrew", provider: Provider()) { entry in
+            CrewWidgetView(entry: entry)
+        }
+        .configurationDisplayName("Agenti")
+        .description("Tvoji agenti a co dělají, v jejich barvách.")
+        .supportedFamilies([.systemSmall, .systemMedium])
+    }
+}
+
+struct CrewWidgetView: View {
+    @Environment(\.widgetFamily) var family
+    let entry: Entry
+    var body: some View {
+        let crew = entry.state?.crew ?? []
+        let a = entry.state?.activityState
+        Group {
+            if family == .systemMedium {
+                HStack(spacing: 12) {
+                    BotBadge(character: entry.state?.bot ?? .white, mode: a?.mode ?? "idle", size: 70)
+                        .frame(width: 84, height: 84)
+                        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
+                    CrewGrid(crew: crew, size: 12)
+                }
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(crew.prefix(4), id: \.name) { CrewPill(chip: $0, size: 11) }
+                }
+            }
+        }
+        .containerBackground(for: .widget) { Color(white: 0.05) }
+    }
+}
+
 struct DispecinkWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "Dispecink", provider: Provider()) { WidgetView(entry: $0) }
-            .configurationDisplayName("Dispečink")
+            .configurationDisplayName("Limity")
             .description("Limity Claude, ChatGPT a Gemini a co na tebe čeká.")
             .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
     }

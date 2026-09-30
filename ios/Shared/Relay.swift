@@ -16,9 +16,15 @@ struct PhoneState: Decodable {
     let limits: Limits
     let agents: [Agent]
     let perms: [Perm]?
+    let bot: MascotCharacter?
+    let answers: [Answer]?
 
     struct Counts: Decodable { let attention: Int; let run: Int; let sleep: Int; let ok: Int; let off: Int }
-    struct Item: Decodable, Identifiable { let id: String; let name: String; let state: String; let chip: String?; let doing: String; let when: String }
+    struct Item: Decodable, Identifiable {
+        let id: String; let name: String; let state: String; let chip: String?; let doing: String; let when: String
+        let group: String?; let engine: String?; let character: MascotCharacter?; let job: String?
+    }
+    struct Answer: Decodable, Identifiable { let id: String; let question: String; let answer: String?; let at: Double }
     struct Live: Decodable { let name: String; let lines: [String] }
     struct Limits: Decodable {
         let claude: Claude?
@@ -30,6 +36,9 @@ struct PhoneState: Decodable {
     }
     struct Agent: Decodable, Identifiable, Hashable {
         let id: String; let name: String; let engine: String; let status: String; let issues: [Issue]
+        let character: MascotCharacter?
+        /** Whether it works on something right now, from its item on the Mac. */
+        func state(in s: PhoneState) -> String { s.items.first { $0.id == "agent:\(id)" }?.state ?? (status == "paused" ? "off" : "sleep") }
         static func == (a: Agent, b: Agent) -> Bool { a.id == b.id }
         func hash(into h: inout Hasher) { h.combine(id) }
     }
@@ -47,6 +56,11 @@ extension PhoneState {
     var gemini5h: Int? { limits.gemini.first { $0.group == "Gemini" && $0.windowSecs == 18000 }?.percent }
     var geminiWeek: Int? { limits.gemini.first { $0.group == "Gemini" && $0.windowSecs == 604800 }?.percent }
     var waiting: [Item] { items.filter { ["you", "bad", "new"].contains($0.state) } }
+    /** The worst state, as the Mac's SEVERITY orders them: the bot's mood. */
+    var worst: String {
+        for s in ["bad", "you", "new", "run", "done", "ok", "sleep", "off"] where items.contains(where: { $0.state == s }) { return s }
+        return "ok"
+    }
 }
 
 enum Relay {

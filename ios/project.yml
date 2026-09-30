@@ -23,6 +23,19 @@ targets:
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
         GENERATE_INFOPLIST_FILE: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_NSSupportsLiveActivities: YES
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Dispečink
+        CFBundleDevelopmentRegion: cs
+        CFBundleLocalizations: [cs]
+        NSSupportsLiveActivities: true
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [cz.erikkarasek.dispecink.refresh]
+        UILaunchScreen: {}
+        UIUserInterfaceStyle: Dark
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     dependencies:
       - target: DispecinkWidget
   DispecinkWidget:
@@ -39,5 +52,7 @@ targets:
       path: Widget/Info.plist
       properties:
         CFBundleDisplayName: Dispečink
+        CFBundleDevelopmentRegion: cs
+        CFBundleLocalizations: [cs]
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

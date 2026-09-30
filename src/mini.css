@@ -273,3 +273,28 @@ body.mini button { font: inherit; color: inherit; }
 .nt .answer button { flex: none; white-space: nowrap; }
 .nt .who { display: flex; align-items: center; min-width: 0; }
 .nt .who .x { margin-left: auto; }
+
+/* Grok-Bot crew: four agents as pills in their colours, 2×2. */
+.nt .crew { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.nt .pill { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 10px 3px 4px; border-radius: 99px; cursor: pointer;
+  color: var(--c); background: color-mix(in srgb, var(--c) 13%, #0b0b0d); border: 1px solid color-mix(in srgb, var(--c) 28%, transparent); }
+.nt .pill .m { width: 20px; height: 20px; flex: none; }
+.nt .pill b { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nt .pill.s-bad { color: #f3a19c; }
+.nt .step .ic { width: 1em; height: 1em; vertical-align: -.12em; margin-right: 6px; opacity: .9; }
+.nt .step.past .ic { width: .9em; height: .9em; }
+/* Closed notch: the crew's faces, 2×2. */
+.nt .faces4 { display: grid; grid-template-columns: 9px 9px; gap: 1px; flex: none; }
+.nt .faces4 span { width: 9px; height: 9px; display: block; }
+.nt .faces4 svg { width: 9px; height: 9px; }
+/* Something failed: the notch glows red, like Grok Bot taking a beating. */
+.nt.err .hero { background: linear-gradient(135deg, #000 35%, rgba(224, 96, 90, .32)) !important; border-color: rgba(224, 96, 90, .35) !important; }
+.nt.err .bar { box-shadow: inset 0 -12px 18px -12px rgba(224, 96, 90, .55); }
+/* Hero and crew side by side, as two cards (the Grok Bot layout). */
+.nt .card.hero { grid-template-rows: 1fr; }
+.nt .card.crewcard { flex: 1.05; display: grid; align-content: center; padding: 12px; }
+.nt .crewcard .crew { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.nt .crewcard .pill { padding: 5px 12px 5px 5px; }
+.nt .crewcard .pill .m { width: 24px; height: 24px; }
+.nt .crewcard .pill b { font-size: 12.5px; }
+.nt .card.hero .big-wrap::before { opacity: .75; }

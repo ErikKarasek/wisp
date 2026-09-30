@@ -19,7 +19,7 @@ function authorized(req: Request, env: Env): boolean {
   return diff === 0;
 }
 
-const KINDS = new Set(["task", "comment", "perm", "refresh"]);
+const KINDS = new Set(["task", "comment", "perm", "refresh", "ask", "job", "agent"]);
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {

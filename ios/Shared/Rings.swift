@@ -17,6 +17,8 @@ struct LimitRing: View {
     let inner: Int?
     var outer: Int? = nil
     var size: CGFloat = 54
+    var hideLabel = false
+    func labelsHidden() -> LimitRing { var r = self; r.hideLabel = true; return r }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -31,7 +33,7 @@ struct LimitRing: View {
                     .foregroundStyle((inner ?? 0) >= 85 ? Palette.bad : .white)
             }
             .frame(width: size, height: size)
-            Text(label).font(.system(size: max(9, size * 0.19), weight: .medium)).foregroundStyle(.secondary)
+            if !hideLabel { Text(label).font(.system(size: max(9, size * 0.19), weight: .medium)).foregroundStyle(.secondary) }
         }
     }
 

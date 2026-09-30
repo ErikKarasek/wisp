@@ -73,6 +73,8 @@ const settle = (k: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, k)), 3);
  * Frames update the attributes of the shapes already on the page instead of
  * rewriting the SVG, and a mascot that is scrolled out of view isn't drawn.
  */
+let mounted = 0;
+
 export function mountMascot(
   el: HTMLElement,
   options: {
@@ -103,6 +105,27 @@ export function mountMascot(
   svg.appendChild(group);
   el.appendChild(svg);
 
+  // Gloss, like a lit ball: a radial highlight top-left fading to a soft shade at
+  // the bottom, clipped to the body. Ids are unique per mascot on the page.
+  const uid = `m${++mounted}`;
+  svg.insertAdjacentHTML(
+    "afterbegin",
+    `<defs><radialGradient id="${uid}g" gradientUnits="userSpaceOnUse">` +
+      `<stop offset="0" stop-color="#fff" stop-opacity=".62"/><stop offset=".38" stop-color="#fff" stop-opacity=".1"/>` +
+      `<stop offset=".7" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".3"/>` +
+      `</radialGradient><clipPath id="${uid}c"></clipPath></defs>`,
+  );
+  const grad = svg.querySelector("radialGradient") as SVGElement;
+  const clip = svg.querySelector("clipPath") as SVGElement;
+  const gloss = document.createElementNS(SVG_NS, "rect");
+  gloss.setAttribute("x", "0");
+  gloss.setAttribute("y", "0");
+  gloss.setAttribute("width", "100");
+  gloss.setAttribute("height", "100");
+  gloss.setAttribute("fill", `url(#${uid}g)`);
+  gloss.setAttribute("clip-path", `url(#${uid}c)`);
+  gloss.setAttribute("pointer-events", "none");
+
   let shapes: SVGElement[] = [];
   let kinds = "";
   const set = (node: Element, name: string, value: string | number) => {
@@ -132,6 +155,26 @@ export function mountMascot(
       });
       kinds = nextKinds;
     }
+    // The highlight sits between the body and the eyes.
+    const b = g.body;
+    set(grad, "cx", b.cx - b.rx * 0.38);
+    set(grad, "cy", b.cy - b.ry * 0.5);
+    set(grad, "r", Math.max(b.rx, b.ry) * 1.55);
+    const bodyShapes = g.primitives.slice(0, b.count);
+    if (clip.childNodes.length !== bodyShapes.length) {
+      clip.replaceChildren(...bodyShapes.map((p) => document.createElementNS(SVG_NS, p.kind === "ellipse" ? "ellipse" : "path")));
+    }
+    bodyShapes.forEach((p, i) => {
+      const node = clip.childNodes[i] as Element;
+      if (p.kind === "ellipse") {
+        set(node, "cx", p.cx);
+        set(node, "cy", p.cy);
+        set(node, "rx", p.rx);
+        set(node, "ry", p.ry);
+      } else if (p.kind === "path") set(node, "d", p.d);
+    });
+    const firstEye = shapes[b.count] ?? null;
+    if (gloss.parentNode !== group || gloss.nextSibling !== firstEye) group.insertBefore(gloss, firstEye);
     g.primitives.forEach((p, i) => {
       const node = shapes[i];
       if (p.kind === "ellipse") {

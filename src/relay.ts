@@ -12,13 +12,15 @@ export type RelayContext = {
   companies: () => { company: Obj; agents: Obj[] }[];
   /** The cards, the counts, the limits and the Focus: what the Mac shows. */
   overview: () => Obj;
+  /** How an item looks (its character, as the Mac draws it). */
+  character: (itemId: string) => Obj;
   toast: (text: string) => void;
 };
 
 const ENGINE: Record<string, string> = { codex_local: "ChatGPT", claude_local: "Claude" };
 const list = (v: Obj[] | { items: Obj[] }) => (Array.isArray(v) ? v : v.items ?? []);
 
-async function threads(companies: { company: Obj; agents: Obj[] }[]) {
+async function threads(companies: { company: Obj; agents: Obj[] }[], character: (id: string) => Obj) {
   const out: Obj[] = [];
   for (const c of companies) {
     const issues = list(await pc<Obj[] | { items: Obj[] }>("GET", `/companies/${c.company.id}/issues`).catch(() => []));
@@ -49,11 +51,14 @@ async function threads(companies: { company: Obj; agents: Obj[] }[]) {
           };
         }),
       );
-      out.push({ id: a.id, name: a.name, engine: ENGINE[a.adapterType] ?? a.adapterType, status: a.status, issues: withMessages });
+      out.push({ id: a.id, name: a.name, engine: ENGINE[a.adapterType] ?? a.adapterType, status: a.status, character: character(`agent:${a.id}`), issues: withMessages });
     }
   }
   return out;
 }
+
+/** Quick questions from the phone and Gemini's answers, newest first. */
+const answers: Obj[] = [];
 
 export function startRelay(ctx: RelayContext) {
   let busy = false;
@@ -62,7 +67,7 @@ export function startRelay(ctx: RelayContext) {
     busy = true;
     try {
       const companies = ctx.companies();
-      await invoke("relay_push", { state: { at: Date.now(), ...ctx.overview(), agents: await threads(companies) } });
+      await invoke("relay_push", { state: { at: Date.now(), ...ctx.overview(), answers, agents: await threads(companies, ctx.character) } });
     } catch {
       /* no relay set up, or offline: the next minute tries again */
     } finally {
@@ -92,6 +97,18 @@ export function startRelay(ctx: RelayContext) {
         });
         await wake(a.id);
         ctx.toast(`Z telefonu: úkol pro ${a.name}.`);
+      } else if (cmd.kind === "ask") {
+        const question = String(cmd.question ?? "").trim();
+        if (!question) return;
+        const entry: Obj = { id: String(cmd.askId ?? cmd.id), question, answer: null, at: Date.now() };
+        answers.unshift(entry);
+        answers.splice(10);
+        void push();
+        entry.answer = await invoke<string>("ask_quick", { question, context: String(cmd.context ?? "") }).catch((e) => `Nepovedlo se: ${e}`);
+      } else if (cmd.kind === "job" && ["run", "pause", "resume"].includes(cmd.action)) {
+        await invoke("job_action", { label: String(cmd.label), action: cmd.action });
+      } else if (cmd.kind === "agent" && ["agentPause", "agentResume", "agentInvoke"].includes(cmd.action)) {
+        await invoke("paperclip_action", { kind: cmd.action, id: String(cmd.agentId) });
       } else if (cmd.kind === "comment") {
         const text = String(cmd.text ?? "").trim();
         if (!text || typeof cmd.issueId !== "string") return;

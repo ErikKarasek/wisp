@@ -138,6 +138,9 @@ const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).
 const midnight = (ms: number) => new Date(new Date(ms).toDateString()).getTime();
 const WHITE_BOT: Partial<MascotCharacter> = { color: "#e6e8ef", eyeColor: "#15161a" };
 
+const TERM = `<svg class="ic" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 6l2 2-2 2M8.5 10.5h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const COPY = `<svg class="ic" viewBox="0 0 16 16"><rect x="5" y="5" width="8.5" height="8.5" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3 10.5V3.8C3 3.4 3.4 3 3.8 3h6.7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
+
 export async function startNotch() {
   const g = await invoke<{ notchWidth: number; barHeight: number; hasNotch: boolean }>("notch_geometry");
   let cfg = await invoke<Cfg>("config_load").catch(() => ({}) as Cfg);
@@ -152,7 +155,7 @@ export async function startNotch() {
         </div>
         <div class="gap"></div>
         <div class="side r">
-          <span class="closed-only rw"><span class="lstep"></span><span class="st"></span><span class="lim" hidden></span></span>
+          <span class="closed-only rw"><span class="lstep"></span><span class="st"></span><span class="faces4"></span><span class="lim" hidden></span></span>
           <div class="open-only icons">
             <span class="ring cl" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
             <span class="ring gem" hidden><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="track"/><circle cx="18" cy="18" r="14" class="fill"/></svg><b></b></span>
@@ -166,8 +169,8 @@ export async function startNotch() {
         <div class="card hero">
           <div class="big-wrap"><div class="m big"></div><span class="dots" hidden><i></i><i></i><i></i></span></div>
           <div class="steps"></div>
-          <div class="crew"></div>
         </div>
+        <div class="card crewcard"><div class="crew"></div></div>
         <div class="card music"></div>
         <div class="card cal"><div class="cal-head"><div class="my"><b></b><span></span></div><div class="week"></div></div><div class="cal-body"></div></div>
         <div class="card mirror" hidden><video autoplay playsinline muted></video><p class="muted"></p></div>
@@ -240,7 +243,7 @@ export async function startNotch() {
 
   // ----- settings -----
   const applyPrefs = () => {
-    $(".crew").hidden = !prefs.showOthers;
+    $(".crewcard").hidden = !prefs.showOthers;
     $(".music").hidden = !prefs.showMusic;
     $(".cal").hidden = !prefs.showCalendar;
     ($("[data-act=mirror]") as HTMLElement).hidden = !prefs.showMirror;
@@ -381,15 +384,20 @@ export async function startNotch() {
 
   // ----- a file dropped on the notch, and a question about it (Gemini answers) -----
   let fileAsk: { path: string; name: string } | null = null;
-  void getCurrentWebview().onDragDropEvent((e) => {
-    const p = e.payload;
-    if (p.type === "enter" || p.type === "over") root.classList.add("dropping");
-    else if (p.type === "leave") root.classList.remove("dropping");
-    else if (p.type === "drop") {
-      root.classList.remove("dropping");
-      if (p.paths[0]) showFile(p.paths[0]);
-    }
-  });
+  // Outside Tauri (a browser copy) there is no webview; the rest of the notch must still work.
+  try {
+    void getCurrentWebview().onDragDropEvent((e) => {
+      const p = e.payload;
+      if (p.type === "enter" || p.type === "over") root.classList.add("dropping");
+      else if (p.type === "leave") root.classList.remove("dropping");
+      else if (p.type === "drop") {
+        root.classList.remove("dropping");
+        if (p.paths[0]) showFile(p.paths[0]);
+      }
+    });
+  } catch {
+    /* no drag and drop here */
+  }
   function showFile(path: string) {
     const name = path.split("/").pop() ?? path;
     fileAsk = { path, name };
@@ -491,6 +499,7 @@ export async function startNotch() {
   const draw = (s: Snapshot) => {
     lastSnap = s;
     root.classList.toggle("focus", !!s.focus);
+    root.classList.toggle("err", s.items.some((i) => i.state === "bad"));
     base = s.focus && worst(s) !== "bad" ? "thriving" : faceFor(worst(s));
     face();
     const bad = s.items.filter((i) => i.state === "bad").length;
@@ -513,7 +522,7 @@ export async function startNotch() {
     lim.hidden = !prefs.showLimits || !limits;
     if (!lim.hidden && lim.innerHTML !== limits) lim.innerHTML = limits;
     // A ring takes ~21 px, and ~17 more with its number.
-    const extra = lim.hidden ? 0 : (limits.match(/class="li /g)?.length ?? 0) * 21 + (limits.match(/<b>/g)?.length ?? 0) * 17 + 4;
+    const extra = (lim.hidden ? 0 : (limits.match(/class="li /g)?.length ?? 0) * 21 + (limits.match(/<b>/g)?.length ?? 0) * 17 + 4) + 26;
     // Only Paperclip agents widen the notch with their step; Claude Code in a
     // terminal shows its dots here and the steps in the open notch.
     const wide = !!s.live?.[0];
@@ -584,7 +593,7 @@ export async function startNotch() {
       while (lines.length < 3) lines.unshift("");
       steps.innerHTML =
         `<small class="who">${escHtml(working.name)} pracuje</small>` +
-        lines.map((l, i) => `<div class="step ${i === lines.length - 1 ? "now" : "past"}">${i === lines.length - 1 ? "›_ " : ""}${escHtml(l)}</div>`).join("");
+        lines.map((l, i) => `<div class="step ${i === lines.length - 1 ? "now" : "past"}">${l ? (i === lines.length - 1 ? TERM : COPY) : ""}${escHtml(l)}</div>`).join("");
     } else if (doneCc) {
       steps.innerHTML = `<small class="who">${escHtml(doneCc.project)} · Claude</small><div class="step now big-text">Hotovo</div><div class="step past wrap">${escHtml(doneCc.text)}</div>`;
     } else if (fresh) {
@@ -633,32 +642,57 @@ export async function startNotch() {
     });
   }
 
+  // The crew: four agents as coloured pills with what they do (agents first, then the busiest others).
+  const crewStatus = (i: MiniItem) =>
+    i.state === "run" ? i.doing : i.state === "you" ? "Čeká na tebe" : i.state === "bad" ? "Selhal" : i.state === "done" ? "Hotovo" : i.state === "new" ? "Něco našel" : i.name;
+  function crewPick(s: Snapshot, working?: { id: string }) {
+    const agents = s.items.filter((i) => i.id.startsWith("agent:") && i.id !== working?.id);
+    const rest = [...s.items].filter((i) => !i.id.startsWith("agent:") && i.id !== working?.id).sort(byUrgency);
+    return [...agents.sort(byUrgency), ...rest].slice(0, 4);
+  }
   function renderCrew(s: Snapshot, working: Snapshot["live"][number] | undefined) {
-    const others = [...s.items].filter((i) => i.id !== working?.id).sort(byUrgency).slice(0, 7);
+    const four = crewPick(s, working);
     const seen = new Set<string>();
-    others.forEach((i, n) => {
+    four.forEach((i, n) => {
       seen.add(i.id);
-      let face = crew.querySelector<HTMLElement>(`[data-id="${CSS.escape(i.id)}"]`);
-      if (!face) {
-        face = document.createElement("button");
-        face.className = "mate";
-        face.dataset.id = i.id;
-        face.innerHTML = `<span class="m"></span><i></i>`;
-        face.addEventListener("click", () => void emit(EV_OPEN, { id: i.id }));
-        crewMascots.set(i.id, mountMascot(face.querySelector(".m") as HTMLElement, { character: i.character, expression: STATES[i.state].expr, seed: 30 + n }));
+      let pill = crew.querySelector<HTMLElement>(`[data-id="${CSS.escape(i.id)}"]`);
+      if (!pill) {
+        pill = document.createElement("button");
+        pill.dataset.id = i.id;
+        pill.innerHTML = `<span class="m"></span><b></b>`;
+        pill.addEventListener("click", () => void emit(EV_OPEN, { id: i.id }));
+        crewMascots.set(i.id, mountMascot(pill.querySelector(".m") as HTMLElement, { character: i.character, expression: STATES[i.state].expr, seed: 30 + n }));
       }
       crewMascots.get(i.id)!.setExpression(STATES[i.state].expr);
-      face.className = `mate s-${i.state}`;
-      face.title = `${i.name}: ${i.chip}\n${i.doing}`;
-      crew.appendChild(face);
+      pill.className = `pill s-${i.state}`;
+      pill.style.setProperty("--c", (i.character as { color?: string }).color ?? "#8b9cff");
+      (pill.querySelector("b") as HTMLElement).textContent = crewStatus(i);
+      pill.title = `${i.name}: ${i.chip}\n${i.doing}`;
+      crew.appendChild(pill);
     });
-    crew.querySelectorAll<HTMLElement>(".mate").forEach((p) => {
+    crew.querySelectorAll<HTMLElement>(".pill").forEach((p) => {
       if (!seen.has(p.dataset.id!)) {
         crewMascots.get(p.dataset.id!)?.destroy();
         crewMascots.delete(p.dataset.id!);
         p.remove();
       }
     });
+    renderFaces(four);
+  }
+
+  // Closed notch: the same four as tiny faces in a 2×2, next to the limits.
+  const faceMascots = new Map<string, MountedMascot>();
+  function renderFaces(four: MiniItem[]) {
+    const box = $(".faces4");
+    const ids = four.map((i) => i.id).join("|");
+    if (box.dataset.ids !== ids) {
+      faceMascots.forEach((m) => m.destroy());
+      faceMascots.clear();
+      box.innerHTML = four.map(() => `<span></span>`).join("");
+      four.forEach((i, n) => faceMascots.set(i.id, mountMascot(box.children[n] as HTMLElement, { character: i.character, expression: STATES[i.state].expr, seed: 50 + n })));
+      box.dataset.ids = ids;
+    }
+    four.forEach((i) => faceMascots.get(i.id)?.setExpression(STATES[i.state].expr));
   }
 
   // ----- music -----
