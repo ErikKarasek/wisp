@@ -300,6 +300,11 @@ async fn claude_usage() -> Result<usage::Usage, String> {
 }
 
 #[tauri::command]
+async fn gemini_usage() -> Result<Vec<usage::AgyWindow>, String> {
+    blocking(usage::gemini_usage).await?
+}
+
+#[tauri::command]
 async fn chatgpt_usage() -> Result<usage::GptUsage, String> {
     usage::chatgpt_usage().await
 }
@@ -438,6 +443,7 @@ pub fn run() {
             codex_command,
             set_tray_title,
             chatgpt_usage,
+            gemini_usage,
             github_prs,
             github_pr_diff,
             github_pr_action,

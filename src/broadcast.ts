@@ -41,6 +41,9 @@ export function windowName(secs: number): string {
 export const resetText = (ms: number) =>
   ms ? new Date(ms).toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 
+/** An Antigravity (Google AI Pro) limit: Gemini models, or its Claude and GPT models. */
+export type AgyWindow = { group: "Gemini" | "Claude a GPT"; percent: number; windowSecs: number; resetsAtMs: number };
+
 export type Snapshot = {
   items: MiniItem[];
   counts: { attention: number; run: number; sleep: number; ok: number; off: number };
@@ -51,6 +54,7 @@ export type Snapshot = {
   live: { id: string; name: string; character: Partial<MascotCharacter>; lines: string[] }[];
   usage: ClaudeUsage | null;
   gpt: QuotaWindow[];
+  gemini: AgyWindow[];
 };
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];

@@ -62,7 +62,7 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       <div class="prow top"><span>Ukazovat</span><div class="checks">
         ${np("showOthers", "Ostatní agenty a úlohy (malé postavičky pod botem)")}${np("showMusic", "Co hraje (Spotify, Hudba)")}
         ${np("showCalendar", "Další události z kalendáře")}${np("showMirror", "Tlačítko kamery (zrcátko)")}
-        ${np("showLimits", "Limity Claude a ChatGPT vedle zavřeného notche, pořád")}
+        ${np("showLimits", "Limity Claude, ChatGPT a Gemini vedle zavřeného notche, pořád")}
       </div></div>
       <div class="prow top"><span>Chování</span><div class="checks">
         ${np("follow", "Oči sledují myš")}${np("dance", "Tancuje, když hraje hudba")}${np("peek", "Vykoukne, když se něco stane")}
@@ -143,7 +143,7 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       <label class="toggle"><input type="checkbox" data-f="sounds" ${ctx.cfg.sounds ? "checked" : ""}>
         Zvuky, když něco doběhne, selže nebo šťouchnu do postavičky</label>
       <label class="toggle"><input type="checkbox" data-f="trayLimits" ${ctx.cfg.trayLimits ? "checked" : ""}>
-        Limity Claude (C) a ChatGPT (G) vedle ikonky v liště</label>
+        Limity Claude (C), ChatGPT (G) a Gemini (Ge) vedle ikonky v liště</label>
       <label class="toggle"><input type="checkbox" data-f="autostart" ${autostart ? "checked" : ""}>
         Spouštět Dispečink po přihlášení</label>
     </section>

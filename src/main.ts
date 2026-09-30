@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { openAgentForm } from "./agentform";
-import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type QuotaWindow, type Snapshot, windowName, resetText } from "./broadcast";
+import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type QuotaWindow, type AgyWindow, type Snapshot, windowName, resetText } from "./broadcast";
 import { renderReviews } from "./reviews";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
@@ -54,6 +54,9 @@ let jobs: Job[] = [];
 let paperclip: PaperclipSnapshot | null = null;
 let usage: ClaudeUsage | null = null;
 let gptQuota: QuotaWindow[] = [];
+let geminiQuota: AgyWindow[] = [];
+/** Antigravity takes ~10 s to answer, so Gemini is read less often. */
+const GEMINI_MS = 2 * 60_000;
 /** How often both limits are read: often enough to watch them move while agents work. */
 const USAGE_MS = 60_000;
 
@@ -63,6 +66,8 @@ function trayTitle(): string {
   const parts: string[] = [];
   if (usage?.session) parts.push(`C ${usage.session.percent} %`);
   if (gptQuota[0]) parts.push(`G ${gptQuota[0].percent} %`);
+  const gem = geminiQuota.find((w) => w.group === "Gemini" && w.windowSecs === 5 * 3600);
+  if (gem) parts.push(`Ge ${gem.percent} %`);
   return parts.join("  ");
 }
 let prCount = 0;
@@ -362,10 +367,23 @@ function renderSide() {
         })
         .join("")
     : "";
+  const gemRows = geminiQuota.filter((w) => w.group === "Gemini").sort((a, b) => a.windowSecs - b.windowSecs);
+  const other = geminiQuota.filter((w) => w.group !== "Gemini").map((w) => `Claude a GPT ${windowName(w.windowSecs)}: ${w.percent} %`).join(", ");
+  const gemini = gemRows.length
+    ? `<h6 title="${esc(other ? `Antigravity, dál ${other}` : "Antigravity")}">Limit Gemini</h6>` +
+      gemRows
+        .map((w) => {
+          const resets = resetText(w.resetsAtMs);
+          return `<div class="gauge${w.percent >= 85 ? " hot" : ""}"${resets ? ` title="obnoví se ${esc(resets)}"` : ""}><div class="bar"><i style="width:${w.percent}%"></i></div>
+            <small>${esc(windowName(w.windowSecs))}: ${w.percent} %</small></div>`;
+        })
+        .join("")
+    : "";
   const neurons = cloudflare ? cloudflareNeurons(cloudflare) : null;
   const gauge =
     claude +
     gpt +
+    gemini +
     (neurons == null
       ? ""
       : `<h6>Workers AI dnes</h6><div class="gauge${neurons >= NEURONS_PER_DAY * 0.9 ? " hot" : ""}"><div class="bar"><i style="width:${Math.min(100, (neurons / NEURONS_PER_DAY) * 100).toFixed(1)}%"></i></div>
@@ -817,6 +835,7 @@ function snapshot(): Snapshot {
     live: liveNow,
     usage,
     gpt: gptQuota,
+    gemini: geminiQuota,
   };
 }
 let newsAt = 0;
@@ -1073,6 +1092,16 @@ async function start() {
   };
   void loadUsage();
   setInterval(() => void loadUsage(), USAGE_MS);
+  const loadGemini = async () => {
+    const got = await invoke<AgyWindow[]>("gemini_usage").catch(() => null);
+    if (!got) return;
+    geminiQuota = got;
+    render();
+    broadcast();
+    void invoke("set_tray_title", { title: trayTitle() });
+  };
+  void loadGemini();
+  setInterval(() => void loadGemini(), GEMINI_MS);
   window.addEventListener("dispecink-tray", () => void invoke("set_tray_title", { title: trayTitle() }));
   setInterval(() => void morning(), 60_000);
   setInterval(() => void refresh(false), LOCAL_MS);

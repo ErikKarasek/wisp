@@ -238,3 +238,5 @@ body.mini button { font: inherit; color: inherit; }
 .nt .li.gp .fl { stroke: #10a37f; }
 .nt .li b { font: 600 10.5px ui-rounded, -apple-system, sans-serif; color: #cfd3da; font-variant-numeric: tabular-nums; }
 .nt .li.fast b { color: #e2b04a; }
+.nt .li.gm .fl { stroke: #4f8df5; }
+.nt .li.gm .fl.wk { stroke: #3b6fc4; opacity: .75; }

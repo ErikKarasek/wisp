@@ -261,8 +261,6 @@ export async function startNotch() {
   const crew = $(".crew");
   const crewMascots = new Map<string, MountedMascot>();
   const LIVE_WING = 190;
-  /** What the limits add to each wing (both wings grow, so the notch stays centred). */
-  const LIMITS_W = 78;
   const arc = (r: number, pct: number) => {
     const len = 2 * Math.PI * r;
     return `stroke-dasharray="${((Math.min(100, pct) / 100) * len).toFixed(2)} ${len.toFixed(2)}"`;
@@ -278,6 +276,16 @@ export async function startNotch() {
         ${week ? `<circle cx="10" cy="10" r="8.5" class="tr"/><circle cx="10" cy="10" r="8.5" class="fl wk" ${arc(8.5, week.percent)}/>` : ""}
         ${ses ? `<circle cx="10" cy="10" r="5" class="tr"/><circle cx="10" cy="10" r="5" class="fl" ${arc(5, ses.percent)}/>` : ""}
       </svg><b>${ses?.percent ?? week?.percent}</b></span>`);
+    }
+    // Gemini (Antigravity): like Claude, the 5 h window inside the week.
+    const g5 = s.gemini?.find((w) => w.group === "Gemini" && w.windowSecs === 5 * 3600);
+    const gw = s.gemini?.find((w) => w.group === "Gemini" && w.windowSecs === 7 * 86400);
+    if (g5 || gw) {
+      const gemAhead = g5 ? ahead(g5.percent, elapsedPercent(g5.resetsAtMs, g5.windowSecs)) : false;
+      out.push(`<span class="li gm${gemAhead ? " fast" : ""}"><svg viewBox="0 0 20 20">
+        ${gw ? `<circle cx="10" cy="10" r="8.5" class="tr"/><circle cx="10" cy="10" r="8.5" class="fl wk" ${arc(8.5, gw.percent)}/>` : ""}
+        ${g5 ? `<circle cx="10" cy="10" r="5" class="tr"/><circle cx="10" cy="10" r="5" class="fl" ${arc(5, g5.percent)}/>` : ""}
+      </svg><b>${g5?.percent ?? gw?.percent}</b></span>`);
     }
     const g = s.gpt?.[0];
     if (g) {
@@ -308,7 +316,8 @@ export async function startNotch() {
     const limits = limitsHtml(s);
     lim.hidden = !prefs.showLimits || !limits;
     if (!lim.hidden && lim.innerHTML !== limits) lim.innerHTML = limits;
-    const extra = lim.hidden ? 0 : LIMITS_W;
+    // Each ring with its number takes ~38 px.
+    const extra = lim.hidden ? 0 : (limits.match(/class="li /g)?.length ?? 0) * 38 + 4;
     const wing = (working ? LIVE_WING : 46) + extra;
     if (wing !== lastWing) {
       lastWing = wing;
