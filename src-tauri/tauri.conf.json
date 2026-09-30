@@ -57,7 +57,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.scdn.co https://i.scdn.co; media-src 'self' blob: mediastream:"
     },
     "macOSPrivateApi": true
   },

@@ -1,6 +1,8 @@
+mod calendar;
 mod cloudflare;
 mod github;
 mod launchd;
+mod media;
 mod notch;
 mod paperclip;
 mod store;
@@ -247,6 +249,33 @@ fn show_main_window(app: AppHandle) {
     show_main(&app);
 }
 
+// ---------- music and calendar (for the notch) ----------
+
+#[tauri::command]
+async fn media_now() -> Result<Option<media::NowPlaying>, String> {
+    blocking(media::now_playing).await
+}
+
+#[tauri::command]
+async fn media_control(app: String, action: String) -> Result<(), String> {
+    blocking(move || media::control(&app, &action)).await?
+}
+
+#[tauri::command]
+fn calendar_status() -> &'static str {
+    calendar::status()
+}
+
+#[tauri::command]
+async fn calendar_request() -> Result<bool, String> {
+    blocking(calendar::request).await
+}
+
+#[tauri::command]
+async fn calendar_events() -> Result<Vec<calendar::Event>, String> {
+    blocking(calendar::upcoming).await
+}
+
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
@@ -331,6 +360,11 @@ pub fn run() {
             paperclip_request,
             show_main_window,
             quit_app,
+            media_now,
+            media_control,
+            calendar_status,
+            calendar_request,
+            calendar_events,
             notch_set_enabled,
             notch_peek,
             notch_geometry,

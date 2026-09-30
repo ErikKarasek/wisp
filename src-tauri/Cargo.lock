@@ -839,6 +839,7 @@ dependencies = [
 name = "dispecink"
 version = "0.1.0"
 dependencies = [
+ "block2",
  "keyring",
  "libc",
  "objc2",

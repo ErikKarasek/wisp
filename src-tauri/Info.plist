@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>Dispečink ukazuje v notchi tvoje dnešní a zítřejší události.</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>Dispečink ukazuje v notchi tvoje dnešní a zítřejší události.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Zrcátko v notchi ukazuje obraz z kamery. Nikam se neukládá ani neposílá.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Dispečink ukazuje, co hraje ve Spotify nebo v Hudbě, a umí je pozastavit nebo přeskočit.</string>
+</dict>
+</plist>

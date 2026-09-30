@@ -21,9 +21,9 @@ use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager};
 pub const LABEL: &str = "notch";
 /// Width of each black wing beside the notch, where the mascot and status sit.
 const WING: f64 = 46.0;
-/// Size of the expanded overview.
-const OPEN_W: f64 = 420.0;
-const OPEN_H: f64 = 260.0;
+/// The expanded view: wide under the notch, like a shelf.
+const OPEN_MAX_W: f64 = 860.0;
+const OPEN_H: f64 = 250.0;
 /// Without a notch, a pill this wide sits at the top centre of the menu bar.
 const NO_NOTCH_W: f64 = 180.0;
 
@@ -34,6 +34,7 @@ pub struct Geometry {
     pub screen_x: f64,
     pub screen_y: f64,
     pub screen_width: f64,
+    pub screen_height: f64,
     pub notch_width: f64,
     pub bar_height: f64,
     pub has_notch: bool,
@@ -45,7 +46,7 @@ impl Geometry {
         (self.screen_x + (self.screen_width - w) / 2.0, self.screen_y, w, self.bar_height)
     }
     fn open(&self) -> (f64, f64, f64, f64) {
-        let w = OPEN_W.max(self.closed().2);
+        let w = OPEN_MAX_W.min(self.screen_width * 0.62).max(self.closed().2);
         (self.screen_x + (self.screen_width - w) / 2.0, self.screen_y, w, OPEN_H)
     }
 }
@@ -88,6 +89,7 @@ pub fn geometry() -> Option<Geometry> {
             screen_x: frame.origin.x,
             screen_y: primary_frame.size.height - top,
             screen_width: frame.size.width,
+            screen_height: frame.size.height,
             notch_width,
             bar_height: bar,
             has_notch,
@@ -153,7 +155,7 @@ struct State {
 static STATE: Mutex<State> = Mutex::new(State {
     enabled: false,
     open: false,
-    geometry: Geometry { screen_x: 0.0, screen_y: 0.0, screen_width: 0.0, notch_width: 0.0, bar_height: 0.0, has_notch: false },
+    geometry: Geometry { screen_x: 0.0, screen_y: 0.0, screen_width: 0.0, screen_height: 0.0, notch_width: 0.0, bar_height: 0.0, has_notch: false },
     hover_since: None,
     outside_since: None,
     peek_until: None,
@@ -216,15 +218,15 @@ pub fn setup(app: &AppHandle) {
         let now = Instant::now();
         let closed = g.closed();
 
-        // Eyes follow the cursor when it is anywhere near.
+        // Eyes follow the cursor wherever it is on the screen.
         let cx = closed.0 + closed.2 / 2.0;
         let (dx, dy) = (p.0 - cx, p.1 - g.screen_y);
-        if dx.abs() < 900.0 && dy < 700.0 {
-            let look = ((dx / 450.0).clamp(-1.0, 1.0), (dy / 350.0).clamp(-1.0, 1.0));
-            if (look.0 - s.last_look.0).abs() > 0.02 || (look.1 - s.last_look.1).abs() > 0.02 {
-                s.last_look = look;
-                let _ = app.emit_to(LABEL, "notch-look", look);
-            }
+        let half = (g.screen_width / 2.0).max(1.0);
+        let tall = (g.screen_height * 0.7).max(1.0);
+        let look = ((dx / half).clamp(-1.0, 1.0), (dy / tall).clamp(-1.0, 1.0));
+        if (look.0 - s.last_look.0).abs() > 0.015 || (look.1 - s.last_look.1).abs() > 0.015 {
+            s.last_look = look;
+            let _ = app.emit_to(LABEL, "notch-look", look);
         }
 
         if !s.open {
