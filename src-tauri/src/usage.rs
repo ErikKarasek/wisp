@@ -196,3 +196,31 @@ fn parse_iso_ms(s: &str) -> Option<u64> {
     let secs = days * 86400 + t[0] * 3600 + t[1] * 60 + t.get(2).copied().unwrap_or(0);
     u64::try_from(secs).ok().map(|s| s * 1000)
 }
+
+/// Days until the certificate Dispečink is signed with runs out. After that the
+/// Keychain starts asking again and new builds can't be signed.
+pub fn signing_cert_days() -> Option<i64> {
+    let pem = Command::new("/usr/bin/security")
+        .args(["find-certificate", "-c", "Apple Development: erikkarasek@centrum.cz", "-p"])
+        .output()
+        .ok()?;
+    let mut child = Command::new("/usr/bin/openssl")
+        .args(["x509", "-noout", "-enddate"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .ok()?;
+    use std::io::Write;
+    child.stdin.take()?.write_all(&pem.stdout).ok()?;
+    let out = child.wait_with_output().ok()?;
+    // "notAfter=Jun 11 12:50:47 2027 GMT"
+    let text = String::from_utf8_lossy(&out.stdout);
+    let date = text.trim().strip_prefix("notAfter=")?;
+    let parts: Vec<&str> = date.split_whitespace().collect();
+    let first = *parts.first()?;
+    let month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].iter().position(|m| *m == first)? + 1;
+    let iso = format!("{}-{:02}-{:02}T{}Z", parts.get(3)?, month, parts.get(1)?.parse::<u32>().ok()?, parts.get(2)?);
+    let end = parse_iso_ms(&iso)? as i64;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64;
+    Some((end - now) / 86_400_000)
+}

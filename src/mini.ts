@@ -393,6 +393,7 @@ export async function startNotch() {
   function showFile(path: string) {
     const name = path.split("/").pop() ?? path;
     fileAsk = { path, name };
+    quickAsk = false;
     permShown = null;
     steps.innerHTML = `<small class="who">${escHtml(name)}<button class="x" title="Zavřít">✕</button></small>
       <div class="step past wrap reply">Na co se chceš zeptat? Odpoví Gemini z tvého AI Pro.</div>
@@ -426,6 +427,60 @@ export async function startNotch() {
       if (e.key === "Enter") void ask();
     });
   }
+
+  // ----- ⌃⌥Space: a quick question, with whatever was copied as its context -----
+  let quickAsk = false;
+  const closeQuick = () => {
+    quickAsk = false;
+    redraw();
+  };
+  void listen<string>("quick-ask", (e) => {
+    quickAsk = true;
+    fileAsk = null;
+    permShown = null;
+    let clip = e.payload.trim();
+    const preview = clip.replace(/\s+/g, " ").slice(0, 90);
+    steps.innerHTML = `<small class="who">Rychlá otázka · Gemini<button class="x" title="Zavřít (Esc)">✕</button></small>
+      ${clip ? `<div class="step past clip">Zkopírováno: „${escHtml(preview)}${clip.length > 90 ? "…" : ""}“ <button class="drop-clip">nepoužít</button></div>` : ""}
+      <div class="step past wrap reply"></div>
+      <div class="answer"><input type="text" placeholder="${clip ? "Třeba: přelož do angličtiny, vysvětli, shrň" : "Na co se chceš zeptat?"}" spellcheck="false"><button>Zeptat se</button></div>`;
+    const input = steps.querySelector("input") as HTMLInputElement;
+    const go = steps.querySelector(".answer button") as HTMLButtonElement;
+    const reply = steps.querySelector(".reply") as HTMLElement;
+    steps.querySelector(".x")!.addEventListener("click", closeQuick);
+    steps.querySelector(".drop-clip")?.addEventListener("click", () => {
+      clip = "";
+      steps.querySelector(".clip")?.remove();
+      input.placeholder = "Na co se chceš zeptat?";
+      input.focus();
+    });
+    const ask = async () => {
+      const q = input.value.trim();
+      if (!q || go.disabled) return;
+      go.disabled = true;
+      reply.textContent = "Gemini přemýšlí…";
+      try {
+        const text = (await invoke<string>("ask_quick", { question: q, context: clip })).replace(/\*\*|__|`/g, "");
+        reply.innerHTML = `${escHtml(text)} <button class="copy">Kopírovat</button>`;
+        reply.querySelector(".copy")!.addEventListener("click", async (ev) => {
+          await navigator.clipboard.writeText(text).catch(() => {});
+          (ev.target as HTMLButtonElement).textContent = "Zkopírováno";
+        });
+        input.value = "";
+        input.placeholder = "Další otázka…";
+      } catch (err) {
+        reply.textContent = String(err);
+      }
+      go.disabled = false;
+      input.focus();
+    };
+    go.addEventListener("click", () => void ask());
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") void ask();
+      if (ev.key === "Escape") closeQuick();
+    });
+    setTimeout(() => input.focus(), 60);
+  });
 
   let lastSnap: Snapshot | null = null;
   const redraw = () => {
@@ -512,7 +567,7 @@ export async function startNotch() {
       return renderCrew(s, working);
     }
     permShown = null;
-    if (fileAsk) return renderCrew(s, working);
+    if (fileAsk || quickAsk) return renderCrew(s, working);
     const doneCc = !working && ccDone && Date.now() - ccDone.at < 15_000 ? ccDone : null;
 
     const asking = !working && !(fresh && fresh.id === "morning") ? s.items.find((i) => i.ask) : undefined;

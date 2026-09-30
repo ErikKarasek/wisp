@@ -260,3 +260,5 @@ body.mini button { font: inherit; color: inherit; }
 .nt .card[hidden] { display: none !important; }
 /* Asking for permission: the command and its buttons get the whole card. */
 .nt.asking .hero .big-wrap { display: none; }
+.nt .clip { color: #9aa0ab; font-size: 11.5px; }
+.nt .clip button, .nt .reply .copy { margin-left: 6px; border: 0; border-radius: 6px; padding: 1px 7px; background: rgba(255, 255, 255, .1); color: #cfd3da; font-size: 11px; cursor: pointer; }

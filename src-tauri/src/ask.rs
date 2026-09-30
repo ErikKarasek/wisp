@@ -61,3 +61,39 @@ pub fn ask_report(report: &str, thread: &str, question: &str) -> Result<String, 
         _ => Err("Gemini neodpověděl.".into()),
     }
 }
+
+/// A quick question from the shortcut, with whatever was copied as its context.
+pub fn ask_quick(question: &str, context: &str) -> Result<String, String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let agy = PathBuf::from(format!("{home}/.local/bin/agy"));
+    if !agy.exists() {
+        return Err("Chybí Antigravity CLI (agy).".into());
+    }
+    let prompt = if context.trim().is_empty() {
+        format!("{question}\n\nOdpověz česky, stručně a přímo, jako v chatu (žádné nadpisy).")
+    } else {
+        format!(
+            "Zkopírovaný text:\n---\n{context}\n---\n\n{question}\n\nOdpověz česky, stručně a přímo, jako v chatu (žádné nadpisy). \
+             Když jde o překlad nebo přepis, vrať rovnou výsledný text."
+        )
+    };
+    let dir = std::env::temp_dir().join("dispecink-ask");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let out = Command::new(agy)
+        .args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "2m"])
+        .current_dir(&dir)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = text.find('{').and_then(|i| serde_json::from_str(&text[i..]).ok()).unwrap_or_default();
+    match v.get("response").and_then(|r| r.as_str()).map(str::trim) {
+        Some(r) if !r.is_empty() => Ok(r.to_string()),
+        _ => Err("Gemini neodpověděl.".into()),
+    }
+}
+
+/// What is on the clipboard as text (at most 8000 characters).
+pub fn clipboard() -> String {
+    let out = Command::new("/usr/bin/pbpaste").output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    out.chars().take(8000).collect()
+}

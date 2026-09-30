@@ -92,7 +92,40 @@ async function loadLocal() {
   ]);
   jobs = jobList;
   paperclip = snap;
+  void watchPaperclip(snap.online);
   localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now)];
+}
+
+// ---------- safety nets ----------
+
+/** Tell Erik on the screen and, when Telegram is on, on the phone. */
+function warn(text: string) {
+  toast(text);
+  if (cfg.telegram.enabled && cfg.telegram.chat) void invoke("telegram_send", { chat: cfg.telegram.chat, text: `Dispečink: ${text}` }).catch(() => {});
+}
+
+// Paperclip runs the agents; when it stops answering twice in a row, launchd restarts it (at most every 10 min).
+const PAPERCLIP_JOB = "ing.paperclip.paperclipai";
+let paperclipDown = 0;
+let paperclipKicked = 0;
+async function watchPaperclip(online: boolean) {
+  if (online) {
+    if (paperclipKicked && paperclipDown) warn("Paperclip zase běží, agenti můžou pracovat.");
+    paperclipDown = 0;
+    return;
+  }
+  paperclipDown++;
+  if (paperclipDown < 2 || Date.now() - paperclipKicked < 10 * 60_000) return;
+  if (!jobs.some((j) => j.label === PAPERCLIP_JOB)) return;
+  paperclipKicked = Date.now();
+  const ok = await invoke("job_action", { label: PAPERCLIP_JOB, action: "restart" }).then(() => true).catch(() => false);
+  warn(ok ? "Paperclip neodpovídal, restartoval jsem ho." : "Paperclip neodpovídá a restart se nepovedl. Mrkni na něj.");
+}
+
+// ChatGPT agents need Codex by its full path, which a Paperclip update moves.
+async function healCodex() {
+  const fixed = await invoke<string[]>("heal_codex").catch(() => [] as string[]);
+  if (fixed.length) warn(`Po aktualizaci Paperclipu jsem opravil cestu ke Codexu: ${fixed.join(", ")}.`);
 }
 
 async function loadCloud() {
@@ -1089,6 +1122,8 @@ async function morning(force = false) {
   if (gemWeek) limits.push(`Gemini ${gemWeek.percent} % týdne`);
   if (proWeek) limits.push(`Claude v AI Pro ${proWeek.percent} % týdne`);
   if (limits.length) parts.push(`Limity: ${limits.join(", ")}.`);
+  const certDays = await invoke<number | null>("signing_cert_days").catch(() => null);
+  if (certDays != null && certDays <= 30) parts.push(`Certifikát, kterým se podepisuje Dispečink, vyprší za ${certDays} dní. Obnov ho v Xcode (Settings → Accounts → Manage Certificates).`);
   const later = allItems()
     .map((i) => {
       const today = /příště dnes (\d{1,2}:\d{2})/.exec(i.when)?.[1];
@@ -1173,6 +1208,8 @@ async function start() {
   setInterval(() => void loadGemini(), GEMINI_MS);
   window.addEventListener("dispecink-tray", () => void invoke("set_tray_title", { title: trayTitle() }));
   setInterval(() => void morning(), 60_000);
+  void healCodex();
+  setInterval(() => void healCodex(), 60 * 60_000);
   startPhone({
     chat: () => (cfg.telegram.enabled && cfg.telegram.remote !== false && cfg.telegram.chat ? cfg.telegram.chat : null),
     companies: () => (paperclip?.online ? paperclip.companies : []),

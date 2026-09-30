@@ -327,6 +327,32 @@ async fn ask_report(report: String, thread: String, question: String) -> Result<
 }
 
 #[tauri::command]
+async fn heal_codex() -> Result<Vec<String>, String> {
+    let Some(cmd) = codex_command() else { return Ok(vec![]) };
+    paperclip::heal_codex(&cmd).await
+}
+
+#[tauri::command]
+async fn signing_cert_days() -> Option<i64> {
+    blocking(usage::signing_cert_days).await.ok().flatten()
+}
+
+/// Open the notch for a quick question, with the clipboard as its context.
+fn quick_ask(app: &AppHandle) {
+    let clip = ask::clipboard();
+    notch::peek(app, 120_000);
+    if let Some(w) = app.get_webview_window("notch") {
+        let _ = w.set_focus();
+    }
+    let _ = tauri::Emitter::emit_to(app, "notch", "quick-ask", clip);
+}
+
+#[tauri::command]
+async fn ask_quick(question: String, context: String) -> Result<String, String> {
+    blocking(move || ask::ask_quick(&question, &context)).await?
+}
+
+#[tauri::command]
 async fn gemini_usage() -> Result<Vec<usage::AgyWindow>, String> {
     blocking(usage::gemini_usage).await?
 }
@@ -415,6 +441,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            // ⌃⌥Space anywhere: the notch opens with a question box (Gemini answers).
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcuts(["ctrl+alt+space"])
+                .expect("shortcut")
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        quick_ask(app);
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             let handle = app.handle();
@@ -478,6 +516,9 @@ pub fn run() {
             cc_hooks_set,
             ask_file,
             ask_report,
+            ask_quick,
+            heal_codex,
+            signing_cert_days,
             github_prs,
             github_pr_diff,
             github_pr_action,

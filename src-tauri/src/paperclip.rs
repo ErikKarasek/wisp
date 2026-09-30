@@ -195,3 +195,35 @@ pub async fn request(method: &str, path: &str, body: Option<Value>) -> Result<Va
         Err(format!("HTTP {status}: {msg}"))
     }
 }
+
+/// ChatGPT agents run Codex by its full path inside Paperclip's own install,
+/// which moves with every Paperclip update. Point any agent whose codex is gone
+/// at the current one; returns the names it fixed.
+pub async fn heal_codex(command: &str) -> Result<Vec<String>, String> {
+    let c = client()?;
+    let mut fixed = Vec::new();
+    for company in list(get(&c, "/companies").await?) {
+        let Some(cid) = company["id"].as_str() else { continue };
+        for a in list(get(&c, &format!("/companies/{cid}/agents")).await.unwrap_or_default()) {
+            if a["adapterType"] != "codex_local" || a["status"] == "terminated" {
+                continue;
+            }
+            let Some(id) = a["id"].as_str() else { continue };
+            let full = get(&c, &format!("/agents/{id}")).await?;
+            let current = full["adapterConfig"]["command"].as_str().unwrap_or("");
+            if !current.is_empty() && std::path::Path::new(current).exists() {
+                continue;
+            }
+            let res = c
+                .patch(format!("{BASE}/api/agents/{id}"))
+                .json(&serde_json::json!({ "adapterConfig": { "command": command, "engine": "cli" } }))
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if res.status().is_success() {
+                fixed.push(a["name"].as_str().unwrap_or(id).to_string());
+            }
+        }
+    }
+    Ok(fixed)
+}
