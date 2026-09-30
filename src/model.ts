@@ -52,7 +52,7 @@ export type Item = {
   chip?: string;
   bubble?: string;
   /** Agents: the subscription they run on. */
-  engine?: "Claude" | "ChatGPT";
+  engine?: "Claude" | "ChatGPT" | "Gemini";
   character: Partial<MascotCharacter>;
   facts: [string, string][];
   /** A job's log label, an agent's live runs, or static lines to show instead. */
@@ -138,6 +138,7 @@ export type Job = {
 
 const JOBS: Record<string, { name: string; doing: string }> = {
   "com.erikkarasek.devlog": { name: "Devlog", doing: "V noci sepíše, co se za den commitlo" },
+  "com.erikkarasek.gemini-portfolio": { name: "Kontrola portfolia", doing: "Každou středu projde erikkarasek.cz: odkazy, texty, chybějící projekty" },
   "com.erikkarasek.github-reels": { name: "GitHub reels", doing: "Ráno projde trendy a AI novinky a napíše scénáře reelů" },
   "com.erikkarasek.job-digest": { name: "Job digest", doing: "Pošle souhrn nových nabídek práce" },
   "com.erikkarasek.job-mail": { name: "Job mail", doing: "Každou hodinu projde poštu kvůli odpovědím na přihlášky" },
@@ -234,9 +235,15 @@ export function jobItem(j: Job, now = Date.now()): Item {
   if (j.lastExit != null) facts.push(["Poslední kód", String(j.lastExit)]);
   facts.push(["Úloha", j.label]);
 
+  // Jobs that run an AI themselves: Antigravity (Gemini) or Claude Code.
+  const cmd = j.command ?? j.program.join(" ");
+  const engine = /gemini-jobs\/|\bagy\b/.test(cmd) ? ("Gemini" as const) : /\bclaude\b/.test(cmd) ? ("Claude" as const) : undefined;
+  if (engine === "Gemini") facts.push(["Motor", "Gemini (Antigravity, Google AI Pro)"]);
+
   return {
     id: `job:${j.label}`,
     group: "mac",
+    ...(engine ? { engine } : {}),
     name: info.name,
     doing,
     about: info.doing,
