@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Dispe\u010dink",
+  "productName": "Dispečink",
   "version": "0.1.0",
   "identifier": "cz.erikkarasek.dispecink",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Dispe\u010dink",
+        "title": "Dispečink",
         "width": 1180,
         "height": 800,
         "minWidth": 720,
@@ -25,7 +25,7 @@
       {
         "label": "panel",
         "url": "index.html?view=panel",
-        "title": "Dispe\u010dink",
+        "title": "Dispečink",
         "width": 340,
         "height": 440,
         "resizable": false,
@@ -41,7 +41,7 @@
       {
         "label": "notch",
         "url": "index.html?view=notch",
-        "title": "Dispe\u010dink notch",
+        "title": "Dispečink notch",
         "width": 300,
         "height": 34,
         "resizable": false,
@@ -75,7 +75,9 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "Dispečink Dev",
+      "hardenedRuntime": false
     }
   }
 }
