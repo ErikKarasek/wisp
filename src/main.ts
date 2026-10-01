@@ -1031,8 +1031,8 @@ async function updateTray() {
       : mascotSvg({ color: "#000000", eyeColor: "#ffffff" }, EXPRESSIONS[face], 44);
     const png = await renderPng(svg, 44, !failed);
     await invoke("set_tray", { png: Array.from(png), tooltip, lines, template: !failed });
-  } catch (e) {
-    console.error("tray", e);
+  } catch {
+    // Drawing the tray icon failed; the next refresh tries again.
     traySig = "";
   }
 }

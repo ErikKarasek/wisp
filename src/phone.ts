@@ -92,23 +92,36 @@ export function startPhone(ctx: PhoneContext) {
     }
   };
   let since = load() ?? new Date(Date.now() - 60 * 60_000).toISOString();
+  let forwarding = false;
   const forward = async () => {
     const chat = ctx.chat();
-    if (!chat) return;
+    if (!chat || forwarding) return;
+    forwarding = true;
     const from = since;
-    since = new Date().toISOString();
+    const next = new Date().toISOString();
     try {
-      localStorage.setItem(KEY, since);
+      await forwardSince(chat, from);
+      // Only a finished run moves the mark; a failed one is retried from the same place.
+      since = next;
+      try {
+        localStorage.setItem(KEY, since);
+      } catch {
+        /* private storage off: forwarding still works while the app runs */
+      }
     } catch {
-      /* private storage off: forwarding still works while the app runs */
+      /* Paperclip busy or down: next minute again */
+    } finally {
+      forwarding = false;
     }
+  };
+  const forwardSince = async (chat: string, from: string) => {
     for (const c of ctx.companies()) {
-      const all = await pc<Obj[] | { items: Obj[] }>("GET", `/companies/${c.company.id}/issues`).catch(() => []);
+      const all = await pc<Obj[] | { items: Obj[] }>("GET", `/companies/${c.company.id}/issues`);
       const mine = (Array.isArray(all) ? all : all.items).filter(
         (i) => i.originKind === "manual" && i.createdByUserId && i.assigneeAgentId && i.updatedAt > from,
       );
       for (const issue of mine) {
-        const got = await pc<Obj[] | { items: Obj[] }>("GET", `/issues/${issue.id}/comments`).catch(() => []);
+        const got = await pc<Obj[] | { items: Obj[] }>("GET", `/issues/${issue.id}/comments`);
         const news = (Array.isArray(got) ? got : got.items).filter((m) => m.authorAgentId && m.createdAt > from);
         const who = c.agents.find((a) => a.id === issue.assigneeAgentId)?.name ?? "Agent";
         for (const m of news) {

@@ -185,7 +185,7 @@ fn parse_iso_ms(s: &str) -> Option<u64> {
     let (date, time) = s.trim_end_matches('Z').split_once('T')?;
     let d: Vec<i64> = date.split('-').map(|p| p.parse().ok()).collect::<Option<_>>()?;
     let t: Vec<i64> = time.split(':').map(|p| p.split('.').next().unwrap_or(p).parse().ok()).collect::<Option<_>>()?;
-    let (y, m, day) = (d[0], d[1], d[2]);
+    let (y, m, day) = (*d.first()?, *d.get(1)?, *d.get(2)?);
     // Days from 1970-01-01 (Howard Hinnant's days_from_civil).
     let y2 = if m <= 2 { y - 1 } else { y };
     let era = y2.div_euclid(400);
@@ -193,7 +193,7 @@ fn parse_iso_ms(s: &str) -> Option<u64> {
     let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146097 + doe - 719468;
-    let secs = days * 86400 + t[0] * 3600 + t[1] * 60 + t.get(2).copied().unwrap_or(0);
+    let secs = days * 86400 + t.first()? * 3600 + t.get(1)? * 60 + t.get(2).copied().unwrap_or(0);
     u64::try_from(secs).ok().map(|s| s * 1000)
 }
 

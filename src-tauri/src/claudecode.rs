@@ -43,6 +43,33 @@ pub struct CcPermission {
 }
 
 static PENDING: Mutex<Option<HashMap<String, Sender<String>>>> = Mutex::new(None);
+/// A secret in the hook URLs, so another local program can't feed Claude permission answers.
+static KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The secret, made once and kept in the app's config folder.
+fn key() -> &'static str {
+    KEY.get_or_init(|| {
+        let path = dirs_config().join("cc-hook-key");
+        if let Ok(k) = std::fs::read_to_string(&path) {
+            let k = k.trim().to_string();
+            if k.len() >= 32 {
+                return k;
+            }
+        }
+        let mut bytes = [0u8; 24];
+        if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+            let _ = f.read_exact(&mut bytes);
+        }
+        let k: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let _ = std::fs::create_dir_all(dirs_config());
+        let _ = std::fs::write(&path, &k);
+        k
+    })
+}
+
+fn dirs_config() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Library/Application Support/cz.erikkarasek.dispecink")
+}
 /// The prompts themselves, for the phone.
 static ASKS: Mutex<Vec<CcPermission>> = Mutex::new(Vec::new());
 
@@ -209,7 +236,14 @@ pub fn start(app: &AppHandle) {
             let mut body = String::new();
             let _ = req.as_reader().take(1 << 20).read_to_string(&mut body);
             let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-            match req.url() {
+            let (path, query) = req.url().split_once('?').unwrap_or((req.url(), ""));
+            let path = path.to_string();
+            // Claude Code's hooks carry the secret; anything else gets nothing.
+            if path.starts_with("/cc/") && !query.split('&').any(|p| p == format!("k={}", key())) {
+                let _ = req.respond(tiny_http::Response::from_string("").with_status_code(403));
+                continue;
+            }
+            match path.as_str() {
                 "/cc/event" => {
                     if let Some(e) = event(&v) {
                         let _ = app.emit("cc-event", e);
@@ -231,7 +265,7 @@ pub fn start(app: &AppHandle) {
                 }
                 // A Shortcuts automation when a macOS Focus turns on or off.
                 "/focus/on" | "/focus/off" => {
-                    let _ = app.emit("focus", req.url() == "/focus/on");
+                    let _ = app.emit("focus", path == "/focus/on");
                     respond(req, String::new());
                 }
                 _ => respond(req, String::new()),
@@ -254,7 +288,7 @@ fn hook(url: &str, timeout: u64, async_: bool) -> Value {
     let max = if async_ { 2 } else { timeout - 5 };
     let mut h = json!({
         "type": "command",
-        "command": format!("curl -s -m {max} -H 'content-type: application/json' --data-binary @- http://{MARK}{url} 2>/dev/null || true"),
+        "command": format!("curl -s -m {max} -H 'content-type: application/json' --data-binary @- 'http://{MARK}{url}?k={}' 2>/dev/null || true", key()),
         "timeout": timeout,
     });
     if async_ {
