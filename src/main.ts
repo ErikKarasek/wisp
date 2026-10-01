@@ -177,6 +177,89 @@ void listen<{ title?: string; text?: string; urgent?: boolean }>("notify", async
   if (cfg.telegram.enabled && cfg.telegram.chat) void invoke("telegram_send", { chat: cfg.telegram.chat, text: `${title}\n\n${text}` }).catch(() => {});
 });
 
+// ---------- Claude's limit: agents pause before it runs out, and come back after ----------
+
+/** Agents the guard paused itself, so it only ever wakes those, never one Erik paused. */
+const GUARD_KEY = "wisp.guard.paused";
+const guardPaused = (): string[] => {
+  try {
+    return JSON.parse(localStorage.getItem(GUARD_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+};
+let guarding = false;
+async function guardClaude(u: ClaudeUsage | null) {
+  if (!u || !paperclip?.online || guarding) return;
+  guarding = true;
+  try {
+    const session = u.session?.percent ?? 0;
+    const week = u.week?.percent ?? 0;
+    const agents = paperclip.companies.flatMap((c) => c.agents).filter((a) => a.adapterType === "claude_local" && a.status !== "terminated");
+    let paused = guardPaused();
+    if (session >= 90 || week >= 95) {
+      const now = agents.filter((a) => a.status !== "paused" && !paused.includes(a.id));
+      for (const a of now) {
+        await invoke("paperclip_action", { kind: "agentPause", id: a.id }).catch(() => {});
+        paused.push(a.id);
+      }
+      if (now.length) warn(`Limit Claude je na ${Math.max(session, week)} %: pozastavil jsem ${now.map((a) => a.name).join(", ")}, ať ho nedočerpají. Až se limit obnoví, sami se rozjedou.`);
+    } else if (session < 60 && week < 90 && paused.length) {
+      const back = agents.filter((a) => paused.includes(a.id));
+      for (const a of back) {
+        await invoke("paperclip_action", { kind: "agentResume", id: a.id }).catch(() => {});
+        // Woken right away, so the tasks it left half done get finished.
+        await invoke("paperclip_action", { kind: "agentInvoke", id: a.id }).catch(() => {});
+      }
+      if (back.length) warn(`Limit Claude se obnovil: ${back.map((a) => a.name).join(", ")} zase pracuje a dodělá rozdělané úkoly.`);
+      paused = [];
+    }
+    localStorage.setItem(GUARD_KEY, JSON.stringify(paused));
+  } finally {
+    guarding = false;
+  }
+}
+
+// ---------- every morning: what Fixer did overnight ----------
+
+const DIGEST_KEY = "wisp.fixerDigest";
+async function fixerDigest() {
+  const today = new Date().toDateString();
+  if (new Date().getHours() < 8 || localStorage.getItem(DIGEST_KEY) === today) return;
+  if (!cfg.telegram.enabled || !cfg.telegram.chat || !paperclip?.online) return;
+  type Obj = Record<string, any>;
+  const list = (v: Obj[] | { items: Obj[] }) => (Array.isArray(v) ? v : v.items ?? []);
+  const since = Date.now() - 24 * 3600_000;
+  const done: string[] = [];
+  const stuck: string[] = [];
+  let working = 0;
+  for (const c of paperclip.companies) {
+    const issues = list(await invoke<Obj[] | { items: Obj[] }>("paperclip_request", { method: "GET", path: `/companies/${c.company.id}/issues`, body: null }).catch(() => []));
+    for (const i of issues.filter((x) => String(x.title).startsWith("[review]") && Date.parse(x.updatedAt) > since)) {
+      const title = String(i.title).replace(/^\[review\]\s*/, "");
+      if (i.status === "done" || i.status === "in_review") {
+        const comments = list(await invoke<Obj[] | { items: Obj[] }>("paperclip_request", { method: "GET", path: `/issues/${i.id}/comments`, body: null }).catch(() => []));
+        const pr = comments.map((m) => String(m.body ?? "")).join("\n").match(/https:\/\/github\.com\/[^\s)]+\/pull\/\d+/g)?.at(-1);
+        done.push(`✅ ${title}${pr ? `\n   ${pr}` : ""}`);
+      } else if (i.status === "blocked") {
+        const comments = list(await invoke<Obj[] | { items: Obj[] }>("paperclip_request", { method: "GET", path: `/issues/${i.id}/comments`, body: null }).catch(() => []));
+        const why = String([...comments].reverse().find((m) => m.authorAgentId)?.body ?? "").replace(/[*`#>]/g, "").split("\n").find((l) => l.trim()) ?? "";
+        stuck.push(`⚠️ ${title}${why ? `\n   ${why.trim().slice(0, 160)}` : ""}`);
+      } else if (i.status === "in_progress" || i.status === "todo") working++;
+    }
+  }
+  localStorage.setItem(DIGEST_KEY, today);
+  if (!done.length && !stuck.length && !working && !prList.length) return;
+  const lines = ["🛠 Fixer za posledních 24 h"];
+  if (done.length) lines.push("", `Opraveno (${done.length}):`, ...done);
+  if (stuck.length) lines.push("", `Zaseklo se, potřebuje tě (${stuck.length}):`, ...stuck);
+  if (working) lines.push("", `Ještě na tom pracuje: ${working}`);
+  if (prList.length) lines.push("", `Čeká na tvoje mergnutí: ${prList.length} PR (Wisp → Ke kontrole)`, ...prList.slice(0, 6).map((p) => `• ${String(p.repo).split("/").pop()}#${p.number} ${p.title}`));
+  void invoke("telegram_send", { chat: cfg.telegram.chat, text: lines.join("\n") }).catch(() => {});
+}
+setInterval(() => void fixerDigest(), 10 * 60_000);
+setTimeout(() => void fixerDigest(), 60_000);
+
 // ---------- safety nets ----------
 
 /** Tell Erik on the screen and, when Telegram is on, on the phone. */
@@ -1286,6 +1369,7 @@ async function start() {
     render();
     broadcast();
     void invoke("set_tray_title", { title: trayTitle() });
+    void guardClaude(usage);
   };
   void loadUsage();
   setInterval(() => void loadUsage(), USAGE_MS);
