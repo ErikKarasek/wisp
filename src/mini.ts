@@ -124,6 +124,9 @@ type CalEvent = { title: string; startMs: number; endMs: number; allDay: boolean
 type Cfg = { sounds?: boolean; characters?: SavedCharacter[]; notchPrefs?: Partial<NotchPrefs> };
 
 const CAMERA = `<svg viewBox="0 0 24 24"><circle cx="12" cy="10" r="6"/><circle cx="12" cy="10" r="2.2"/><path d="M8 20h8M12 16v4"/></svg>`;
+const HOME = `<svg viewBox="0 0 24 24"><path d="M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-5h-6v5H5a1 1 0 0 1-1-1z"/></svg>`;
+const CHAT = `<svg viewBox="0 0 24 24"><path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></svg>`;
+const PLUS = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8.5v7M8.5 12h7"/></svg>`;
 const GEAR = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/></svg>`;
 const CAL_EMPTY = `<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><circle cx="17.5" cy="17.5" r="4.2" class="ok"/><path d="m15.8 17.6 1.2 1.2 2.3-2.4" class="tick"/></svg>`;
 const BADGE: Record<string, string> = {
@@ -151,7 +154,12 @@ export async function startNotch() {
       <div class="bar">
         <div class="side l">
           <div class="closed-only lw"><div class="m tiny"></div><span class="lname"></span></div>
-          <div class="open-only sum"></div>
+          <div class="open-only tabs">
+            <button data-tab="home" class="on" title="Přehled">${HOME}</button>
+            <button data-tab="chat" title="Chat s agenty">${CHAT}</button>
+            <button data-tab="new" title="Nový úkol pro agenta">${PLUS}</button>
+            <span class="sum"></span>
+          </div>
         </div>
         <div class="gap"></div>
         <div class="side r">
@@ -171,6 +179,11 @@ export async function startNotch() {
           <div class="steps"></div>
         </div>
         <div class="card crewcard"><div class="crew"></div></div>
+        <div class="card chatcard" hidden>
+          <div class="agents"></div>
+          <div class="convo"><div class="msgs"></div>
+            <div class="answer"><input type="text" spellcheck="false"><button>Poslat</button></div></div>
+        </div>
         <div class="card music"></div>
         <div class="card cal"><div class="cal-head"><div class="my"><b></b><span></span></div><div class="week"></div></div><div class="cal-body"></div></div>
         <div class="card mirror" hidden><video autoplay playsinline muted></video><p class="muted"></p></div>
@@ -219,7 +232,12 @@ export async function startNotch() {
       tiny.setExpression(ex);
       big.setExpression(ex);
       if (cfg.sounds !== false) sounds.poke(n >= 5 ? 0.6 : 1 + n * 0.08);
-      if (n >= 5) pokes = [];
+      if (n >= 5) {
+        pokes = [];
+        beatenUntil = Date.now() + 3200;
+        renderBeaten();
+        setTimeout(() => redraw(), 3300);
+      }
       setTimeout(face, 1150);
     });
   }
@@ -419,7 +437,7 @@ export async function startNotch() {
       const q = input.value.trim();
       if (!q || go.disabled) return;
       go.disabled = true;
-      reply.textContent = "Gemini čte soubor…";
+      reply.innerHTML = `<div class="run-bar"><i></i></div><small>Gemini čte ${escHtml(name)}…</small>`;
       try {
         const text = await invoke<string>("ask_file", { path, question: q });
         reply.textContent = text.replace(/\*\*|__|`/g, "");
@@ -492,6 +510,125 @@ export async function startNotch() {
     setTimeout(() => input.focus(), 60);
   });
 
+  // ----- tabs: the overview, a chat with the agents, a new task -----
+  let tab: "home" | "chat" | "new" = "home";
+  let chatAgent: string | null = null;
+  const chatcard = $(".chatcard");
+  const homeCards = () => [...panes.querySelectorAll<HTMLElement>(".card:not(.chatcard)")];
+  function setTab(next: typeof tab) {
+    tab = next;
+    root.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+    const chat = tab !== "home";
+    chatcard.hidden = !chat;
+    homeCards().forEach((c) => c.classList.toggle("tabbed-out", chat));
+    if (chat) void renderChat();
+  }
+  root.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab as typeof tab)));
+  // While the chat is open, the agent's answer shows up on its own.
+  setInterval(() => {
+    if (tab === "chat" && root.classList.contains("is-open") && document.activeElement !== chatcard.querySelector("input")) void renderChat();
+  }, 6000);
+  const chatMascots: MountedMascot[] = [];
+  void listen<boolean>("notch-open", (e) => {
+    if (!e.payload) setTab("home");
+  });
+
+  type Obj = Record<string, any>;
+  const listOf = (v: Obj[] | { items: Obj[] }) => (Array.isArray(v) ? v : v.items ?? []);
+  async function renderChat() {
+    const s = lastSnap;
+    if (!s) return;
+    const agents = s.items.filter((i) => i.id.startsWith("agent:") && i.state !== "off");
+    if (!chatAgent || !agents.some((a) => a.id === chatAgent)) chatAgent = agents[0]?.id ?? null;
+    const box = chatcard.querySelector(".agents") as HTMLElement;
+    box.innerHTML = agents
+      .map((a) => `<button class="pill${a.id === chatAgent ? " on" : ""} s-${a.state}" data-agent="${escHtml(a.id)}" style="--c:${escHtml((a.character as { color?: string }).color ?? "#8b9cff")}"><span class="m"></span><b>${escHtml(a.name)}</b></button>`)
+      .join("");
+    chatMascots.splice(0).forEach((m) => m.destroy());
+    box.querySelectorAll<HTMLElement>("[data-agent]").forEach((b, n) => {
+      const a = agents[n];
+      chatMascots.push(mountMascot(b.querySelector(".m") as HTMLElement, { character: a.character, expression: STATES[a.state].expr, seed: 70 + n }));
+      b.addEventListener("click", () => {
+        chatAgent = a.id;
+        void renderChat();
+      });
+    });
+    const agent = agents.find((a) => a.id === chatAgent);
+    const msgs = chatcard.querySelector(".msgs") as HTMLElement;
+    const input = chatcard.querySelector("input") as HTMLInputElement;
+    if (!agent) {
+      msgs.innerHTML = `<p class="muted">Žádní agenti.</p>`;
+      return;
+    }
+    const agentId = agent.id.slice(6);
+    input.placeholder = tab === "new" ? `Nový úkol pro ${agent.name}…` : `Napiš ${agent.name}…`;
+    let thread: Obj | null = null;
+    if (tab === "chat") {
+      try {
+        const full = await invoke<Obj>("paperclip_request", { method: "GET", path: `/agents/${agentId}`, body: null });
+        const issues = listOf(await invoke<Obj[] | { items: Obj[] }>("paperclip_request", { method: "GET", path: `/companies/${full.companyId}/issues`, body: null }));
+        thread = issues.filter((i) => i.assigneeAgentId === agentId).sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))[0] ?? null;
+        if (thread) {
+          const comments = listOf(await invoke<Obj[] | { items: Obj[] }>("paperclip_request", { method: "GET", path: `/issues/${thread.id}/comments`, body: null }))
+            .sort((x, y) => x.createdAt.localeCompare(y.createdAt))
+            .slice(-4);
+          msgs.innerHTML =
+            `<small class="who">${escHtml(thread.identifier)} · ${escHtml(thread.title)}</small>` +
+            comments.map((m) => `<div class="bub ${m.authorAgentId ? "them" : "me"}">${escHtml(String(m.body ?? "").replace(/[*`#>]/g, "").slice(0, 280))}</div>`).join("");
+          msgs.scrollTop = msgs.scrollHeight;
+        } else {
+          msgs.innerHTML = `<p class="muted">Zatím spolu nic neřešíte. Napiš úkol a ${escHtml(agent.name)} se do něj pustí.</p>`;
+        }
+      } catch {
+        msgs.innerHTML = `<p class="muted">Paperclip neodpovídá.</p>`;
+      }
+    } else {
+      msgs.innerHTML = `<p class="muted">Napiš, co má ${escHtml(agent.name)} udělat. První věta bude název úkolu; hned se probudí a pustí se do toho.</p>`;
+    }
+    const go = chatcard.querySelector(".answer button") as HTMLButtonElement;
+    const send = async () => {
+      const text = input.value.trim();
+      if (!text || go.disabled) return;
+      go.disabled = true;
+      // The main window knows Paperclip best; it handles the phone's commands the same way.
+      if (thread && tab === "chat") await emit("relay-cmd", { kind: "comment", issueId: thread.id, text });
+      else await emit("relay-cmd", { kind: "task", agentId, text });
+      input.value = "";
+      go.disabled = false;
+      msgs.insertAdjacentHTML("beforeend", `<div class="bub me">${escHtml(text)}</div>`);
+      msgs.scrollTop = msgs.scrollHeight;
+      if (tab === "new") setTab("chat");
+      setTimeout(() => void renderChat(), 4000);
+    };
+    go.onclick = () => void send();
+    input.onkeydown = (e) => {
+      if (e.key === "Enter") void send();
+    };
+    input.focus();
+  }
+
+  // ----- a failure: a red card with a retry, like Grok Bot's "couldn't finish" -----
+  function renderFailure(bad: MiniItem) {
+    if (steps.dataset.fail === bad.id) return;
+    steps.dataset.fail = bad.id;
+    steps.innerHTML = `<small class="who bad">${escHtml(bad.name)} selhal</small>
+      <div class="step past wrap failtext">${escHtml(bad.doing)}</div>
+      <div class="perm"><button class="go retry">Zkusit znovu</button><button data-open>Otevřít</button></div>`;
+    steps.querySelector(".retry")!.addEventListener("click", () => {
+      if (bad.id.startsWith("job:")) void emit("relay-cmd", { kind: "job", label: bad.id.slice(4), action: "run" });
+      else if (bad.id.startsWith("agent:")) void emit("relay-cmd", { kind: "agent", agentId: bad.id.slice(6), action: "agentInvoke" });
+      steps.innerHTML = `<small class="who">${escHtml(bad.name)}</small><div class="step now big-text">Zkouším to znovu…</div>`;
+      steps.dataset.fail = "";
+    });
+    steps.querySelector("[data-open]")!.addEventListener("click", () => void emit(EV_OPEN, { id: bad.id }));
+  }
+
+  // ----- poked too hard: the bot takes a beating and needs a moment -----
+  let beatenUntil = 0;
+  function renderBeaten() {
+    steps.innerHTML = `<div class="beaten"><span class="spin"></span><div><b>Dostal jsem nakládačku.</b><small>Vzpamatovávám se…</small></div></div>`;
+  }
+
   let lastSnap: Snapshot | null = null;
   const redraw = () => {
     if (lastSnap) draw(lastSnap);
@@ -499,6 +636,7 @@ export async function startNotch() {
   const draw = (s: Snapshot) => {
     lastSnap = s;
     root.classList.toggle("focus", !!s.focus);
+
     root.classList.toggle("err", s.items.some((i) => i.state === "bad"));
     base = s.focus && worst(s) !== "bad" ? "thriving" : faceFor(worst(s));
     face();
@@ -580,6 +718,13 @@ export async function startNotch() {
     }
     permShown = null;
     if (fileAsk || quickAsk) return renderCrew(s, working);
+    if (Date.now() < beatenUntil) return renderCrew(s, working);
+    const failed = !working ? s.items.find((i) => i.state === "bad") : undefined;
+    if (failed) {
+      renderFailure(failed);
+      return renderCrew(s, working);
+    }
+    steps.dataset.fail = "";
     const doneCc = !working && ccDone && Date.now() - ccDone.at < 15_000 ? ccDone : null;
 
     const asking = !working && !(fresh && fresh.id === "morning") ? s.items.find((i) => i.ask) : undefined;

@@ -117,7 +117,30 @@ void listen<{ session: string; project: string; kind: string; text: string }>("c
     cur.busy = false;
   }
   ccSessions.set(session, cur);
+  updateGlow();
 });
+/** The screen glow follows whether anything works; it fades out a few seconds after the last step. */
+let glowOn = false;
+let glowOffTimer = 0;
+function updateGlow() {
+  const want = cfg.notchPrefs.glow !== false && (liveNow.length > 0 || ccLive().length > 0);
+  if (want) {
+    clearTimeout(glowOffTimer);
+    glowOffTimer = 0;
+    if (!glowOn) {
+      glowOn = true;
+      void invoke("glow_set", { on: true });
+    }
+  } else if (glowOn && !glowOffTimer) {
+    glowOffTimer = window.setTimeout(() => {
+      glowOn = false;
+      glowOffTimer = 0;
+      void invoke("glow_set", { on: false });
+    }, 4000);
+  }
+}
+setInterval(updateGlow, 5000);
+
 /** Claude Code sessions working right now, as "live" entries. */
 function ccLive() {
   const now = Date.now();

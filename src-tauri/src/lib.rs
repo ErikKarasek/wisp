@@ -372,6 +372,12 @@ async fn relay_push(app: AppHandle, state: serde_json::Value) -> Result<(), Stri
 }
 
 #[tauri::command]
+fn glow_set(app: AppHandle, on: bool) {
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || notch::glow_set(&app2, on));
+}
+
+#[tauri::command]
 async fn gemini_usage() -> Result<Vec<usage::AgyWindow>, String> {
     blocking(usage::gemini_usage).await?
 }
@@ -539,6 +545,7 @@ pub fn run() {
             ask_quick,
             run_cleanup,
             relay_push,
+            glow_set,
             heal_codex,
             signing_cert_days,
             github_prs,

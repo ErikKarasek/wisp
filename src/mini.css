@@ -298,3 +298,36 @@ body.mini button { font: inherit; color: inherit; }
 .nt .crewcard .pill .m { width: 24px; height: 24px; }
 .nt .crewcard .pill b { font-size: 12.5px; }
 .nt .card.hero .big-wrap::before { opacity: .75; }
+
+/* Tabs in the open notch's top bar (home, chat, new). */
+.nt .tabs { gap: 2px; align-items: center; }
+.nt .tabs button { width: 28px; height: 24px; border: 0; border-radius: 8px; background: none; color: #6d7380; display: grid; place-items: center; cursor: pointer; }
+.nt .tabs button.on { background: rgba(255, 255, 255, .12); color: #fff; }
+.nt .tabs button:hover { color: #fff; }
+.nt .tabs svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.nt .tabs .sum { margin-left: 8px; }
+.nt .card.tabbed-out { display: none !important; }
+/* The chat pane: agents on the left, the conversation and a box on the right. */
+.nt .card.chatcard { flex: 1; display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 12px; padding: 12px; }
+.nt .chatcard .agents { display: flex; flex-direction: column; gap: 6px; overflow: auto; }
+.nt .chatcard .pill { opacity: .6; }
+.nt .chatcard .pill.on { opacity: 1; box-shadow: 0 0 0 1.5px var(--c); }
+.nt .chatcard .convo { display: grid; grid-template-rows: 1fr auto; gap: 8px; min-width: 0; min-height: 0; }
+.nt .chatcard .msgs { overflow: auto; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.nt .chatcard .muted { color: #6d7380; font-size: 12.5px; margin: 0; }
+.nt .bub { max-width: 85%; padding: 6px 10px; border-radius: 12px; font-size: 12.5px; line-height: 1.35; background: rgba(255, 255, 255, .07); color: #e6e8ee; align-self: flex-start; }
+.nt .bub.me { align-self: flex-end; background: rgba(139, 156, 255, .25); }
+/* Failure and the retry. */
+.nt .who.bad { color: #f3a19c; }
+.nt .failtext { color: #f3a19c; }
+.nt .perm button.retry { background: #e0605a; color: #fff; }
+/* Poked too hard. */
+.nt .beaten { display: flex; align-items: center; gap: 12px; color: #cfd3da; }
+.nt .beaten b { display: block; font-size: 15px; color: #fff; }
+.nt .beaten small { color: #9097a3; }
+.nt .spin { width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid rgba(255, 255, 255, .15); border-top-color: #fff; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* A dropped file being read: a green running bar, like Grok Bot's upload. */
+.nt .run-bar { height: 6px; border-radius: 3px; background: rgba(95, 207, 168, .18); overflow: hidden; margin: 4px 0; }
+.nt .run-bar i { display: block; width: 40%; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #4fbf7d, #9be8c2); animation: runbar 1.3s ease-in-out infinite; }
+@keyframes runbar { from { transform: translateX(-100%); } to { transform: translateX(250%); } }

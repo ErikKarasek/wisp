@@ -321,6 +321,22 @@ pub fn peek(app: &AppHandle, millis: u64) {
     set_open(app, true, g);
 }
 
+/// The glow around the screen's edge while an agent works: a click-through
+/// window over the whole main screen, shown or hidden on demand.
+pub fn glow_set(app: &AppHandle, on: bool) {
+    let Some(w) = app.get_webview_window("glow") else { return };
+    if !on {
+        let _ = w.hide();
+        return;
+    }
+    let g = geometry().unwrap_or_else(current_geometry);
+    let _ = w.set_size(LogicalSize::new(g.screen_width, g.screen_height));
+    let _ = w.set_position(LogicalPosition::new(g.screen_x, g.screen_y));
+    let _ = w.set_ignore_cursor_events(true);
+    float_over_menu_bar(&w);
+    let _ = w.show();
+}
+
 /// Stop holding the notch open after a peek; it closes once the cursor is away.
 pub fn release() {
     if let Ok(mut s) = STATE.lock() {

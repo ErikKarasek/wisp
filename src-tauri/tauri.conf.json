@@ -54,6 +54,22 @@
         "shadow": false,
         "acceptFirstMouse": true,
         "visibleOnAllWorkspaces": true
+      },
+      {
+        "label": "glow",
+        "url": "index.html?view=glow",
+        "title": "Dispečink záře",
+        "width": 400,
+        "height": 300,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false,
+        "shadow": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {
