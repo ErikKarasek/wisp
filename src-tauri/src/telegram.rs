@@ -182,6 +182,7 @@ pub fn start_listening(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let mut offset: i64 = 0;
+        let mut menu_set = false;
         let long = reqwest::Client::builder().timeout(Duration::from_secs(65)).build();
         let Ok(long) = long else { return };
         loop {
@@ -189,6 +190,20 @@ pub fn start_listening(app: &AppHandle) {
                 tokio_sleep(60).await;
                 continue;
             };
+            // The "/" menu in Telegram, so the commands don't have to be remembered.
+            if !menu_set {
+                menu_set = true;
+                let _ = long
+                    .post(format!("https://api.telegram.org/bot{}/setMyCommands", r.token))
+                    .json(&json!({ "commands": [
+                        { "command": "stav", "description": "Co se děje: kdo pracuje, co čeká na tebe" },
+                        { "command": "agenti", "description": "Agenti a jak jim dát úkol" },
+                        { "command": "limity", "description": "Limity Claude, ChatGPT a Gemini" },
+                        { "command": "pomoc", "description": "Jak se mnou mluvit" }
+                    ] }))
+                    .send()
+                    .await;
+            }
             let res = long
                 .post(format!("https://api.telegram.org/bot{}/getUpdates", r.token))
                 .json(&json!({ "offset": offset, "timeout": 50, "allowed_updates": ["message", "callback_query"] }))

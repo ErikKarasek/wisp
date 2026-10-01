@@ -20,10 +20,15 @@ export type PhoneContext = {
 const plain = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
 const HELP = [
   "Takhle se mnou můžeš mluvit:",
-  "• Watcher: zkontroluj release check – nový úkol pro agenta",
-  "• odpověz na zprávu od agenta – pošlu mu to do úkolu",
-  "• /stav – co se děje",
-  "• /limity – Claude, ChatGPT, Gemini",
+  "",
+  "• Jméno agenta a úkol – třeba „Watcher: zkontroluj release check“. Agent se hned probudí.",
+  "• Odpověď na zprávu od agenta (podrž zprávu → Odpovědět) – pošlu mu to do jeho úkolu.",
+  "• Tlačítka Povolit / Vždy / Zamítnout – když Claude Code na Macu chce něco spustit a ty nejsi u Macu.",
+  "",
+  "/stav – kdo pracuje a co čeká na tebe",
+  "/agenti – kdo tu je a na čem běží",
+  "/limity – Claude, ChatGPT, Gemini",
+  "/pomoc – tahle zpráva",
 ].join("\n");
 
 export function startPhone(ctx: PhoneContext) {
@@ -40,6 +45,18 @@ export function startPhone(ctx: PhoneContext) {
       if (/^\/(start|pomoc|help)\b/i.test(text)) return send(HELP);
       if (/^\/stav\b/i.test(text)) return send(ctx.status().join("\n"));
       if (/^\/limity\b/i.test(text)) return send(ctx.limits().join("\n") || "Limity zatím nemám načtené.");
+      if (/^\/agenti\b/i.test(text)) {
+        const engine: Record<string, string> = { claude_local: "Claude", codex_local: "ChatGPT" };
+        const list = agents().filter((a) => a.status !== "terminated");
+        return send(
+          [
+            "Agenti:",
+            ...list.map((a) => `• ${a.name} (${engine[a.adapterType] ?? a.adapterType})${a.status === "paused" ? " – pozastavený" : ""}`),
+            "",
+            `Úkol dáš tak, že napíšeš jméno a co má udělat, třeba „${list[0]?.name ?? "Watcher"}: …“.`,
+          ].join("\n"),
+        );
+      }
 
       // A reply to an agent's message: a comment on that task.
       const ref = /\b([A-Z]{2,6}-\d+)\b/.exec(replyTo)?.[1];

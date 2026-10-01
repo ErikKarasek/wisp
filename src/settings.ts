@@ -46,6 +46,17 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
     `<label class="toggle"><input type="checkbox" data-np="${key}" ${ctx.cfg.notchPrefs[key] ? "checked" : ""}> ${label}</label>`;
   el.innerHTML = `
   <div class="settings">
+    <section class="help">
+      <h3>Jak to ovládat</h3>
+      <dl>
+        <dt>Notch</dt><dd>Najeď myší na notch. Nahoře jsou záložky: <b>domeček</b> přehled, <b>bublina</b> chat s agenty, <b>+</b> nový úkol. Na bota můžeš klikat, na notch přetáhnout soubor a zeptat se na něj.</dd>
+        <dt>⌃⌥ Mezerník</dt><dd>Kdekoli rychlá otázka pro Gemini; co máš zkopírované, vezme jako podklad.</dd>
+        <dt>Claude Code</dt><dd>Když chce něco spustit, notch se otevře s <b>Povolit / Vždy / Zamítnout / Terminál</b>.</dd>
+        <dt>Telegram (bot Dispečinku)</dt><dd><code>Watcher: zkontroluj…</code> dá agentovi úkol · odpověď na zprávu agenta mu pošle odpověď · <code>/stav</code> <code>/agenti</code> <code>/limity</code> <code>/pomoc</code> · tlačítka pro povolení, když nejsi u Macu.</dd>
+        <dt>Telegram (bot job-mailu)</dt><dd>Pošli odkaz na nabídku a založí kartu · <code>/board</code> přihlášky · <code>/prehled</code> ranní přehled teď · tlačítka u odpovědí firem posouvají karty.</dd>
+        <dt>iPhone</dt><dd>Appka Dispečink: přehled, agenti a chat, otázky pro Gemini, povolování ze zamčené obrazovky; widgety Bot, Agenti a Limity.</dd>
+      </dl>
+    </section>
     <section class="notch-prefs">
       <h3>Notch</h3>
       <label class="toggle"><input type="checkbox" data-f="notch" ${ctx.cfg.notch ? "checked" : ""}>

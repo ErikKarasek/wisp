@@ -126,7 +126,25 @@ pub fn action(repo: &str, workflow_id: i64, action: &str) -> Result<(), String> 
 
 /// Open pull requests in these repos, with their checks, for the review list.
 pub fn pull_requests(repos: &[String]) -> Vec<Value> {
-    repos
+    // Also every other repo of the same owners that has an open pull request: the
+    // Fixer opens them in repos without workflows too (devlog, job-mail…).
+    let mut all: Vec<String> = repos.to_vec();
+    let mut owners: Vec<&str> = repos.iter().filter_map(|r| r.split('/').next()).collect();
+    owners.sort();
+    owners.dedup();
+    for owner in owners {
+        let found = gh(&["search", "prs", "--owner", owner, "--state", "open", "--limit", "50", "--json", "repository"]);
+        if let Some(list) = found.ok().and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok()) {
+            for pr in list {
+                if let Some(name) = pr["repository"]["nameWithOwner"].as_str() {
+                    if !all.iter().any(|r| r == name) {
+                        all.push(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    all
         .iter()
         .filter(|r| is_repo(r))
         .flat_map(|repo| {

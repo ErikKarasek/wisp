@@ -437,3 +437,8 @@ button { font: inherit; color: inherit; }
 .btn.small { padding: 3px 9px; font-size: 11.5px; }
 @keyframes blink { 50% { opacity: .35; } }
 .side .chat-btn { margin-top: 6px; color: var(--accent); font-weight: 600; }
+
+.settings .help dl { display: grid; grid-template-columns: 170px 1fr; gap: 8px 14px; margin: 0; font-size: 13px; }
+.settings .help dt { font-weight: 600; color: var(--muted); }
+.settings .help dd { margin: 0; line-height: 1.45; }
+.settings .help code { font-size: 12px; background: rgba(255, 255, 255, .07); padding: 1px 5px; border-radius: 5px; }

@@ -42,6 +42,7 @@ struct OverviewView: View {
             }
             .refreshable { await store.refresh() }
             .navigationTitle("Dispečink")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { HelpButton() } }
         }
     }
 
@@ -394,6 +395,41 @@ struct AskView: View {
             }
             .navigationTitle("Zeptat se")
             .refreshable { await store.refresh() }
+        }
+    }
+}
+
+
+// MARK: - How to use it
+
+struct HelpButton: View {
+    @State private var open = false
+    var body: some View {
+        Button { open = true } label: { Image(systemName: "questionmark.circle") }
+            .sheet(isPresented: $open) { HelpSheet().presentationDetents([.large]) }
+    }
+}
+
+struct HelpSheet: View {
+    private let rows: [(String, String)] = [
+        ("Přehled", "Bot nahoře ukazuje, co se děje. Klepnutím na úlohu nebo agenta ho spustíš, pozastavíš nebo probudíš."),
+        ("Agenti", "Vyber agenta, zadej mu nový úkol, nebo odpověz v konverzaci. Agent se hned probudí."),
+        ("Zeptat se", "Otázka pro Gemini z tvého AI Pro; odpoví přes Mac."),
+        ("Povolování", "Když Claude Code na Macu chce něco spustit, objeví se tu i na zamčené obrazovce Povolit / Vždy / Zamítnout."),
+        ("Dynamic Island a widgety", "Ostrov ukazuje bota a co dělá. Widgety Bot, Agenti a Limity přidáš podržením plochy → +. Obnovují se, když appku otevřeš, jinak zhruba po 15–30 minutách."),
+        ("Telegram", "Botovi Dispečinku napiš „Watcher: …“ a agent dostane úkol. Odpovědí na zprávu agenta mu odpovíš. /stav, /agenti, /limity, /pomoc."),
+        ("Job-mail bot", "Pošli odkaz na nabídku a založí kartu. /board, /prehled."),
+    ]
+    var body: some View {
+        NavigationStack {
+            List(rows, id: \.0) { r in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(r.0).font(.headline)
+                    Text(r.1).font(.callout).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+            .navigationTitle("Jak to ovládat")
         }
     }
 }
