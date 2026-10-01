@@ -57,10 +57,11 @@ fn key() -> &'static str {
                 return k;
             }
         }
+        // A key that is not random is worse than none: swallowing a failure here wrote 48 zeroes
+        // to disk, and the length check above then accepted them on every later launch.
         let mut bytes = [0u8; 24];
-        if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-            let _ = f.read_exact(&mut bytes);
-        }
+        let mut f = std::fs::File::open("/dev/urandom").expect("open /dev/urandom for the hook key");
+        f.read_exact(&mut bytes).expect("read /dev/urandom for the hook key");
         let k: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         let _ = std::fs::create_dir_all(dirs_config());
         let _ = std::fs::write(&path, &k);
