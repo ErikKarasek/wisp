@@ -100,7 +100,7 @@ export function startPhone(ctx: PhoneContext) {
     const from = since;
     const next = new Date().toISOString();
     try {
-      await forwardSince(chat, from);
+      await forwardSince(from);
       // Only a finished run moves the mark; a failed one is retried from the same place.
       since = next;
       try {
@@ -114,7 +114,7 @@ export function startPhone(ctx: PhoneContext) {
       forwarding = false;
     }
   };
-  const forwardSince = async (chat: string, from: string) => {
+  const forwardSince = async (from: string) => {
     for (const c of ctx.companies()) {
       const all = await pc<Obj[] | { items: Obj[] }>("GET", `/companies/${c.company.id}/issues`);
       const mine = (Array.isArray(all) ? all : all.items).filter(
