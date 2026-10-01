@@ -1,10 +1,16 @@
 import SwiftUI
 
 struct RootView: View {
+    @EnvironmentObject var store: Store
     var body: some View {
         TabView {
             OverviewView().tabItem { Label("Přehled", systemImage: "gauge.with.dots.needle.33percent") }
-            AgentsView().tabItem { Label("Agenti", systemImage: "bubble.left.and.bubble.right") }
+                .badge((store.state?.waiting.count ?? 0) + (store.state?.perms?.count ?? 0))
+            AgentsView().tabItem { Label("Agenti", systemImage: "person.2.wave.2") }
+            TasksView().tabItem { Label("Úkoly", systemImage: "checklist") }
+                .badge(store.state?.tasks.filter { $0.issue.status == "blocked" }.count ?? 0)
+            ReviewsView().tabItem { Label("Kontrola", systemImage: "arrow.triangle.pull") }
+                .badge(store.state?.prs?.count ?? 0)
             AskView().tabItem { Label("Zeptat se", systemImage: "sparkles") }
         }
         .tint(Palette.accent)
@@ -13,86 +19,186 @@ struct RootView: View {
 
 // MARK: - Overview
 
+/// What the overview filters by, like the Mac's sidebar.
+enum Filter: String, CaseIterable, Identifiable {
+    case all = "Vše", run = "Pracuje", attention = "Čeká", sleep = "Spí", off = "Vypnuto"
+    var id: String { rawValue }
+    func matches(_ s: String) -> Bool {
+        switch self {
+        case .all: return true
+        case .run: return s == "run"
+        case .attention: return ["you", "new", "bad"].contains(s)
+        case .sleep: return ["sleep", "ok", "done"].contains(s)
+        case .off: return s == "off"
+        }
+    }
+}
+
 struct OverviewView: View {
     @EnvironmentObject var store: Store
+    @State private var filter: Filter = .all
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    header
+                VStack(alignment: .leading, spacing: 16) {
+                    HeroCard()
                     if let s = store.state {
-                        limits(s)
                         if let perms = s.perms, !perms.isEmpty {
                             section("Claude chce povolit") { ForEach(perms) { PermCard(perm: $0) } }
                         }
-                        section(s.waiting.isEmpty ? "Nic na tebe nečeká" : "Čeká na tebe") {
-                            ForEach(s.waiting) { ItemRow(item: $0) }
+                        LimitsCard(s: s)
+                        if !s.waiting.isEmpty {
+                            section("Čeká na tebe") { panel { ForEach(s.waiting) { ItemRow(item: $0) } } }
                         }
-                        section("Ostatní") {
-                            ForEach(s.items.filter { !["you", "bad", "new"].contains($0.state) }) { ItemRow(item: $0) }
+                        filters(s)
+                        ForEach(groups(s), id: \.0) { name, items in
+                            section("\(name) · \(items.count)") { panel { ForEach(items) { ItemRow(item: $0) } } }
+                        }
+                        if let h = s.history, !h.isEmpty {
+                            section("Naposledy") {
+                                panel {
+                                    ForEach(h.prefix(6), id: \.key) { HistoryRow(e: $0) }
+                                    NavigationLink { HistoryView() } label: {
+                                        Text("Celá historie").font(.subheadline.weight(.medium)).frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .padding(.top, 4)
+                                }
+                            }
                         }
                     } else if let e = store.error {
                         Text(e).foregroundStyle(.secondary)
                     } else {
-                        ProgressView().frame(maxWidth: .infinity)
+                        ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                     }
                 }
                 .padding(16)
+                .animation(.spring(response: 0.4, dampingFraction: 0.85), value: filter)
             }
+            .background(Color.black)
             .refreshable { await store.refresh() }
             .navigationTitle("Dispečink")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { HelpButton() } }
         }
     }
 
-    /// The hero card, like the notch: the live bot, its steps or the crew.
-    private var header: some View {
-        let a = store.state?.activityState
-        let mode = store.macAsleep ? "idle" : (a?.mode ?? "idle")
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 14) {
-                BotBadge(character: store.state?.bot ?? .white, mode: mode, size: 70, animated: true)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(headline).font(.headline)
-                    if let a, a.mode == "working" { StepTicker(steps: a.steps, fallback: a.title, big: 14) }
-                    else if let a, a.mode == "error" || a.mode == "ask" { Text(a.detail).font(.caption).foregroundStyle(modeColor(a.mode)).lineLimit(2) }
-                    Text(subline).font(.caption2).foregroundStyle(.secondary)
+    private func filters(_ s: PhoneState) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Filter.allCases) { f in
+                    let n = s.items.filter { f.matches($0.state) }.count
+                    Button {
+                        Haptic.tap()
+                        filter = f
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(f.rawValue)
+                            Text("\(n)").foregroundStyle(filter == f ? .black.opacity(0.6) : .secondary)
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(filter == f ? Color.white : Palette.card, in: Capsule())
+                        .foregroundStyle(filter == f ? .black : .white)
+                    }
+                    .buttonStyle(.plain)
                 }
-                Spacer(minLength: 0)
             }
-            if let crew = store.state?.crew, !crew.isEmpty { CrewGrid(crew: crew, size: 12) }
         }
-        .padding(14)
-        .background(ActivityGlow(mode: mode).clipShape(RoundedRectangle(cornerRadius: 20)))
     }
 
-    private var headline: String {
-        guard let s = store.state else { return "Načítám…" }
-        if s.counts.attention > 0 { return s.counts.attention == 1 ? "1 věc na tebe čeká" : "\(s.counts.attention) věci na tebe čekají" }
-        if let p = s.perms?.first { return "\(p.project) · Claude chce povolit" }
-        if let l = s.live?.first { return "\(l.name) pracuje" }
-        if s.counts.run > 0 { return "\(s.counts.run) pracuje" }
-        return "Všechno v pořádku"
+    /// The items by where they run, in the Mac's order; waiting ones are above already.
+    private func groups(_ s: PhoneState) -> [(String, [PhoneState.Item])] {
+        let shown = s.items.filter { filter.matches($0.state) && (filter == .attention || !["you", "new", "bad"].contains($0.state)) }
+        var order: [String] = (s.groups ?? []).map(\.id)
+        for i in shown where !order.contains(i.group ?? "") { order.append(i.group ?? "") }
+        return order.compactMap { id in
+            let items = shown.filter { ($0.group ?? "") == id }
+            return items.isEmpty ? nil : (s.groupName(id.isEmpty ? nil : id), items)
+        }
     }
+}
 
-    private var subline: String {
-        guard let at = store.pushed else { return "" }
-        let focus = store.state?.focus == true ? " · soustředění" : ""
-        return store.macAsleep ? "Mac spí, poslední stav \(agoText(at))\(focus)" : "Mac hlásil \(agoText(at))\(focus)"
-    }
-
-    private func limits(_ s: PhoneState) -> some View {
-        HStack {
-            LimitRing(label: "Claude", color: Palette.claude, inner: s.limits.claude?.session, outer: s.limits.claude?.week)
+/// The three subscriptions' limits, with when they reset.
+struct LimitsCard: View {
+    let s: PhoneState
+    var body: some View {
+        HStack(alignment: .top) {
+            ring("Claude", Palette.claude, s.limits.claude?.session, s.limits.claude?.week, s.limits.claude?.resets.flatMap(claudeReset))
             Spacer()
-            LimitRing(label: "ChatGPT", color: Palette.gpt, inner: s.limits.gpt.first?.percent)
+            ring("ChatGPT", Palette.gpt, s.limits.gpt.first?.percent, nil, s.limits.gpt.first.map { resetIn($0.resetsAtMs) })
             Spacer()
-            LimitRing(label: "Gemini", color: Palette.gemini, inner: s.gemini5h, outer: s.geminiWeek)
+            ring("Gemini", Palette.gemini, s.gemini5h, s.geminiWeek, s.limits.gemini.first { $0.group == "Gemini" && $0.windowSecs == 18000 }.map { resetIn($0.resetsAtMs) })
         }
         .padding(16)
-        .background(Palette.card, in: RoundedRectangle(cornerRadius: 18))
+        .background(Color(white: 0.06), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.07), lineWidth: 1))
     }
+
+    private func ring(_ name: String, _ c: Color, _ inner: Int?, _ outer: Int?, _ reset: String?) -> some View {
+        VStack(spacing: 4) {
+            LimitRing(label: name, color: c, inner: inner, outer: outer, size: 58)
+            Text(reset ?? " ").font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+        }
+        .frame(maxWidth: 100)
+    }
+
+    /// Claude says when it resets in English ("Oct 1 at 5pm (Europe/Prague)"): just the time, in Czech.
+    private func claudeReset(_ text: String) -> String? {
+        guard let m = text.range(of: #"(\d{1,2})(?::(\d{2}))?\s*(am|pm)"#, options: [.regularExpression, .caseInsensitive]) else { return nil }
+        let part = text[m].lowercased()
+        let digits = part.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+        guard var h = digits.first else { return nil }
+        if part.hasSuffix("pm") && h < 12 { h += 12 }
+        if part.hasSuffix("am") && h == 12 { h = 0 }
+        return "obnoví v \(h):\(String(format: "%02d", digits.count > 1 ? digits[1] : 0))"
+    }
+
+    private func resetIn(_ ms: Double) -> String {
+        let s = ms / 1000 - Date().timeIntervalSince1970
+        if s <= 0 { return "obnoveno" }
+        if s < 3600 { return "obnoví za \(Int(s / 60)) min" }
+        if s < 86400 { return "obnoví za \(Int(s / 3600)) h" }
+        return "obnoví za \(Int(s / 86400)) d"
+    }
+}
+
+struct HistoryRow: View {
+    let e: PhoneState.Event
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle().fill(stateColor(e.state)).frame(width: 8, height: 8).padding(.top, 6)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack {
+                    Text(e.name).font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text(agoText(Date(timeIntervalSince1970: e.at / 1000))).font(.caption2).foregroundStyle(.tertiary)
+                }
+                Text(e.text.isEmpty ? stateText(e.state) : e.text).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+    }
+}
+
+struct HistoryView: View {
+    @EnvironmentObject var store: Store
+    var body: some View {
+        List(store.state?.history ?? [], id: \.key) { HistoryRow(e: $0) }
+            .navigationTitle("Historie")
+            .refreshable { await store.refresh() }
+    }
+}
+
+func stateText(_ s: String) -> String {
+    ["run": "Pracuje", "you": "Čeká na tebe", "new": "Něco našel", "bad": "Selhal", "done": "Hotovo", "ok": "V pořádku", "sleep": "Spí", "off": "Vypnuto"][s] ?? s
+}
+
+/// A dark card for a list, like the notch's.
+func panel<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+    VStack(alignment: .leading, spacing: 10) { content() }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(white: 0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.07), lineWidth: 1))
 }
 
 struct ItemRow: View {
@@ -207,20 +313,18 @@ struct PermCard: View {
 
 struct AgentsView: View {
     @EnvironmentObject var store: Store
+    private let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
     var body: some View {
         NavigationStack {
-            List(store.state?.agents ?? []) { a in
-                NavigationLink(value: a) {
-                    HStack(spacing: 12) {
-                        MascotView(character: a.character ?? MascotCharacter(), expression: .forState(store.state.map { a.state(in: $0) } ?? "ok"), seed: Double(a.name.count))
-                            .frame(width: 44, height: 44)
-                        VStack(alignment: .leading) {
-                            Text(a.name).font(.headline)
-                            Text("\(a.engine)\(a.status == "paused" ? " · pozastavený" : "")").font(.caption).foregroundStyle(.secondary)
-                        }
+            ScrollView {
+                LazyVGrid(columns: cols, spacing: 12) {
+                    ForEach(store.state?.agents ?? []) { a in
+                        NavigationLink(value: a) { AgentCard(agent: a) }.buttonStyle(.plain)
                     }
                 }
+                .padding(16)
             }
+            .background(Color.black)
             .navigationDestination(for: PhoneState.Agent.self) { AgentView(agentId: $0.id) }
             .refreshable { await store.refresh() }
             .navigationTitle("Agenti")
@@ -228,41 +332,313 @@ struct AgentsView: View {
     }
 }
 
+struct AgentCard: View {
+    @EnvironmentObject var store: Store
+    let agent: PhoneState.Agent
+    var body: some View {
+        let state = store.state.map { agent.state(in: $0) } ?? "ok"
+        let c = hexColor(agent.character?.color ?? "#8b9cff")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                MascotView(character: agent.character ?? MascotCharacter(), expression: .forState(state), seed: Double(agent.name.count))
+                    .frame(width: 58, height: 58)
+                Spacer()
+                Text(stateText(state)).font(.caption2.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(stateColor(state).opacity(0.18), in: Capsule()).foregroundStyle(stateColor(state))
+            }
+            Text(agent.name).font(.headline)
+            Text(agent.engine + (agent.status == "paused" ? " · pozastavený" : "")).font(.caption).foregroundStyle(.secondary)
+            Text(agent.issues.first?.title ?? "Zatím žádný úkol").font(.caption2).foregroundStyle(.tertiary).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(minHeight: 190, alignment: .top)
+        .background(
+            ZStack {
+                Color(white: 0.06)
+                RadialGradient(colors: [c.opacity(state == "run" ? 0.35 : 0.14), .clear], center: .topLeading, startRadius: 0, endRadius: 160)
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(c.opacity(0.22), lineWidth: 1))
+    }
+}
+
 struct AgentView: View {
     @EnvironmentObject var store: Store
     let agentId: String
     @State private var draft = ""
-    @State private var sent = false
+    @State private var sent: String?
 
     var agent: PhoneState.Agent? { store.state?.agents.first { $0.id == agentId } }
 
     var body: some View {
+        let state = agent.flatMap { a in store.state.map { a.state(in: $0) } } ?? "ok"
+        let live = store.state?.live?.first { $0.id == "agent:\(agentId)" }
         List {
+            Section {
+                HStack(spacing: 16) {
+                    MascotView(character: agent?.character ?? MascotCharacter(), expression: .forState(state), seed: 3)
+                        .frame(width: 84, height: 84)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(stateText(state)).font(.subheadline.weight(.semibold)).foregroundStyle(stateColor(state))
+                        Text(agent?.engine ?? "").font(.caption).foregroundStyle(.secondary)
+                        if let live { LiveTicker(steps: live.lines, size: 13) }
+                    }
+                }
+                .padding(.vertical, 6)
+                HStack {
+                    action("Probudit", "bolt.fill", ["kind": "agent", "agentId": agentId, "action": "agentInvoke"])
+                    if agent?.status == "paused" { action("Obnovit", "play.fill", ["kind": "agent", "agentId": agentId, "action": "agentResume"]) }
+                    else { action("Pozastavit", "pause.fill", ["kind": "agent", "agentId": agentId, "action": "agentPause"]) }
+                }
+                if let sent { Text(sent).font(.caption).foregroundStyle(.secondary) }
+            }
             Section("Nový úkol") {
                 TextField("Co má \(agent?.name ?? "agent") udělat?", text: $draft, axis: .vertical).lineLimit(2...6)
-                Button(sent ? "Zadáno, agent se probudí" : "Zadat") {
+                Button("Zadat") {
                     Task {
                         if await store.send(["kind": "task", "agentId": agentId, "text": draft]) {
-                            draft = ""; sent = true
+                            draft = ""; sent = "Zadáno, agent se do 10 s probudí."; Haptic.success()
                         }
                     }
                 }
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.sending)
             }
             Section("Konverzace") {
+                if (agent?.issues ?? []).isEmpty { Text("Zatím nic.").foregroundStyle(.secondary) }
                 ForEach(agent?.issues ?? []) { i in
-                    NavigationLink(value: i) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(i.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-                            Text("\(i.identifier) · \(statusText(i.status))").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
+                    NavigationLink(value: i) { TaskRow(issue: i, agent: nil) }
                 }
             }
         }
         .navigationDestination(for: PhoneState.Issue.self) { ThreadView(agentId: agentId, issueId: $0.id) }
         .refreshable { await store.refresh() }
         .navigationTitle(agent?.name ?? "Agent")
+    }
+
+    private func action(_ title: String, _ icon: String, _ cmd: [String: String]) -> some View {
+        Button {
+            Task { if await store.send(cmd) { sent = "Odesláno, Mac to udělá do 10 s."; Haptic.success() } }
+        } label: { Label(title, systemImage: icon).frame(maxWidth: .infinity) }
+        .buttonStyle(.bordered).tint(Palette.accent)
+    }
+}
+
+// MARK: - Tasks: every conversation with every agent
+
+struct TaskRow: View {
+    let issue: PhoneState.Issue
+    let agent: PhoneState.Agent?
+    var body: some View {
+        HStack(spacing: 10) {
+            if let agent {
+                MascotView(character: agent.character ?? MascotCharacter(), expression: .forState(issue.status == "blocked" ? "you" : issue.status == "in_progress" ? "run" : "ok"), animated: false)
+                    .frame(width: 34, height: 34)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(issue.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                Text([issue.identifier, agent?.name, statusText(issue.status)].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(issue.status == "blocked" ? Palette.amber : .secondary)
+            }
+        }
+    }
+}
+
+struct TasksView: View {
+    @EnvironmentObject var store: Store
+    enum Kind: String, CaseIterable, Identifiable {
+        case you = "Na tebe", work = "Běží", review = "Kontrola", done = "Hotové"
+        var id: String { rawValue }
+        var statuses: [String] {
+            switch self {
+            case .you: return ["blocked"]
+            case .work: return ["todo", "in_progress", "backlog"]
+            case .review: return ["in_review"]
+            case .done: return ["done", "cancelled"]
+            }
+        }
+    }
+    @State private var kind: Kind = .you
+    @State private var newTask = false
+
+    var body: some View {
+        NavigationStack {
+            let all = store.state?.tasks ?? []
+            List {
+                let shown = all.filter { kind.statuses.contains($0.issue.status) }
+                if shown.isEmpty {
+                    Text(kind == .you ? "Nic na tebe nečeká." : "Nic tu není.").foregroundStyle(.secondary)
+                }
+                ForEach(shown, id: \.issue.id) { t in
+                    NavigationLink { ThreadView(agentId: t.agent.id, issueId: t.issue.id) } label: { TaskRow(issue: t.issue, agent: t.agent) }
+                }
+            }
+            .animation(.default, value: kind)
+            .safeAreaInset(edge: .top) {
+                Picker("", selection: $kind) {
+                    ForEach(Kind.allCases) { k in Text("\(k.rawValue) \(all.filter { k.statuses.contains($0.issue.status) }.count)").tag(k) }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16).padding(.bottom, 6)
+            }
+            .onAppear {
+                // Open where there is something, the most urgent first.
+                if !all.contains(where: { kind.statuses.contains($0.issue.status) }),
+                   let k = Kind.allCases.first(where: { k in all.contains { k.statuses.contains($0.issue.status) } }) { kind = k }
+            }
+            .refreshable { await store.refresh() }
+            .navigationTitle("Úkoly")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { newTask = true } label: { Image(systemName: "plus.circle.fill") }
+                }
+            }
+            .sheet(isPresented: $newTask) { NewTaskSheet().environmentObject(store).presentationDetents([.medium, .large]) }
+        }
+    }
+}
+
+struct NewTaskSheet: View {
+    @EnvironmentObject var store: Store
+    @Environment(\.dismiss) private var dismiss
+    @State private var agentId = ""
+    @State private var text = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Picker("Agent", selection: $agentId) {
+                    ForEach((store.state?.agents ?? []).filter { $0.status != "paused" }) { a in Text(a.name).tag(a.id) }
+                }
+                Section("Co má udělat") {
+                    TextField("První věta je název úkolu", text: $text, axis: .vertical).lineLimit(4...10)
+                }
+            }
+            .navigationTitle("Nový úkol")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Zrušit") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Zadat") {
+                        Task {
+                            if await store.send(["kind": "task", "agentId": agentId, "text": text]) { Haptic.success(); dismiss() }
+                        }
+                    }
+                    .disabled(agentId.isEmpty || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.sending)
+                }
+            }
+            .onAppear { if agentId.isEmpty { agentId = store.state?.agents.first { $0.status != "paused" }?.id ?? "" } }
+        }
+    }
+}
+
+// MARK: - Pull requests waiting for Erik
+
+struct ReviewsView: View {
+    @EnvironmentObject var store: Store
+    @State private var open: PhoneState.PR?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                let prs = store.state?.prs ?? []
+                if prs.isEmpty { Text("Nic ke kontrole.").foregroundStyle(.secondary) }
+                ForEach(prs) { pr in
+                    Button { open = pr } label: { PRRow(pr: pr) }.buttonStyle(.plain)
+                }
+            }
+            .refreshable { await store.refresh() }
+            .navigationTitle("Ke kontrole")
+            .sheet(item: $open) { PRSheet(pr: $0).environmentObject(store).presentationDetents([.medium, .large]) }
+        }
+    }
+}
+
+func ciBadge(_ ci: String) -> (String, Color) {
+    switch ci {
+    case "ok": return ("zelená", .green)
+    case "bad": return ("červená", Palette.bad)
+    case "run": return ("CI běží", Palette.accent)
+    default: return ("bez kontrol", .gray)
+    }
+}
+
+struct PRRow: View {
+    let pr: PhoneState.PR
+    var body: some View {
+        let ci = ciBadge(pr.ci)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("\(pr.repoName) #\(pr.number)").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Text(ci.0).font(.caption2.weight(.semibold)).padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(ci.1.opacity(0.18), in: Capsule()).foregroundStyle(ci.1)
+            }
+            Text(pr.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+            HStack(spacing: 10) {
+                Text("+\(pr.additions)").foregroundStyle(.green)
+                Text("−\(pr.deletions)").foregroundStyle(Palette.bad)
+                Text("\(pr.files) souborů").foregroundStyle(.secondary)
+                if pr.draft { Text("koncept").foregroundStyle(.secondary) }
+                if pr.conflict { Text("konflikt").foregroundStyle(Palette.amber) }
+            }
+            .font(.caption.monospacedDigit())
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+    }
+}
+
+struct PRSheet: View {
+    @EnvironmentObject var store: Store
+    @Environment(\.dismiss) private var dismiss
+    let pr: PhoneState.PR
+    @State private var confirm: String?
+    @State private var done: String?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    PRRow(pr: pr)
+                    Text("od \(pr.author)").font(.caption).foregroundStyle(.secondary)
+                    if !pr.body.isEmpty {
+                        Text(LocalizedStringKey(pr.body)).font(.callout).padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Palette.card, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    if let done {
+                        Label(done, systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.subheadline)
+                    } else {
+                        Button { confirm = "merge" } label: { Label("Mergnout do main", systemImage: "arrow.triangle.merge").frame(maxWidth: .infinity) }
+                            .buttonStyle(.borderedProminent).tint(.green).disabled(pr.draft || pr.conflict || store.sending)
+                        Button { confirm = "close" } label: { Text("Zavřít bez mergnutí").frame(maxWidth: .infinity) }
+                            .buttonStyle(.bordered).tint(Palette.bad).disabled(store.sending)
+                    }
+                    if let url = URL(string: pr.url) {
+                        Link(destination: url) { Label("Otevřít na GitHubu", systemImage: "safari").frame(maxWidth: .infinity) }
+                            .buttonStyle(.bordered)
+                    }
+                }
+                .padding(18)
+            }
+            .navigationTitle("PR #\(pr.number)")
+            .navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog(confirm == "merge" ? (pr.ci == "ok" ? "Mergnout do main?" : "CI není zelená. Mergnout i tak?") : "Zavřít bez mergnutí?",
+                                isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }), titleVisibility: .visible) {
+                Button(confirm == "merge" ? "Mergnout" : "Zavřít", role: confirm == "close" ? .destructive : nil) {
+                    let action = confirm ?? ""
+                    Task {
+                        if await store.send(["kind": "pr", "repo": pr.repo, "number": String(pr.number), "action": action]) {
+                            done = action == "merge" ? "Posláno, Mac to do 10 s mergne." : "Posláno, Mac ho do 10 s zavře."
+                            Haptic.success()
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

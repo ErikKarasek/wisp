@@ -109,6 +109,11 @@ export function startRelay(ctx: RelayContext): { push: () => Promise<void> } {
         await invoke("job_action", { label: String(cmd.label), action: cmd.action });
       } else if (cmd.kind === "agent" && ["agentPause", "agentResume", "agentInvoke"].includes(cmd.action)) {
         await invoke("paperclip_action", { kind: cmd.action, id: String(cmd.agentId) });
+      } else if (cmd.kind === "pr" && ["merge", "close"].includes(cmd.action) && typeof cmd.repo === "string") {
+        // Merge or close from the phone: the same call as the Mac's buttons, after the phone asked "really?".
+        await invoke("github_pr_action", { repo: cmd.repo, number: Number(cmd.number), action: cmd.action });
+        ctx.toast(`Z telefonu: PR #${cmd.number} ${cmd.action === "merge" ? "mergnut" : "zavřen"}.`);
+        void push();
       } else if (cmd.kind === "comment") {
         const text = String(cmd.text ?? "").trim();
         if (!text || typeof cmd.issueId !== "string") return;

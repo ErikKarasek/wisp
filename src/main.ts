@@ -77,6 +77,8 @@ function trayTitle(): string {
   return parts.join("  ");
 }
 let prCount = 0;
+/** The open pull requests, as the phone shows them under "Ke kontrole". */
+let prList: Record<string, any>[] = [];
 /** The last item that changed in a way worth showing in the notch. */
 let news: MiniItem | null = null;
 
@@ -217,7 +219,8 @@ async function loadCloud() {
   cloudflare = cf;
   cloudGroups = [cloudflareGroup(cf, now), gh && githubGroup(gh, now)].filter((g): g is Group => !!g);
   if (cfg.githubRepos?.length) {
-    prCount = (await invoke<unknown[]>("github_prs", { repos: cfg.githubRepos }).catch(() => [])).length;
+    prList = await invoke<Record<string, any>[]>("github_prs", { repos: cfg.githubRepos }).catch(() => []);
+    prCount = prList.length;
   }
 }
 
@@ -1317,7 +1320,30 @@ async function start() {
           job: i.id.startsWith("job:") ? i.id.slice(4) : null,
         })),
         bot: cfg.notchPrefs.bot ? cfg.characters.find((c) => c.id === cfg.notchPrefs.bot)?.character ?? null : null,
-        live: [...s.live.map((l) => ({ name: l.name, lines: l.lines })), ...ccLive()],
+        live: [...s.live.map((l) => ({ id: l.id, name: l.name, lines: l.lines, character: l.character })), ...ccLive().map((l) => ({ ...l, id: "cc", character: { color: "#d97757", eyeColor: "#2a1610" } }))],
+        // Where things run, by name, so the phone can group them like the sidebar.
+        groups: groups.map((g) => ({ id: g.id, name: groupLabel(g) })),
+        history: history.slice(-30).reverse().map((h) => ({ id: h.id, name: h.name, state: h.state, at: h.at, text: h.text })),
+        prs: prList.map((pr) => {
+          const all: Record<string, string>[] = pr.statusCheckRollup ?? [];
+          const bad = all.some((c) => ["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"].includes(c.conclusion ?? c.state ?? ""));
+          const running = all.some((c) => (c.status && c.status !== "COMPLETED") || c.state === "PENDING");
+          return {
+            repo: pr.repo,
+            number: pr.number,
+            title: pr.title,
+            author: pr.author?.login ?? "",
+            updatedAt: pr.updatedAt,
+            url: pr.url,
+            additions: pr.additions,
+            deletions: pr.deletions,
+            files: pr.changedFiles,
+            draft: !!pr.isDraft,
+            conflict: pr.mergeable === "CONFLICTING",
+            ci: !all.length ? "none" : bad ? "bad" : running ? "run" : "ok",
+            body: String(pr.body ?? "").slice(0, 1500),
+          };
+        }),
         limits: {
           claude: usage ? { session: usage.session?.percent ?? null, week: usage.week?.percent ?? null, resets: usage.session?.resets ?? "" } : null,
           gpt: gptQuota.map((w) => ({ percent: w.percent, windowSecs: w.windowSecs, resetsAtMs: w.resetsAtMs })),

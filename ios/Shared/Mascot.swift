@@ -25,6 +25,8 @@ struct MascotCharacter: Codable, Hashable {
         eyeSpread = (try? c.decode(Double.self, forKey: .eyeSpread)) ?? 1
     }
     static let white = { var c = MascotCharacter(); c.color = "#f4f5f8"; return c }()
+    /// Claude Code in a terminal: Claude's clay orange.
+    static let claude = { var c = MascotCharacter(); c.color = "#d97757"; c.eyeColor = "#2a1610"; return c }()
 }
 
 struct EyeSpec { var x = 0.0, y = 0.0, length = 1.0, width = 1.0, angle = 0.0 }
@@ -54,6 +56,13 @@ struct MascotExpression {
         x.lookX = -0.45; x.lookY = 0.35; x.tilt = -5; x.wander = 0.2; return x
     }()
 
+    static let wink: MascotExpression = {
+        var x = MascotExpression(); x.left = EyeSpec(y: 0.03, length: 0.9, width: 0.6, angle: 80); x.right = EyeSpec(y: -0.02, length: 0.62, width: 1.05, angle: -14)
+        x.lookX = 0.25; x.lookY = -0.25; x.tilt = 9; x.wander = 0; x.blinks = false; return x
+    }()
+    static let love = both(EyeSpec(y: -0.03, length: 0.5, width: 1.15, angle: -18)) { $0.lookY = -0.5; $0.tilt = -6; $0.bounce = 2; $0.wander = 0; $0.tint = "#ff7aa8"; $0.tintAmount = 0.35 }
+    static let tired = both(EyeSpec(y: 0.06, length: 0.45, width: 1, angle: -8)) { $0.lookY = 0.4; $0.tilt = 4; $0.wander = 0.15 }
+
     /// The Mac's STATES table: which face each state wears.
     static func forState(_ s: String) -> MascotExpression {
         switch s {
@@ -69,7 +78,7 @@ struct MascotExpression {
     }
 }
 
-struct MascotPose { var lookX = 0.0, lookY = 0.0, blink = 0.0, squash = 0.0, lift = 0.0, time = 0.0 }
+struct MascotPose { var lookX = 0.0, lookY = 0.0, blink = 0.0, squash = 0.0, lift = 0.0, time = 0.0, spin = 0.0 }
 
 private func hash01(_ n: Double) -> Double { let x = sin(n * 127.1 + 311.7) * 43758.5453; return x - floor(x) }
 
@@ -187,7 +196,7 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
 
     // The head's rotation, and the eyes projected from the sphere.
     let yaw = min(1, max(-1, ex.lookX + pose.lookX)) * 0.62
-    let pitch = min(1, max(-1, ex.lookY + pose.lookY)) * 0.42
+    let pitch = min(1, max(-1, ex.lookY + pose.lookY)) * 0.42 - pose.spin
     let cosY = cos(yaw), sinY = sin(yaw), cosP = cos(pitch), sinP = sin(pitch)
     func project(_ az: Double, _ el: Double) -> (x: Double, y: Double, z: Double) {
         var x = cos(el) * sin(az), y = sin(el), z = cos(el) * cos(az)
@@ -236,6 +245,8 @@ struct MascotView: View {
     var expression: MascotExpression = .happy
     var animated = true
     var seed: Double = 0
+    /// When a roll over the top started: the eyes go up and over and come back from below.
+    var rollAt: Date? = nil
 
     var body: some View {
         if animated {
@@ -249,7 +260,11 @@ struct MascotView: View {
 
     private func canvas(time: Double?) -> some View {
         Canvas { ctx, size in
-            let pose = time.map { mascotPose(expression, $0, seed: seed) } ?? MascotPose()
+            var pose = time.map { mascotPose(expression, $0, seed: seed) } ?? MascotPose()
+            if let rollAt, let t = time {
+                let k = (t - rollAt.timeIntervalSinceReferenceDate) / 0.95
+                if k > 0 && k < 1 { pose.spin = .pi * 2 * (k < 0.5 ? 4 * k * k * k : 1 - pow(-2 * k + 2, 3) / 2) }
+            }
             drawMascot(&ctx, size: size, character: character, expression: expression, pose: pose)
         }
     }

@@ -96,14 +96,23 @@ struct StepTicker: View {
 struct CrewPill: View {
     var chip: CrewChip
     var size: CGFloat = 13
+    /// Name and status on two lines (the app); one line in the small places.
+    var detailed = false
 
     var body: some View {
         let c = hexColor(chip.character.color)
         HStack(spacing: 6) {
             MascotView(character: chip.character, expression: .forState(chip.state), animated: false)
                 .frame(width: size * 1.6, height: size * 1.6)
-            Text(["run", "you", "bad", "done", "new"].contains(chip.state) ? chip.status : chip.name).lineLimit(1)
-                .font(.system(size: size, weight: .medium)).foregroundStyle(c)
+            if detailed {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(chip.name).font(.system(size: size, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text(chip.status).font(.system(size: size * 0.82)).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                }
+            } else {
+                Text(["run", "you", "bad", "done", "new"].contains(chip.state) ? chip.status : chip.name).lineLimit(1)
+                    .font(.system(size: size, weight: .medium)).foregroundStyle(c)
+            }
         }
         .padding(.leading, 5).padding(.trailing, 10).padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -116,11 +125,12 @@ struct CrewPill: View {
 struct CrewGrid: View {
     var crew: [CrewChip]
     var size: CGFloat = 13
+    var detailed = false
     var body: some View {
         let rows = stride(from: 0, to: min(crew.count, 4), by: 2).map { Array(crew[$0..<min($0 + 2, crew.count)]) }
         VStack(spacing: 6) {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: 6) { ForEach(row, id: \.name) { CrewPill(chip: $0, size: size) } }
+                HStack(spacing: 6) { ForEach(row, id: \.name) { CrewPill(chip: $0, size: size, detailed: detailed) } }
             }
         }
     }

@@ -35,15 +35,25 @@ struct DispecinkActivity: ActivityAttributes {
 
 extension PhoneState {
     /// The four agents shown as a crew: Paperclip agents first, then the Antigravity jobs.
+    /// Only who is busy, like the notch: agents first.
     var crew: [CrewChip] {
-        let agentItems = items.filter { $0.id.hasPrefix("agent:") }
-        let geminiJobs = items.filter { $0.engine == "Gemini" }
-        return (agentItems + geminiJobs).prefix(4).map {
+        let active = busy.filter { $0.id != live?.first?.id }
+        let agentItems = active.filter { $0.id.hasPrefix("agent:") }
+        let others = active.filter { !$0.id.hasPrefix("agent:") }
+        return (agentItems + others).prefix(4).map {
             CrewChip(name: $0.name, status: crewStatus($0), state: $0.state, character: $0.character ?? MascotCharacter())
         }
     }
 
-    private func crewStatus(_ i: Item) -> String {
+    /// Whose look the bot wears: Claude asking, the agent at work, the one that failed or waits.
+    var focusLook: MascotCharacter? {
+        if perms?.isEmpty == false { return .claude }
+        if let l = live?.first { return l.id == "cc" ? .claude : l.character }
+        if let i = items.first(where: { $0.state == "bad" }) ?? waiting.first { return i.character }
+        return nil
+    }
+
+    func crewStatus(_ i: Item) -> String {
         switch i.state {
         case "run": return i.doing
         case "you": return "Čeká na tebe"
@@ -75,7 +85,7 @@ extension PhoneState {
         return .init(mode: mode, title: title, detail: detail, steps: steps, worst: worst,
                      waiting: waiting.count, perms: perms?.count ?? 0,
                      claude: limits.claude?.session, claudeWeek: limits.claude?.week,
-                     gpt: limits.gpt.first?.percent, gemini: gemini5h, bot: bot, crew: crew, updated: Date(),
+                     gpt: limits.gpt.first?.percent, gemini: gemini5h, bot: focusLook ?? bot, crew: crew, updated: Date(),
                      permId: perms?.first?.id)
     }
 }

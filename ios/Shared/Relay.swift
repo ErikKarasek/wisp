@@ -18,6 +18,9 @@ struct PhoneState: Decodable {
     let perms: [Perm]?
     let bot: MascotCharacter?
     let answers: [Answer]?
+    let groups: [Group]?
+    let history: [Event]?
+    let prs: [PR]?
 
     struct Counts: Decodable { let attention: Int; let run: Int; let sleep: Int; let ok: Int; let off: Int }
     struct Item: Decodable, Identifiable {
@@ -25,7 +28,18 @@ struct PhoneState: Decodable {
         let group: String?; let engine: String?; let character: MascotCharacter?; let job: String?
     }
     struct Answer: Decodable, Identifiable { let id: String; let question: String; let answer: String?; let at: Double }
-    struct Live: Decodable { let name: String; let lines: [String] }
+    struct Live: Decodable { let id: String?; let name: String; let lines: [String]; let character: MascotCharacter? }
+    struct Group: Decodable, Identifiable { let id: String; let name: String }
+    struct Event: Decodable, Identifiable {
+        let id: String; let name: String; let state: String; let at: Double; let text: String
+        var key: String { "\(id)-\(at)" }
+    }
+    struct PR: Decodable, Identifiable {
+        let repo: String; let number: Int; let title: String; let author: String; let updatedAt: String; let url: String
+        let additions: Int; let deletions: Int; let files: Int; let draft: Bool; let conflict: Bool; let ci: String; let body: String
+        var id: String { "\(repo)#\(number)" }
+        var repoName: String { repo.split(separator: "/").last.map(String.init) ?? repo }
+    }
     struct Limits: Decodable {
         let claude: Claude?
         let gpt: [Window]
@@ -56,6 +70,18 @@ extension PhoneState {
     var gemini5h: Int? { limits.gemini.first { $0.group == "Gemini" && $0.windowSecs == 18000 }?.percent }
     var geminiWeek: Int? { limits.gemini.first { $0.group == "Gemini" && $0.windowSecs == 604800 }?.percent }
     var waiting: [Item] { items.filter { ["you", "bad", "new"].contains($0.state) } }
+    /// Who is doing or wants something right now: the only ones the crew shows.
+    var busy: [Item] { items.filter { ["run", "you", "new", "bad", "done"].contains($0.state) } }
+    /// Every conversation with every agent, newest first, with who it belongs to.
+    var tasks: [(agent: Agent, issue: Issue)] {
+        agents.flatMap { a in a.issues.map { (agent: a, issue: $0) } }.sorted { $0.issue.updatedAt > $1.issue.updatedAt }
+    }
+    func groupName(_ id: String?) -> String {
+        guard let id else { return "Ostatní" }
+        return groups?.first { $0.id == id }?.name ?? (id == "mac" ? "Tento Mac" : id == "github" ? "GitHub" : id == "cloudflare" ? "Cloudflare" : "Agenti")
+    }
+    /// Claude's limit used up (the session or the week).
+    var spent: Bool { max(limits.claude?.session ?? 0, limits.claude?.week ?? 0) >= 95 }
     /** The worst state, as the Mac's SEVERITY orders them: the bot's mood. */
     var worst: String {
         for s in ["bad", "you", "new", "run", "done", "ok", "sleep", "off"] where items.contains(where: { $0.state == s }) { return s }
