@@ -1252,6 +1252,7 @@ export async function startNotch() {
   $("[data-act=mirror]").addEventListener("click", () => (mirror.hidden ? void openMirror() : closeMirror()));
   async function openMirror() {
     mirror.hidden = false;
+    root.classList.add("mirroring");
     $("[data-act=mirror]").classList.add("on");
     const note = mirror.querySelector(".muted") as HTMLElement;
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -1272,6 +1273,7 @@ export async function startNotch() {
     const video = mirror.querySelector("video") as HTMLVideoElement;
     video.srcObject = null;
     mirror.hidden = true;
+    root.classList.remove("mirroring");
     $("[data-act=mirror]").classList.remove("on");
   }
 

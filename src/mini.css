@@ -401,6 +401,17 @@ body.mini button { font: inherit; color: inherit; }
 }
 .nt .crewcard .crew { grid-template-columns: 1fr; }
 .nt .card.crewcard.idle { display: none; }
-.nt .crewcard .pill .nm { display: grid; min-width: 0; line-height: 1.15; }
+.nt .crewcard .pill .nm { display: grid; min-width: 0; line-height: 1.15; text-align: left; }
 .nt .crewcard .pill .nm b, .nt .crewcard .pill .nm small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nt .crewcard .pill .nm small { font-size: 10.5px; opacity: .75; }
+
+/* Asking (a quick question, a dropped file, a permission): the bot steps aside and its
+   text takes the whole card; the crew makes room. */
+.nt.asking .card.hero { grid-template-columns: minmax(0, 1fr); flex-grow: 2; }
+.nt.asking .card.crewcard { display: none; }
+/* The camera needs its square: the calendar and the player make room while it's on. */
+.nt.mirroring .card.cal, .nt.mirroring .card.music { display: none !important; }
+/* A dark colour (pure blue) would vanish on the dark pill: its text is lifted towards white. */
+.nt .pill { color: color-mix(in srgb, var(--c) 62%, #fff); }
+/* The camera card is as wide as it is tall; the shared width rule (flex-basis: 0) would squash it to nothing. */
+.nt .panes > .card.mirror { flex: 0 0 auto; width: auto; aspect-ratio: 1; height: 100%; }
