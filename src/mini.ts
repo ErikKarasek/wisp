@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { EXPRESSIONS, type ExpressionName, type MascotCharacter } from "./mascot/mascot";
+import { DEFAULT_CHARACTER, EXPRESSIONS, type ExpressionName, type MascotCharacter } from "./mascot/mascot";
 import { mountMascot, type MountedMascot } from "./mascot/svg";
 import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot, windowName, resetText, claudeResetMs, elapsedPercent } from "./broadcast";
 import { defaultNotchPrefs, type NotchPrefs, type SavedCharacter } from "./config";
@@ -140,6 +140,10 @@ const hm = (ms: number) => new Date(ms).toLocaleTimeString("cs-CZ", { hour: "num
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const midnight = (ms: number) => new Date(new Date(ms).toDateString()).getTime();
 const WHITE_BOT: Partial<MascotCharacter> = { color: "#e6e8ef", eyeColor: "#15161a" };
+/** Claude Code in a terminal has no character of its own: Claude's clay orange. */
+const CLAUDE_BOT: Partial<MascotCharacter> = { color: "#d97757", eyeColor: "#2a1610" };
+/** The crew shows only who is doing something or wants something, not everyone there is. */
+const ACTIVE: State[] = ["run", "you", "new", "bad", "done"];
 
 const TERM = `<svg class="ic" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 6l2 2-2 2M8.5 10.5h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const COPY = `<svg class="ic" viewBox="0 0 16 16"><rect x="5" y="5" width="8.5" height="8.5" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3 10.5V3.8C3 3.4 3.4 3 3.8 3h6.7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
@@ -200,6 +204,17 @@ export async function startNotch() {
   const botLook = () => {
     const saved = prefs.bot ? cfg.characters?.find((c) => c.id === prefs.bot) : null;
     return saved ? saved.character : WHITE_BOT;
+  };
+  // The bot takes the look of whoever it is showing right now: the agent at work,
+  // the one that failed or asks, Claude in a terminal; your own bot otherwise.
+  let shownLook = "";
+  const showLook = (c: Partial<MascotCharacter>) => {
+    const full = { ...DEFAULT_CHARACTER, ...c };
+    const sig = JSON.stringify(full);
+    if (sig === shownLook) return;
+    shownLook = sig;
+    tiny.setCharacter(full);
+    big.setCharacter(full);
   };
   const tiny = mountMascot($(".m.tiny"), { character: botLook(), expression: "happy", transition: 180, seed: 21 });
   const big = mountMascot($(".m.big"), { character: botLook(), expression: "happy", transition: 200, seed: 22 });
@@ -454,8 +469,8 @@ export async function startNotch() {
     $(".cal").hidden = !prefs.showCalendar;
     ($("[data-act=mirror]") as HTMLElement).hidden = !prefs.showMirror;
     if (!prefs.showMirror) closeMirror();
-    tiny.setCharacter(botLook());
-    big.setCharacter(botLook());
+    shownLook = "";
+    showLook(botLook());
     root.classList.toggle("dancing", dancing && prefs.dance);
     face();
   };
@@ -968,6 +983,11 @@ export async function startNotch() {
       gpt.title = s.gpt.map((w, i) => `${i ? "" : "ChatGPT: "}${windowName(w.windowSecs)} ${w.percent} %${w.resetsAtMs ? ` (obnoví se ${resetText(w.resetsAtMs)})` : ""}`).join("\n");
     }
 
+    const failedItem = !working ? s.items.find((i) => i.state === "bad") : undefined;
+    const askingItem = !working ? s.items.find((i) => i.ask) : undefined;
+    const who = perms.length ? CLAUDE_BOT : working ? (working.id.startsWith("cc:") ? CLAUDE_BOT : working.character) : failedItem?.character ?? askingItem?.character;
+    showLook(who && Object.keys(who).length ? who : botLook());
+
     // Claude Code asking for permission comes first, then a dropped file.
     root.classList.toggle("asking", perms.length > 0 || !!fileAsk || quickAsk);
     if (perms.length) {
@@ -1049,9 +1069,10 @@ export async function startNotch() {
   const crewStatus = (i: MiniItem) =>
     i.state === "run" ? i.doing : i.state === "you" ? "Čeká na tebe" : i.state === "bad" ? "Selhal" : i.state === "done" ? "Hotovo" : i.state === "new" ? "Něco našel" : i.name;
   function crewPick(s: Snapshot, working?: { id: string }) {
-    const agents = s.items.filter((i) => i.id.startsWith("agent:") && i.id !== working?.id);
-    const rest = [...s.items].filter((i) => !i.id.startsWith("agent:") && i.id !== working?.id).sort(byUrgency);
-    return [...agents.sort(byUrgency), ...rest].slice(0, 4);
+    const busy = s.items.filter((i) => ACTIVE.includes(i.state) && i.id !== working?.id);
+    const agents = busy.filter((i) => i.id.startsWith("agent:"));
+    const rest = busy.filter((i) => !i.id.startsWith("agent:"));
+    return [...agents.sort(byUrgency), ...rest.sort(byUrgency)].slice(0, 4);
   }
   function renderCrew(s: Snapshot, working: Snapshot["live"][number] | undefined) {
     const four = crewPick(s, working);
@@ -1062,14 +1083,16 @@ export async function startNotch() {
       if (!pill) {
         pill = document.createElement("button");
         pill.dataset.id = i.id;
-        pill.innerHTML = `<span class="m"></span><b></b>`;
+        pill.innerHTML = `<span class="m"></span><span class="nm"><b></b><small></small></span>`;
         pill.addEventListener("click", () => void emit(EV_OPEN, { id: i.id }));
         crewMascots.set(i.id, mountMascot(pill.querySelector(".m") as HTMLElement, { character: i.character, expression: STATES[i.state].expr, seed: 30 + n }));
       }
       crewMascots.get(i.id)!.setExpression(STATES[i.state].expr);
       pill.className = `pill s-${i.state}`;
       pill.style.setProperty("--c", (i.character as { color?: string }).color ?? "#8b9cff");
-      (pill.querySelector("b") as HTMLElement).textContent = crewStatus(i);
+      // Only busy ones are here now, so each says who it is and what's up.
+      (pill.querySelector("b") as HTMLElement).textContent = i.name;
+      (pill.querySelector("small") as HTMLElement).textContent = crewStatus(i) === i.name ? i.chip : crewStatus(i);
       pill.title = `${i.name}: ${i.chip}\n${i.doing}`;
       crew.appendChild(pill);
     });
@@ -1080,6 +1103,8 @@ export async function startNotch() {
         p.remove();
       }
     });
+    // Nobody else busy: the card steps aside and the others get its room.
+    $(".crewcard").classList.toggle("idle", four.length === 0);
     renderFaces(four);
   }
 
