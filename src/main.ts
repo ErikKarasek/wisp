@@ -168,7 +168,7 @@ void listen<boolean>("focus", (e) => {
   }
 });
 void listen<{ title?: string; text?: string; urgent?: boolean }>("notify", async (e) => {
-  const title = e.payload.title ?? "Dispečink";
+  const title = e.payload.title ?? "Wisp";
   const text = (e.payload.text ?? "").slice(0, 3500);
   if (focus && !e.payload.urgent) return void held.push(`${title}: ${text.split("\n")[0]}`);
   toast(`${title}: ${text.split("\n")[0]}`);
@@ -181,7 +181,7 @@ void listen<{ title?: string; text?: string; urgent?: boolean }>("notify", async
 /** Tell Erik on the screen and, when Telegram is on, on the phone. */
 function warn(text: string) {
   toast(text);
-  if (cfg.telegram.enabled && cfg.telegram.chat) void invoke("telegram_send", { chat: cfg.telegram.chat, text: `Dispečink: ${text}` }).catch(() => {});
+  if (cfg.telegram.enabled && cfg.telegram.chat) void invoke("telegram_send", { chat: cfg.telegram.chat, text: `Wisp: ${text}` }).catch(() => {});
 }
 
 // Paperclip runs the agents; when it stops answering twice in a row, launchd restarts it (at most every 10 min).
@@ -631,7 +631,7 @@ async function renderDetail() {
   const past = history.filter((h) => h.id === item.id).slice(-12).reverse();
   q(".history").innerHTML = past.length
     ? past.map((h) => `<span class="h s-${h.state}" title="${esc(h.text)}"><i></i>${esc(STATES[h.state].chip)} <small>${esc(ago(h.at))}</small></span>`).join("")
-    : `<span class="h empty">Zatím žádné změny. Historie se zapisuje, dokud Dispečink běží.</span>`;
+    : `<span class="h empty">Zatím žádné změny. Historie se zapisuje, dokud Wisp běží.</span>`;
 
   const btns = q(".btns");
   const sig = actionSig(item.actions);
@@ -879,7 +879,7 @@ async function onChanges() {
     if (notifyAllowed) for (const i of alarming.slice(0, 3)) sendNotification({ title: title(i), body: i.doing });
   }
   if (cfg.telegram.enabled && cfg.telegram.chat) {
-    const text = ["Dispečink", ...alarming.map((i) => `• ${title(i)}\n  ${i.doing}`)].join("\n");
+    const text = ["Wisp", ...alarming.map((i) => `• ${title(i)}\n  ${i.doing}`)].join("\n");
     void invoke("telegram_send", { chat: cfg.telegram.chat, text }).catch((e) => toast(`Telegram: ${e}`));
   }
 }
@@ -989,7 +989,7 @@ let tgConflictShown = false;
 void listen("tg-conflict", () => {
   if (tgConflictShown) return;
   tgConflictShown = true;
-  toast("Telegram: tvého bota už poslouchá jiný program (asi job-mail). Na ovládání z telefonu dej Dispečinku vlastního bota.");
+  toast("Telegram: tvého bota už poslouchá jiný program (asi job-mail). Na ovládání z telefonu dej Wispu vlastního bota.");
 });
 void listen(EV_REFRESH, () => void refresh(true));
 void listen(EV_OPEN_SETTINGS, () => {
@@ -1021,7 +1021,7 @@ async function updateTray() {
   if (usage?.session && usage.session.percent >= 85) lines.push(`Claude: ${usage.session.percent} % relace, obnoví se ${usage.session.resets}`);
   if (prCount) lines.push(`Ke kontrole: ${prCount} PR`);
   if (!lines.length) lines.push("Všechno v pořádku");
-  const tooltip = attention.length ? `Dispečink: ${attention.length} potřebuje pozornost` : "Dispečink: všechno v pořádku";
+  const tooltip = attention.length ? `Wisp: ${attention.length} potřebuje pozornost` : "Wisp: všechno v pořádku";
   const sig = `${face}|${lines.join("|")}`;
   if (sig === traySig) return;
   traySig = sig;
@@ -1215,7 +1215,7 @@ async function morning(force = false) {
   if (proWeek) limits.push(`Claude v AI Pro ${proWeek.percent} % týdne`);
   if (limits.length) parts.push(`Limity: ${limits.join(", ")}.`);
   const certDays = await invoke<number | null>("signing_cert_days").catch(() => null);
-  if (certDays != null && certDays <= 30) parts.push(`Certifikát, kterým se podepisuje Dispečink, vyprší za ${certDays} dní. Obnov ho v Xcode (Settings → Accounts → Manage Certificates).`);
+  if (certDays != null && certDays <= 30) parts.push(`Certifikát, kterým se podepisuje Wisp, vyprší za ${certDays} dní. Obnov ho v Xcode (Settings → Accounts → Manage Certificates).`);
   const later = allItems()
     .map((i) => {
       const today = /příště dnes (\d{1,2}:\d{2})/.exec(i.when)?.[1];

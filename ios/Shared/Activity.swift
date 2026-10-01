@@ -39,7 +39,7 @@ struct DispecinkActivity: ActivityAttributes {
         var settled: ContentState {
             var c = self
             if ["working", "ask", "done"].contains(mode) {
-                c.mode = "idle"; c.title = "Otevři Dispečink pro novinky"; c.detail = ""; c.steps = []
+                c.mode = "idle"; c.title = "Otevři Wisp pro novinky"; c.detail = ""; c.steps = []
             }
             c.bot = home ?? bot
             c.permId = nil

@@ -52,9 +52,9 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
         <dt>Notch</dt><dd>Najeď myší na notch. Nahoře jsou záložky: <b>domeček</b> přehled, <b>bublina</b> chat s agenty, <b>+</b> nový úkol. Na bota můžeš klikat, na notch přetáhnout soubor a zeptat se na něj.</dd>
         <dt>⌃⌥ Mezerník</dt><dd>Kdekoli rychlá otázka pro Gemini; co máš zkopírované, vezme jako podklad.</dd>
         <dt>Claude Code</dt><dd>Když chce něco spustit, notch se otevře s <b>Povolit / Vždy / Zamítnout / Terminál</b>.</dd>
-        <dt>Telegram (bot Dispečinku)</dt><dd><code>Watcher: zkontroluj…</code> dá agentovi úkol · odpověď na zprávu agenta mu pošle odpověď · <code>/stav</code> <code>/agenti</code> <code>/limity</code> <code>/pomoc</code> · tlačítka pro povolení, když nejsi u Macu.</dd>
+        <dt>Telegram (bot Wispu)</dt><dd><code>Watcher: zkontroluj…</code> dá agentovi úkol · odpověď na zprávu agenta mu pošle odpověď · <code>/stav</code> <code>/agenti</code> <code>/limity</code> <code>/pomoc</code> · tlačítka pro povolení, když nejsi u Macu.</dd>
         <dt>Telegram (bot job-mailu)</dt><dd>Pošli odkaz na nabídku a založí kartu · <code>/board</code> přihlášky · <code>/prehled</code> ranní přehled teď · tlačítka u odpovědí firem posouvají karty.</dd>
-        <dt>iPhone</dt><dd>Appka Dispečink: přehled, agenti a chat, otázky pro Gemini, povolování ze zamčené obrazovky; widgety Bot, Agenti a Limity.</dd>
+        <dt>iPhone</dt><dd>Appka Wisp: přehled, agenti a chat, otázky pro Gemini, povolování ze zamčené obrazovky; widgety Bot, Agenti a Limity.</dd>
       </dl>
     </section>
     <section class="notch-prefs">
@@ -83,7 +83,7 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       </div></div>
       <div class="prow top"><span>Claude Code</span><div class="checks">
         <label class="check"><input type="checkbox" data-f="ccHooks" ${ccHooks ? "checked" : ""}> Ukazovat, co Claude Code v terminálu dělá, a povolovat mu příkazy z notche</label>
-        <small class="muted">Přidá háčky do ~/.claude/settings.json. Když Dispečink neběží, Claude se ptá v terminálu jako dřív. Na povolení čeká notch minutu, pak se zeptá terminál.</small>
+        <small class="muted">Přidá háčky do ~/.claude/settings.json. Když Wisp neběží, Claude se ptá v terminálu jako dřív. Na povolení čeká notch minutu, pak se zeptá terminál.</small>
       </div></div>
     </section>
 
@@ -110,7 +110,7 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       <ol class="steps">
         <li>Klikni na <a href="#" data-link="https://dash.cloudflare.com/profile/api-tokens">Cloudflare → API Tokens</a> a přihlas se.</li>
         <li>Dej <b>Create Token</b>, sjeď úplně dolů na <b>Custom token</b> a klikni <b>Get started</b>.</li>
-        <li><b>Token name</b>: Dispečink.</li>
+        <li><b>Token name</b>: Wisp.</li>
         <li><b>Permissions</b>: v prvním řádku vyber <b>Account</b> → <b>Workers Scripts</b> → <b>Read</b>.
           Pak <b>+ Add more</b> a vyber <b>Account</b> → <b>Account Analytics</b> → <b>Read</b>.</li>
         <li><b>Account Resources</b>: nech <b>Include</b> a vyber svůj účet. Zbytek neměň.</li>
@@ -135,7 +135,7 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
 
     <section>
       <h3>Telegram ${!hasBot ? `<span class="pill">bez bota</span>` : ctx.cfg.telegram.enabled && ctx.cfg.telegram.chat ? `<span class="pill good">posílá</span>` : `<span class="pill">vypnutý</span>`}</h3>
-      <p>Když něco selže nebo na tebe čeká, přijde zpráva. Posílá ji Dispečink z Macu, takže jen když je Mac zapnutý.
+      <p>Když něco selže nebo na tebe čeká, přijde zpráva. Posílá ji Wisp z Macu, takže jen když je Mac zapnutý.
         Použij bota, kterého nic jiného nečte: nového od <b>@BotFather</b>, nebo <b>@DDevlogbot</b>. Bota od job-mailu ne,
         ten si zprávy vyzvedává sám a hledání chatu by se s ním přetahovalo.</p>
       <div class="inline">
@@ -165,7 +165,7 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
       <label class="toggle"><input type="checkbox" data-f="trayLimits" ${ctx.cfg.trayLimits ? "checked" : ""}>
         Limity Claude (C), ChatGPT (G) a Gemini (Ge) vedle ikonky v liště</label>
       <label class="toggle"><input type="checkbox" data-f="autostart" ${autostart ? "checked" : ""}>
-        Spouštět Dispečink po přihlášení</label>
+        Spouštět Wisp po přihlášení</label>
     </section>
   </div>`;
 
@@ -309,7 +309,7 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
   });
   el.querySelector('[data-act="testMsg"]')?.addEventListener("click", async () => {
     try {
-      await invoke("telegram_send", { chat: ctx.cfg.telegram.chat, text: "Dispečink: zkušební zpráva. Tudy ti dám vědět, když něco selže." });
+      await invoke("telegram_send", { chat: ctx.cfg.telegram.chat, text: "Wisp: zkušební zpráva. Tudy ti dám vědět, když něco selže." });
       ctx.toast("Odesláno.", true);
     } catch (e) {
       ctx.toast(String(e));

@@ -1,4 +1,4 @@
-// The iPhone app's side of Dispečink: every minute the state goes to the relay
+// The iPhone app's side of Wisp: every minute the state goes to the relay
 // (agents, their conversations, limits, what waits on Erik), and the phone's
 // commands come back as "relay-cmd" events. Permission answers are handled in Rust.
 

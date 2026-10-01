@@ -156,7 +156,7 @@ pub fn start(app: &AppHandle) {
         let dir = std::env::temp_dir().join("dispecink-ask");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join(format!("okno-{}.png", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)));
-        // -x no sound, -o no shadow, -l just that window. Needs Screen Recording for Dispečink.
+        // -x no sound, -o no shadow, -l just that window. Needs Screen Recording for Wisp.
         let ok = std::process::Command::new("/usr/sbin/screencapture")
             .args(["-x", "-o", "-l", &id.to_string()])
             .arg(&path)
@@ -164,7 +164,7 @@ pub fn start(app: &AppHandle) {
             .is_ok_and(|s| s.success())
             && path.exists();
         if !ok {
-            let _ = app.emit_to(notch::LABEL, "buddy-failed", "Okno se nepodařilo vyfotit. Povol Dispečinku Nahrávání obrazovky v Nastavení systému → Soukromí.");
+            let _ = app.emit_to(notch::LABEL, "buddy-failed", "Okno se nepodařilo vyfotit. Povol Wispu Nahrávání obrazovky v Nastavení systému → Soukromí.");
             notch::peek(&app, 8000);
             return;
         }

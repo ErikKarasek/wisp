@@ -103,7 +103,7 @@ pub async fn action(kind: &str, id: &str) -> Result<(), String> {
     }
 }
 
-/// The calls Dispečink makes, and only those. `{id}` stands for one id segment.
+/// The calls Wisp makes, and only those. `{id}` stands for one id segment.
 const ALLOWED: &[(&str, &str)] = &[
     // tasks and their comments
     ("GET", "/issues/{id}"),
@@ -154,7 +154,7 @@ fn allowed(method: &str, path: &str) -> bool {
 
 pub async fn request(method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
     if !allowed(method, path) {
-        return Err(format!("{method} {path} Dispečink nesmí volat"));
+        return Err(format!("{method} {path} Wisp nesmí volat"));
     }
     // Only these query keys, with plain values.
     const KEYS: &[&str] = &["path", "limit", "agentId", "offset", "limitBytes"];

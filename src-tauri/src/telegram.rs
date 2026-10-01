@@ -102,7 +102,7 @@ pub async fn bot_info(token: &str) -> Result<Value, String> {
 
 // ---------- the phone: the same bot, listening back ----------
 //
-// Dispečink long-polls the bot's updates, but only when Telegram is on and
+// Wisp long-polls the bot's updates, but only when Telegram is on and
 // `telegram.remote` isn't switched off, and it only listens to the chat from the
 // settings. Buttons answer Claude Code's permission prompts; plain messages go to
 // the main window, which turns them into tasks and comments for the agents.

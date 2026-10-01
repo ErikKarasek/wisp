@@ -17,7 +17,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: cz.erikkarasek.dispecink.phone
-        INFOPLIST_KEY_CFBundleDisplayName: Dispečink
+        INFOPLIST_KEY_CFBundleDisplayName: Wisp
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
@@ -27,7 +27,7 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: Dispečink
+        CFBundleDisplayName: Wisp
         CFBundleDevelopmentRegion: cs
         CFBundleLocalizations: [cs]
         NSSupportsLiveActivities: true
@@ -49,12 +49,12 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: cz.erikkarasek.dispecink.phone.widget
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Dispečink
+        INFOPLIST_KEY_CFBundleDisplayName: Wisp
         INFOPLIST_KEY_NSExtension: { NSExtensionPointIdentifier: com.apple.widgetkit-extension }
     info:
       path: Widget/Info.plist
       properties:
-        CFBundleDisplayName: Dispečink
+        CFBundleDisplayName: Wisp
         CFBundleDevelopmentRegion: cs
         CFBundleLocalizations: [cs]
         NSExtension:

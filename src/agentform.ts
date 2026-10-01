@@ -1,4 +1,4 @@
-// Editing a Paperclip agent, or hiring a new one, without leaving Dispečink:
+// Editing a Paperclip agent, or hiring a new one, without leaving Wisp:
 // name, role, boss, model, budget, waking on its own, skills and instructions.
 
 import { invoke } from "@tauri-apps/api/core";

@@ -1,4 +1,4 @@
-// Dispečink relay: the Mac pushes its state here and picks up commands; the
+// Wisp relay: the Mac pushes its state here and picks up commands; the
 // iPhone app and its widget read the state and leave commands. One shared
 // bearer token (RELAY_TOKEN secret) guards everything.
 
@@ -24,7 +24,7 @@ const KINDS = new Set(["task", "comment", "perm", "refresh", "ask", "job", "agen
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname === "/") return new Response("Dispečink relay", { status: 200 });
+    if (url.pathname === "/") return new Response("Wisp relay", { status: 200 });
     if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
 
     // The Mac: the whole state, replaced each time.

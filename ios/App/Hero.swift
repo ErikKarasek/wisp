@@ -189,10 +189,10 @@ struct HeroCard: View {
     }
 
     private var who: String {
-        guard let s else { return "Dispečink" }
+        guard let s else { return "Wisp" }
         if let p = s.perms?.first { return "\(p.project) · Claude" }
         if let l = s.live?.first { return "\(l.name) pracuje" }
-        return "Dispečink"
+        return "Wisp"
     }
 
     private var subline: String {

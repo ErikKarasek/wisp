@@ -49,7 +49,7 @@ struct LimitRing: View {
     }
 }
 
-/// The Dispečink bot: a soft blob with two eyes, its colour from how things are.
+/// The Wisp bot: a soft blob with two eyes, its colour from how things are.
 struct Mascot: View {
     var color: Color = Palette.accent
     var size: CGFloat = 44

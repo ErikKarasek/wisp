@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Dispečink",
+  "productName": "Wisp",
   "version": "0.1.0",
   "identifier": "cz.erikkarasek.dispecink",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Dispečink",
+        "title": "Wisp",
         "width": 1180,
         "height": 800,
         "minWidth": 720,
@@ -25,7 +25,7 @@
       {
         "label": "panel",
         "url": "index.html?view=panel",
-        "title": "Dispečink",
+        "title": "Wisp",
         "width": 340,
         "height": 440,
         "resizable": false,
@@ -41,7 +41,7 @@
       {
         "label": "notch",
         "url": "index.html?view=notch",
-        "title": "Dispečink notch",
+        "title": "Wisp notch",
         "width": 300,
         "height": 34,
         "resizable": false,
@@ -58,7 +58,7 @@
       {
         "label": "glow",
         "url": "index.html?view=glow",
-        "title": "Dispečink záře",
+        "title": "Wisp záře",
         "width": 400,
         "height": 300,
         "resizable": false,
@@ -74,7 +74,7 @@
       {
         "label": "buddy",
         "url": "index.html?view=buddy",
-        "title": "Dispečink bot",
+        "title": "Wisp bot",
         "width": 64,
         "height": 64,
         "resizable": false,

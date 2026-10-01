@@ -1,6 +1,6 @@
 //! How much of the Claude subscription is used: the current session and the
 //! week, as Claude Code's own `/usage` prints them. Asking the CLI (as
-//! Codenotch does) means Dispečink never touches the Claude credentials.
+//! Codenotch does) means Wisp never touches the Claude credentials.
 
 use serde::Serialize;
 use std::path::PathBuf;
@@ -197,7 +197,7 @@ fn parse_iso_ms(s: &str) -> Option<u64> {
     u64::try_from(secs).ok().map(|s| s * 1000)
 }
 
-/// Days until the certificate Dispečink is signed with runs out. After that the
+/// Days until the certificate Wisp is signed with runs out. After that the
 /// Keychain starts asking again and new builds can't be signed.
 pub fn signing_cert_days() -> Option<i64> {
     let pem = Command::new("/usr/bin/security")

@@ -1,6 +1,6 @@
 import Foundation
 
-// What the Mac pushes (see src/relay.ts in Dispečink) and the commands the phone sends back.
+// What the Mac pushes (see src/relay.ts in Wisp) and the commands the phone sends back.
 
 struct RelayEnvelope: Decodable {
     let pushedAt: Double?

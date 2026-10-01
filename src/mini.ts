@@ -83,7 +83,7 @@ function subscribe(onState: (s: Snapshot) => void) {
 export function startPanel() {
   document.body.innerHTML = `
     <div class="pn">
-      <header><div class="m face"></div><div><b>Dispečink</b><small class="head">Načítám…</small></div></header>
+      <header><div class="m face"></div><div><b>Wisp</b><small class="head">Načítám…</small></div></header>
       <div class="tiles">
         <div class="tile s-you"><b data-c="attention">–</b><small>čeká na tebe</small></div>
         <div class="tile s-run"><b data-c="run">–</b><small>pracuje</small></div>
@@ -92,9 +92,9 @@ export function startPanel() {
       </div>
       <div class="list"></div>
       <footer>
-        <button data-act="open">Otevřít Dispečink</button>
+        <button data-act="open">Otevřít Wisp</button>
         <button data-act="refresh" title="Obnovit">↻</button>
-        <button data-act="quit" title="Ukončit Dispečink">Ukončit</button>
+        <button data-act="quit" title="Ukončit Wisp">Ukončit</button>
       </footer>
     </div>`;
   const face = mountMascot(document.querySelector(".face") as HTMLElement, { expression: "happy", seed: 4 });
@@ -566,7 +566,7 @@ export async function startNotch() {
   }
   let lastWing = 46;
 
-  // ----- Claude Code in a terminal: its hooks post to Dispečink, which passes them here -----
+  // ----- Claude Code in a terminal: its hooks post to Wisp, which passes them here -----
   type CcEvent = { session: string; project: string; kind: string; text: string };
   type Perm = { id: string; session: string; project: string; tool: string; detail: string; rule: string };
   const ccSessions = new Map<string, { project: string; lines: string[]; at: number; since: number; busy: boolean }>();
@@ -1021,7 +1021,7 @@ export async function startNotch() {
       steps.innerHTML = `<small class="who">${escHtml(fresh.name)}</small><div class="step now big-text">${escHtml(fresh.chip)}</div><div class="step past${fresh.id === "morning" ? " wrap" : ""}">${escHtml(fresh.doing)}</div>`;
     } else {
       setMode("idle");
-      steps.innerHTML = `<small class="who">Dispečink</small><div class="step now big-text">${escHtml(headline(s))}</div><div class="step past">${s.counts.run} pracuje · ${s.counts.sleep} spí</div>`;
+      steps.innerHTML = `<small class="who">Wisp</small><div class="step now big-text">${escHtml(headline(s))}</div><div class="step past">${s.counts.run} pracuje · ${s.counts.sleep} spí</div>`;
     }
 
     renderCrew(s, working);
@@ -1041,7 +1041,7 @@ export async function startNotch() {
     const list = Array.isArray(comments) ? comments : comments.items;
     const last = [...list].reverse().find((c) => c.authorAgentId);
     const q = steps.querySelector(".q");
-    if (q) q.textContent = (last?.body ?? "").replace(/[*`#>]/g, "").replace(/\s+/g, " ").slice(0, 240) || "Otevři úkol v Dispečinku.";
+    if (q) q.textContent = (last?.body ?? "").replace(/[*`#>]/g, "").replace(/\s+/g, " ").slice(0, 240) || "Otevři úkol ve Wispu.";
     const input = steps.querySelector("input") as HTMLInputElement;
     const send = steps.querySelector(".answer button") as HTMLButtonElement;
     const go = async () => {

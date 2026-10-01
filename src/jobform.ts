@@ -122,7 +122,7 @@ export function openJobForm(o: JobFormOptions) {
       when.innerHTML = `<span class="inline">každých <input type="number" min="1" max="1440" value="${minutes}" data-f="minutes"> minut</span>`;
     } else {
       when.innerHTML = `<small>${
-        kind === "keepAlive" ? "Spustí se hned a když spadne, launchd ho pustí znovu." : kind === "atLogin" ? "Spustí se jednou po každém přihlášení." : "Spustíš ji tlačítkem v Dispečinku."
+        kind === "keepAlive" ? "Spustí se hned a když spadne, launchd ho pustí znovu." : kind === "atLogin" ? "Spustí se jednou po každém přihlášení." : "Spustíš ji tlačítkem ve Wispu."
       }</small>`;
     }
   }

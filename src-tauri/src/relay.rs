@@ -1,4 +1,4 @@
-//! The iPhone app's link: Dispečink pushes its state to the Cloudflare relay
+//! The iPhone app's link: Wisp pushes its state to the Cloudflare relay
 //! (relay/ in this repo) and picks up what the phone asked for. The relay's URL
 //! and token live in config.json under "relay"; without them this does nothing.
 

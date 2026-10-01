@@ -1,7 +1,7 @@
 //! Claude Code sessions in the notch, like Coucou: what each session in a
 //! terminal is doing right now, and its permission prompts answered from the
 //! notch. Claude Code's hooks (see `install_hooks`) post to a tiny HTTP server
-//! on 127.0.0.1; when Dispečink isn't running, the hooks fail silently and
+//! on 127.0.0.1; when Wisp isn't running, the hooks fail silently and
 //! Claude Code asks in the terminal as usual.
 
 use serde::Serialize;
@@ -213,7 +213,7 @@ fn permission(app: &AppHandle, v: &Value) -> String {
     let decision = match answer.as_str() {
         "allow" => json!({ "behavior": "allow" }),
         "always" => json!({ "behavior": "allow", "addPermissionRules": [ask.rule] }),
-        "deny" => json!({ "behavior": "deny", "message": "Zamítnuto v Dispečinku." }),
+        "deny" => json!({ "behavior": "deny", "message": "Zamítnuto ve Wispu." }),
         // "terminal" or no answer: Claude Code asks in the terminal.
         _ => return String::new(),
     };
@@ -328,7 +328,7 @@ fn settings_path() -> PathBuf {
 }
 
 fn hook(url: &str, timeout: u64, async_: bool) -> Value {
-    // curl, not an http hook: when Dispečink is off it fails silently instead
+    // curl, not an http hook: when Wisp is off it fails silently instead
     // of leaving an error notice in every session.
     let max = if async_ { 2 } else { timeout - 5 };
     let mut h = json!({
@@ -342,12 +342,12 @@ fn hook(url: &str, timeout: u64, async_: bool) -> Value {
     h
 }
 
-/// Whether Dispečink's hooks are in Claude Code's settings.
+/// Whether Wisp's hooks are in Claude Code's settings.
 pub fn hooks_installed() -> bool {
     std::fs::read_to_string(settings_path()).is_ok_and(|s| s.contains(MARK))
 }
 
-/// Add (or remove) Dispečink's hooks, keeping everything else in the file.
+/// Add (or remove) Wisp's hooks, keeping everything else in the file.
 pub fn set_hooks(on: bool) -> Result<(), String> {
     let path = settings_path();
     let text = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".into());

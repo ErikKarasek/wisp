@@ -57,7 +57,7 @@ pub struct Job {
     pub log_path: Option<String>,
     pub log_modified_ms: Option<i64>,
     pub last_log_line: Option<String>,
-    /// Made by Dispečink, so it may be edited and deleted here.
+    /// Made by Wisp, so it may be edited and deleted here.
     pub managed: bool,
     /// For managed jobs: the shell command and working folder, for the edit form.
     pub command: Option<String>,
@@ -501,7 +501,7 @@ pub fn create(spec: &JobSpec) -> Result<String, String> {
 fn managed(label: &str) -> Result<Job, String> {
     let job = find(label)?;
     if !job.managed {
-        return Err("Tuhle úlohu nezaložil Dispečink, takže ji tu neměním.".into());
+        return Err("Tuhle úlohu nezaložil Wisp, takže ji tu neměním.".into());
     }
     Ok(job)
 }

@@ -1,4 +1,4 @@
-// Dispečink from the phone, through the user's Telegram bot: tasks for the
+// Wisp from the phone, through the user's Telegram bot: tasks for the
 // agents, replies to them, the state and the limits. The Rust side listens to
 // the bot (only the chat from the settings) and passes the messages here.
 

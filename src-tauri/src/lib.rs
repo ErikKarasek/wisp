@@ -183,7 +183,7 @@ fn tray_menu(app: &AppHandle, lines: &[String]) -> tauri::Result<Menu<Wry>> {
     if !lines.is_empty() {
         menu.append(&PredefinedMenuItem::separator(app)?)?;
     }
-    menu.append(&MenuItem::with_id(app, "open", "Otevřít Dispečink", true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "open", "Otevřít Wisp", true, None::<&str>)?)?;
     menu.append(&MenuItem::with_id(app, "quit", "Ukončit", true, None::<&str>)?)?;
     Ok(menu)
 }
@@ -489,7 +489,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle();
             let mut tray = TrayIconBuilder::with_id(TRAY_ID)
-                .tooltip("Dispečink")
+                .tooltip("Wisp")
                 .menu(&tray_menu(handle, &[])?)
                 // Left click opens the panel; the menu stays on right click.
                 .show_menu_on_left_click(false)
@@ -508,6 +508,16 @@ pub fn run() {
             }
             tray.build(app)?;
             notch::setup(handle);
+            // The app used to be called Dispečink, and its login item still opens the
+            // old app. Move it over to this one, once.
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let old = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Library/LaunchAgents/Dispečink.plist");
+                if old.exists() {
+                    let _ = std::fs::remove_file(&old);
+                    let _ = handle.autolaunch().enable();
+                }
+            }
             claudecode::start(handle);
             telegram::start_listening(handle);
             relay::start(handle);
@@ -587,7 +597,7 @@ pub fn run() {
             set_tray
         ])
         .build(tauri::generate_context!())
-        .expect("Dispečink se nepodařilo spustit");
+        .expect("Wisp se nepodařilo spustit");
 
     app.run(|app, event| {
         // Clicking the Dock icon brings the hidden window back.

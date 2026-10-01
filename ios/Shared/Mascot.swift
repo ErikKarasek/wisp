@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The Dispečink mascot, ported one-to-one from src/mascot/mascot.ts so the
+// The Wisp mascot, ported one-to-one from src/mascot/mascot.ts so the
 // phone draws exactly the characters the Mac does: a flat body in one of five
 // shapes and two capsule eyes laid on an imagined sphere. 100×100 viewBox.
 

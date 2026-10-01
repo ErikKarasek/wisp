@@ -5,7 +5,7 @@ import WidgetKit
 
 /// Fetch the Mac's state again now, instead of waiting for iOS's next refresh.
 struct RefreshIntent: AppIntent {
-    static var title: LocalizedStringResource = "Obnovit Dispečink"
+    static var title: LocalizedStringResource = "Obnovit Wisp"
     static var openAppWhenRun = false
 
     func perform() async throws -> some IntentResult {

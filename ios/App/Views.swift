@@ -82,7 +82,7 @@ struct OverviewView: View {
             }
             .background(Color.black)
             .refreshable { await store.refresh() }
-            .navigationTitle("Dispečink")
+            .navigationTitle("Wisp")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { HelpButton() } }
         }
     }
@@ -798,7 +798,7 @@ struct HelpSheet: View {
         ("Zeptat se", "Otázka pro Gemini z tvého AI Pro; odpoví přes Mac."),
         ("Povolování", "Když Claude Code na Macu chce něco spustit, objeví se tu i na zamčené obrazovce Povolit / Vždy / Zamítnout."),
         ("Dynamic Island a widgety", "Ostrov ukazuje bota a co dělá. Widgety Bot, Agenti a Limity přidáš podržením plochy → +. Obnovují se, když appku otevřeš, jinak zhruba po 15–30 minutách."),
-        ("Telegram", "Botovi Dispečinku napiš „Watcher: …“ a agent dostane úkol. Odpovědí na zprávu agenta mu odpovíš. /stav, /agenti, /limity, /pomoc."),
+        ("Telegram", "Botovi Wispu napiš „Watcher: …“ a agent dostane úkol. Odpovědí na zprávu agenta mu odpovíš. /stav, /agenti, /limity, /pomoc."),
         ("Job-mail bot", "Pošli odkaz na nabídku a založí kartu. /board, /prehled."),
     ]
     var body: some View {
