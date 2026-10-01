@@ -578,8 +578,11 @@ export async function startNotch() {
     const [id, v] = [...ccSessions.entries()].filter(([, v]) => v.busy && now - v.at < 120_000).sort((a, b) => b[1].at - a[1].at)[0] ?? [];
     return v ? { id: `cc:${id}`, name: `${v.project} · Claude`, character: {}, lines: v.lines } : undefined;
   };
+  /** "agent:<id>" from a Paperclip agent's Claude → that agent's name. */
+  const nameOf = (project: string) => (project.startsWith("agent:") ? lastSnap?.items.find((i) => i.id === project)?.name ?? "Agent" : project);
   void listen<CcEvent>("cc-event", (e) => {
-    const { session, project, kind, text } = e.payload;
+    const { session, kind, text } = e.payload;
+    const project = nameOf(e.payload.project);
     const now = Date.now();
     if (kind === "end") {
       ccSessions.delete(session);

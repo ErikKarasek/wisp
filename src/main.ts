@@ -149,7 +149,8 @@ function ccLive() {
   return [...ccSessions.values()]
     .filter((s) => s.busy && now - s.at < 120_000)
     .sort((a, b) => b.at - a.at)
-    .map((s) => ({ name: `${s.project} · Claude`, lines: s.lines.slice(-3) }));
+    // A Paperclip agent's Claude reports "agent:<id>": show the agent's name.
+    .map((s) => ({ name: s.project.startsWith("agent:") ? allItems().find((i) => i.id === s.project)?.name ?? "Agent" : `${s.project} · Claude`, lines: s.lines.slice(-3) }));
 }
 
 // ---------- Focus (a Shortcuts automation tells us) and messages from local scripts ----------
