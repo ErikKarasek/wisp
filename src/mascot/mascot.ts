@@ -22,7 +22,7 @@ export type MascotPrimitive =
   | { kind: "path"; d: string; fill: string }
   | { kind: "stroke"; d: string; stroke: string; width: number };
 
-export type MascotShape = "round" | "capsule" | "lemon" | "cube" | "cloud";
+export type MascotShape = "round" | "capsule" | "lemon" | "cube" | "cloud" | "ghost";
 
 export type MascotCharacter = {
   shape: MascotShape;
@@ -419,6 +419,25 @@ function widthAt(shape: MascotShape, v: number): number {
 
 function bodyPath(shape: MascotShape, cx: number, cy: number, rx: number, ry: number): string {
   "worklet";
+  if (shape === "ghost") {
+    // A dome on top, straight sides, three soft scallops along the bottom.
+    const pts: string[] = [];
+    const top = cy - ry * 0.05;
+    for (let i = 0; i <= 32; i += 1) {
+      const a = Math.PI + (i / 32) * Math.PI;
+      pts.push(`${r2(cx + rx * Math.cos(a))} ${r2(top + ry * 0.95 * Math.sin(a))}`);
+    }
+    const hem = cy + ry * 0.82;
+    pts.push(`${r2(cx + rx)} ${r2(hem)}`);
+    for (let k = 0; k < 3; k += 1) {
+      for (let j = 1; j <= 8; j += 1) {
+        const t = j / 8;
+        const x = cx + rx - (2 * rx * (k + t)) / 3;
+        pts.push(`${r2(x)} ${r2(hem + Math.sin(t * Math.PI) * ry * 0.2)}`);
+      }
+    }
+    return `M${pts.join(" L")} Z`;
+  }
   // Superellipse exponent: higher is boxier.
   const n = shape === "cube" ? 5 : shape === "capsule" ? 3 : 2;
   const steps = 64;

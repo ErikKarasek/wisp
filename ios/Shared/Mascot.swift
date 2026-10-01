@@ -166,6 +166,26 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
             g.fill(e, with: .color(color(body)))
             bodyPath.addPath(e)
         }
+    } else if ch.shape == "ghost" {
+        // A dome on top, straight sides, three soft scallops along the bottom (mascot.ts bodyPath).
+        var path = Path()
+        let top = cy - ry * 0.05
+        for i in 0...32 {
+            let a = Double.pi + Double(i) / 32 * .pi
+            let p = P(cx + rx * cos(a), top + ry * 0.95 * sin(a))
+            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        }
+        let hem = cy + ry * 0.82
+        path.addLine(to: P(cx + rx, hem))
+        for k in 0..<3 {
+            for j in 1...8 {
+                let t = Double(j) / 8
+                path.addLine(to: P(cx + rx - 2 * rx * (Double(k) + t) / 3, hem + sin(t * .pi) * ry * 0.2))
+            }
+        }
+        path.closeSubpath()
+        g.fill(path, with: .color(color(body)))
+        bodyPath = path
     } else {
         let n = ch.shape == "cube" ? 5.0 : ch.shape == "capsule" ? 3.0 : 2.0
         var path = Path()

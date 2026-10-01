@@ -35,12 +35,17 @@ struct DispecinkActivity: ActivityAttributes {
 
 extension PhoneState {
     /// The four agents shown as a crew: Paperclip agents first, then the Antigravity jobs.
-    /// Only who is busy, like the notch: agents first.
+    /// Four, like the notch: who is busy first (agents ahead), then whoever did something most recently.
     var crew: [CrewChip] {
         let active = busy.filter { $0.id != live?.first?.id }
-        let agentItems = active.filter { $0.id.hasPrefix("agent:") }
-        let others = active.filter { !$0.id.hasPrefix("agent:") }
-        return (agentItems + others).prefix(4).map {
+        var picked = active.filter { $0.id.hasPrefix("agent:") } + active.filter { !$0.id.hasPrefix("agent:") }
+        let recentIds = (history ?? []).map(\.id)
+        let recent = recentIds.compactMap { id in items.first { $0.id == id } }
+        let agents = items.filter { $0.id.hasPrefix("agent:") && $0.state != "off" }
+        for i in recent + agents where picked.count < 4 && i.id != live?.first?.id && !picked.contains(where: { $0.id == i.id }) {
+            picked.append(i)
+        }
+        return picked.prefix(4).map {
             CrewChip(name: $0.name, status: crewStatus($0), state: $0.state, character: $0.character ?? MascotCharacter())
         }
     }

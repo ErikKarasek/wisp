@@ -1068,11 +1068,17 @@ export async function startNotch() {
   // The crew: four agents as coloured pills with what they do (agents first, then the busiest others).
   const crewStatus = (i: MiniItem) =>
     i.state === "run" ? i.doing : i.state === "you" ? "Čeká na tebe" : i.state === "bad" ? "Selhal" : i.state === "done" ? "Hotovo" : i.state === "new" ? "Něco našel" : i.name;
+  // Four: who is busy right now first, then whoever did something most recently.
   function crewPick(s: Snapshot, working?: { id: string }) {
     const busy = s.items.filter((i) => ACTIVE.includes(i.state) && i.id !== working?.id);
     const agents = busy.filter((i) => i.id.startsWith("agent:"));
     const rest = busy.filter((i) => !i.id.startsWith("agent:"));
-    return [...agents.sort(byUrgency), ...rest.sort(byUrgency)].slice(0, 4);
+    const taken = new Set([...busy.map((i) => i.id), working?.id]);
+    const recent = (s.recent ?? []).map((id) => s.items.find((i) => i.id === id)).filter((i): i is MiniItem => !!i && !taken.has(i.id));
+    const fill = s.items.filter((i) => i.id.startsWith("agent:") && i.state !== "off" && !taken.has(i.id));
+    const out = [...agents.sort(byUrgency), ...rest.sort(byUrgency)];
+    for (const i of [...recent, ...fill]) if (!out.some((o) => o.id === i.id)) out.push(i);
+    return out.slice(0, 4);
   }
   function renderCrew(s: Snapshot, working: Snapshot["live"][number] | undefined) {
     const four = crewPick(s, working);

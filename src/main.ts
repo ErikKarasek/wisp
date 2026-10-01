@@ -977,6 +977,7 @@ function snapshot(): Snapshot {
     gpt: gptQuota,
     gemini: geminiQuota,
     focus,
+    recent: [...new Set(history.slice(-200).reverse().map((h) => h.id))].slice(0, 16),
   };
 }
 let newsAt = 0;

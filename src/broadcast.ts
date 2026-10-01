@@ -57,6 +57,8 @@ export type Snapshot = {
   gemini: AgyWindow[];
   /** A macOS Focus is on: the bot works quietly. */
   focus: boolean;
+  /** Item ids by when they last did something, newest first. */
+  recent?: string[];
 };
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
