@@ -2,18 +2,23 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject var store: Store
+    /// The open tab; widgets open a tab with dispecink://<tab>.
+    @State private var tab = "overview"
     var body: some View {
-        TabView {
-            OverviewView().tabItem { Label("Přehled", systemImage: "gauge.with.dots.needle.33percent") }
+        TabView(selection: $tab) {
+            OverviewView().tabItem { Label("Přehled", systemImage: "gauge.with.dots.needle.33percent") }.tag("overview")
                 .badge((store.state?.waiting.count ?? 0) + (store.state?.perms?.count ?? 0))
-            AgentsView().tabItem { Label("Agenti", systemImage: "person.2.wave.2") }
-            TasksView().tabItem { Label("Úkoly", systemImage: "checklist") }
+            AgentsView().tabItem { Label("Agenti", systemImage: "person.2.wave.2") }.tag("agents")
+            TasksView().tabItem { Label("Úkoly", systemImage: "checklist") }.tag("tasks")
                 .badge(store.state?.tasks.filter { $0.issue.status == "blocked" }.count ?? 0)
-            ReviewsView().tabItem { Label("Kontrola", systemImage: "arrow.triangle.pull") }
+            ReviewsView().tabItem { Label("Kontrola", systemImage: "arrow.triangle.pull") }.tag("reviews")
                 .badge(store.state?.prs?.count ?? 0)
-            AskView().tabItem { Label("Zeptat se", systemImage: "sparkles") }
+            AskView().tabItem { Label("Zeptat se", systemImage: "sparkles") }.tag("ask")
         }
         .tint(Palette.accent)
+        .onOpenURL { url in
+            if let host = url.host, ["overview", "agents", "tasks", "reviews", "ask"].contains(host) { tab = host }
+        }
     }
 }
 

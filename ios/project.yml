@@ -32,6 +32,9 @@ targets:
         CFBundleLocalizations: [cs]
         NSSupportsLiveActivities: true
         UIBackgroundModes: [fetch]
+        CFBundleURLTypes:
+          - CFBundleURLName: cz.erikkarasek.dispecink.phone
+            CFBundleURLSchemes: [dispecink]
         BGTaskSchedulerPermittedIdentifiers: [cz.erikkarasek.dispecink.refresh]
         UILaunchScreen: {}
         UIUserInterfaceStyle: Dark
