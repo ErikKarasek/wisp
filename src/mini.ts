@@ -992,7 +992,9 @@ export async function startNotch() {
     showLook(who && Object.keys(who).length ? who : botLook());
 
     // Claude Code asking for permission comes first, then a dropped file.
-    root.classList.toggle("asking", perms.length > 0 || !!fileAsk || quickAsk);
+    // An agent's question gets the whole card too, like a quick question.
+    const agentAsks = !working && s.items.some((i) => i.ask);
+    root.classList.toggle("asking", perms.length > 0 || !!fileAsk || quickAsk || agentAsks);
     if (perms.length) {
       renderPerm();
       return renderCrew(s, working);

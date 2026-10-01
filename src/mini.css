@@ -415,3 +415,8 @@ body.mini button { font: inherit; color: inherit; }
 .nt .pill { color: color-mix(in srgb, var(--c) 62%, #fff); }
 /* The camera card is as wide as it is tall; the shared width rule (flex-basis: 0) would squash it to nothing. */
 .nt .panes > .card.mirror { flex: 0 0 auto; width: auto; aspect-ratio: 1; height: 100%; }
+/* The text column may shrink below its widest child (the answer box, a long title):
+   without this the grid grows past the card and everything gets cut. */
+.nt .steps { grid-template-columns: minmax(0, 1fr); }
+.nt .steps > * { min-width: 0; }
+.nt .step.now.big-text.small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
