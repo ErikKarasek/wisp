@@ -523,7 +523,8 @@ export function cloudflareGroup(snap: CloudflareSnapshot, now = Date.now()): Gro
       state = "bad";
       bubble = "cron selhal";
       doing = `Poslední cron skončil: ${lastCron.status}`;
-    } else if (errors > 0) {
+    } else if (errors >= 5 && errors / Math.max(1, requests) > 0.01) {
+      // A stray error now and then (a deploy, a dropped connection) isn't worth bothering Erik.
       state = "you";
       bubble = `${errors} chyb`;
       doing = `${errors} chyb z ${requests} běhů za 24 h`;

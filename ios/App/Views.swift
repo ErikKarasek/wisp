@@ -602,6 +602,7 @@ struct PRSheet: View {
     let pr: PhoneState.PR
     @State private var confirm: String?
     @State private var done: String?
+    @State private var failed: String?
 
     var body: some View {
         NavigationStack {
@@ -613,6 +614,9 @@ struct PRSheet: View {
                         Text(LocalizedStringKey(pr.body)).font(.callout).padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Palette.card, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    if let failed {
+                        Label(failed, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Palette.bad).font(.subheadline)
                     }
                     if let done {
                         Label(done, systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.subheadline)
@@ -637,8 +641,12 @@ struct PRSheet: View {
                     let action = confirm ?? ""
                     Task {
                         if await store.send(["kind": "pr", "repo": pr.repo, "number": String(pr.number), "action": action]) {
+                            failed = nil
                             done = action == "merge" ? "Posláno, Mac to do 10 s mergne." : "Posláno, Mac ho do 10 s zavře."
                             Haptic.success()
+                        } else {
+                            failed = store.error ?? "Neodesláno."
+                            Haptic.warning()
                         }
                     }
                 }
