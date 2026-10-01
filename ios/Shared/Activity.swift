@@ -30,6 +30,21 @@ struct DispecinkActivity: ActivityAttributes {
         var updated: Date
         /// The first permission prompt waiting, answered with the card's buttons.
         var permId: String? = nil
+        /// Erik's own bot, for when the news is old.
+        var home: MascotCharacter? = nil
+
+        /// What the card shows once it hasn't been updated for a while: the phone
+        /// can't know whether Claude or an agent still works, so it says nothing
+        /// it can't vouch for, and the bot goes back to Erik's own.
+        var settled: ContentState {
+            var c = self
+            if ["working", "ask", "done"].contains(mode) {
+                c.mode = "idle"; c.title = "Otevři Dispečink pro novinky"; c.detail = ""; c.steps = []
+            }
+            c.bot = home ?? bot
+            c.permId = nil
+            return c
+        }
     }
 }
 
@@ -91,6 +106,6 @@ extension PhoneState {
                      waiting: waiting.count, perms: perms?.count ?? 0,
                      claude: limits.claude?.session, claudeWeek: limits.claude?.week,
                      gpt: limits.gpt.first?.percent, gemini: gemini5h, bot: focusLook ?? bot, crew: crew, updated: Date(),
-                     permId: perms?.first?.id)
+                     permId: perms?.first?.id, home: bot)
     }
 }

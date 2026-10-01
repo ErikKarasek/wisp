@@ -22,7 +22,7 @@ export type MascotPrimitive =
   | { kind: "path"; d: string; fill: string }
   | { kind: "stroke"; d: string; stroke: string; width: number };
 
-export type MascotShape = "round" | "capsule" | "lemon" | "cube" | "cloud" | "ghost";
+export type MascotShape = "round" | "capsule" | "lemon" | "cube" | "cloud" | "ghost" | "dome" | "onigiri" | "blob" | "cat" | "bear" | "bunny";
 
 export type MascotCharacter = {
   shape: MascotShape;
@@ -417,8 +417,51 @@ function widthAt(shape: MascotShape, v: number): number {
   return 1;
 }
 
+/** A closed outline through points given in polar form around the centre. */
+function polar(cx: number, cy: number, rx: number, ry: number, r: (a: number) => number, clampBottom = Infinity): string {
+  "worklet";
+  const pts: string[] = [];
+  for (let i = 0; i < 72; i += 1) {
+    const a = (i / 72) * Math.PI * 2;
+    const k = r(a);
+    pts.push(`${r2(cx + rx * k * Math.cos(a))} ${r2(Math.min(cy + ry * k * Math.sin(a), clampBottom))}`);
+  }
+  return `M${pts.join(" L")} Z`;
+}
+
 function bodyPath(shape: MascotShape, cx: number, cy: number, rx: number, ry: number): string {
   "worklet";
+  if (shape === "dome") {
+    // A mochi: a soft superellipse with its bottom pressed flat.
+    return polar(cx, cy - ry * 0.08, rx, ry * 1.06, (a) => {
+      const c = Math.abs(Math.cos(a));
+      const s = Math.abs(Math.sin(a));
+      return 1 / Math.pow(Math.pow(c, 2.6) + Math.pow(s, 2.6), 1 / 2.6);
+    }, cy + ry * 0.86);
+  }
+  if (shape === "blob") {
+    // Jelly: a wobbly, uneven outline.
+    return polar(cx, cy, rx, ry, (a) => 1 + 0.07 * Math.sin(3 * a + 0.6) + 0.045 * Math.cos(5 * a));
+  }
+  if (shape === "onigiri") {
+    // A rounded triangle, point up.
+    const v = [
+      [cx, cy - ry * 1.05],
+      [cx + rx * 1.08, cy + ry * 0.92],
+      [cx - rx * 1.08, cy + ry * 0.92],
+    ];
+    const lerp = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    let d = "";
+    for (let i = 0; i < 3; i += 1) {
+      const prev = v[(i + 2) % 3];
+      const cur = v[i];
+      const next = v[(i + 1) % 3];
+      const a = lerp(cur, prev, 0.3);
+      const b = lerp(cur, next, 0.3);
+      d += `${i === 0 ? "M" : "L"}${r2(a[0])} ${r2(a[1])} Q${r2(cur[0])} ${r2(cur[1])} ${r2(b[0])} ${r2(b[1])} `;
+    }
+    return `${d}Z`;
+  }
   if (shape === "ghost") {
     // A dome on top, straight sides, three soft scallops along the bottom.
     const pts: string[] = [];
@@ -476,6 +519,28 @@ function cloudPuffs(cx: number, cy: number, rx: number, ry: number, fill: string
   );
 }
 
+/** The body as one or more shapes of its colour: puffs for a cloud, ears for the animals. */
+function bodyPrimitives(shape: MascotShape, cx: number, cy: number, rx: number, ry: number, fill: string): MascotPrimitive[] {
+  "worklet";
+  if (shape === "cloud") return cloudPuffs(cx, cy, rx, ry, fill);
+  const round: MascotPrimitive = { kind: "path", d: bodyPath("round", cx, cy, rx, ry), fill };
+  if (shape === "cat") {
+    const ear = (side: number) =>
+      `M${r2(cx + side * rx * 0.86)} ${r2(cy - ry * 0.32)} L${r2(cx + side * rx * 0.7)} ${r2(cy - ry * 1.28)} ` +
+      `Q${r2(cx + side * rx * 0.62)} ${r2(cy - ry * 1.36)} ${r2(cx + side * rx * 0.52)} ${r2(cy - ry * 1.26)} L${r2(cx + side * rx * 0.1)} ${r2(cy - ry * 0.8)} Z`;
+    return [{ kind: "path", d: ear(-1), fill }, { kind: "path", d: ear(1), fill }, round];
+  }
+  if (shape === "bear") {
+    const ear = (side: number): MascotPrimitive => ({ kind: "ellipse", cx: r2(cx + side * rx * 0.66), cy: r2(cy - ry * 0.78), rx: r2(rx * 0.3), ry: r2(ry * 0.3), fill });
+    return [ear(-1), ear(1), round];
+  }
+  if (shape === "bunny") {
+    const ear = (side: number): MascotPrimitive => ({ kind: "ellipse", cx: r2(cx + side * rx * 0.34), cy: r2(cy - ry * 1.12), rx: r2(rx * 0.17), ry: r2(ry * 0.52), fill });
+    return [ear(-1), ear(1), round];
+  }
+  return [{ kind: "path", d: bodyPath(shape, cx, cy, rx, ry), fill }];
+}
+
 export type MascotGeometry = {
   width: number;
   height: number;
@@ -497,7 +562,8 @@ export function mascotFrame(character: Partial<MascotCharacter>, pose: MascotPos
   const ex = pose.expression;
   const groundY = 92;
 
-  const baseR = 38;
+  // Animals leave headroom for their ears.
+  const baseR = 38 * (ch.shape === "bunny" ? 0.74 : ch.shape === "cat" || ch.shape === "bear" ? 0.84 : 1);
   const cloud = ch.shape === "cloud";
   const rx = baseR * Math.sqrt(ch.aspect) * (1 + pose.squash * 0.5) * (cloud ? 0.92 : 1);
   const ry = (baseR / Math.sqrt(ch.aspect)) * (1 - pose.squash) * (cloud ? 0.72 : 1);
@@ -518,9 +584,8 @@ export function mascotFrame(character: Partial<MascotCharacter>, pose: MascotPos
     ? mixHex(baseEye, mixHex(ex.tint, "#000000", 0.6), ex.tintAmount)
     : baseEye;
 
-  const primitives: MascotPrimitive[] = cloud
-    ? cloudPuffs(cx, cy, rx, ry, color)
-    : [{ kind: "path", d: bodyPath(ch.shape, cx, cy, rx, ry), fill: color }];
+  const primitives: MascotPrimitive[] = bodyPrimitives(ch.shape, cx, cy, rx, ry, color);
+  const bodyCount = primitives.length;
 
   // ── The head's rotation ─────────────────────────────────────────────────
   const yaw = clamp(ex.lookX + pose.lookX, -1, 1) * 0.62;
@@ -617,7 +682,7 @@ export function mascotFrame(character: Partial<MascotCharacter>, pose: MascotPos
     primitives,
     tilt: ch.lean + ex.tilt,
     pivot: { x: cx, y: groundY },
-    body: { cx, cy, rx, ry, count: cloud ? 6 : 1 },
+    body: { cx, cy, rx, ry, count: bodyCount },
   };
 }
 

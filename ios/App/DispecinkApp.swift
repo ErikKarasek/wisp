@@ -70,7 +70,10 @@ final class Store: ObservableObject {
     /// The Dynamic Island: one Live Activity, started when missing (they end after hours), then updated.
     private func updateIsland(_ s: PhoneState) async {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        let content = ActivityContent(state: s.activityState, staleDate: Date(timeIntervalSinceNow: 40 * 60))
+        // Work and questions are only true for a few minutes; after that the card settles (see `settled`).
+        let a = s.activityState
+        let fresh: TimeInterval = ["working", "ask", "done"].contains(a.mode) ? 4 * 60 : 40 * 60
+        let content = ActivityContent(state: a, staleDate: Date(timeIntervalSinceNow: fresh))
         let running = Activity<DispecinkActivity>.activities.filter { $0.activityState == .active }
         if let a = running.first {
             await a.update(content)

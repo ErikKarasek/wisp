@@ -5,6 +5,10 @@ struct Entry: TimelineEntry {
     let date: Date
     let state: PhoneState?
     let pushed: Date?
+    /// The news is too old to say someone works right now.
+    var old: Bool { pushed.map { date.timeIntervalSince($0) > 5 * 60 } ?? true }
+    /// The bot's mode, settled to idle once the news is old.
+    var mode: String { old ? "idle" : (state?.activityState.mode ?? "idle") }
 }
 
 struct Provider: TimelineProvider {
@@ -17,8 +21,10 @@ struct Provider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
         Task {
             let entry = await load()
+            // A second entry a few minutes on, where "working" settles to idle if no refresh came.
+            let later = Entry(date: .now.addingTimeInterval(6 * 60), state: entry.state, pushed: entry.pushed)
             // iOS decides how often widgets refresh; asking for 15 minutes is the usual budget.
-            completion(Timeline(entries: [entry], policy: .after(.now.addingTimeInterval(15 * 60))))
+            completion(Timeline(entries: [entry, later], policy: .after(.now.addingTimeInterval(15 * 60))))
         }
     }
 
@@ -144,7 +150,7 @@ struct BotWidgetView: View {
     let entry: Entry
     var body: some View {
         let a = entry.state?.activityState
-        let mode = a?.mode ?? "idle"
+        let mode = entry.mode
         VStack(spacing: 4) {
             Text(a.map { $0.mode == "working" ? $0.title : "Dispečink" } ?? "Dispečink")
                 .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.4)).lineLimit(1)
@@ -191,7 +197,7 @@ struct CrewWidgetView: View {
         Group {
             if family == .systemMedium {
                 HStack(spacing: 12) {
-                    BotBadge(character: entry.state?.bot ?? .white, mode: a?.mode ?? "idle", size: 70)
+                    BotBadge(character: entry.state?.bot ?? .white, mode: entry.mode, size: 70)
                         .frame(width: 84, height: 84)
                         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
                     CrewGrid(crew: crew, size: 12)

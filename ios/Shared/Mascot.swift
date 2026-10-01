@@ -140,7 +140,8 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
     let ox = (size.width - 100 * scale) / 2, oy = (size.height - 100 * scale) / 2
     func P(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: ox + x * scale, y: oy + y * scale) }
 
-    let groundY = 92.0, baseR = 38.0, cloud = ch.shape == "cloud"
+    // Animals leave headroom for their ears.
+    let groundY = 92.0, baseR = 38.0 * (ch.shape == "bunny" ? 0.74 : ch.shape == "cat" || ch.shape == "bear" ? 0.84 : 1), cloud = ch.shape == "cloud"
     let rx = baseR * sqrt(ch.aspect) * (1 + pose.squash * 0.5) * (cloud ? 0.92 : 1)
     let ry = (baseR / sqrt(ch.aspect)) * (1 - pose.squash) * (cloud ? 0.72 : 1)
     let cx = 50.0, cy = groundY - ry - pose.lift - (cloud ? 8 : 0)
@@ -157,17 +158,40 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
     g.rotate(by: .degrees(ch.lean + ex.tilt))
     g.translateBy(x: -pivot.x, y: -pivot.y)
 
-    var bodyPath = Path()
-    if cloud {
-        for (x, y, r) in [(0.0, 0.18, 0.78), (-0.52, 0.28, 0.5), (0.52, 0.28, 0.5), (-0.3, -0.3, 0.52), (0.28, -0.36, 0.56), (0, 0.5, 0.5)] {
-            let c = P(cx + x * rx, cy + y * ry)
-            let w = r * rx * scale, h = r * ry * scale
-            let e = Path(ellipseIn: CGRect(x: c.x - w, y: c.y - h, width: w * 2, height: h * 2))
-            g.fill(e, with: .color(color(body)))
-            bodyPath.addPath(e)
+    // The body as one or more shapes of its colour (puffs, ears), ported from mascot.ts bodyPrimitives.
+    func ellipse(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> Path {
+        let c = P(x, y)
+        return Path(ellipseIn: CGRect(x: c.x - w * scale, y: c.y - h * scale, width: w * 2 * scale, height: h * 2 * scale))
+    }
+    func polar(_ x0: Double, _ y0: Double, _ ax: Double, _ ay: Double, clampBottom: Double = .infinity, _ r: (Double) -> Double) -> Path {
+        var path = Path()
+        for i in 0..<72 {
+            let a = Double(i) / 72 * .pi * 2, k = r(a)
+            let p = P(x0 + ax * k * cos(a), min(y0 + ay * k * sin(a), clampBottom))
+            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
         }
-    } else if ch.shape == "ghost" {
-        // A dome on top, straight sides, three soft scallops along the bottom (mascot.ts bodyPath).
+        path.closeSubpath()
+        return path
+    }
+    func superellipse(_ n: Double) -> Path {
+        var path = Path()
+        for i in 0..<64 {
+            let a = Double(i) / 64 * .pi * 2
+            let c = cos(a), s = sin(a)
+            let ex2 = (c < 0 ? -1 : 1) * pow(abs(c), 2 / n), ey = (s < 0 ? -1 : 1) * pow(abs(s), 2 / n)
+            let p = P(cx + rx * ex2 * widthAt(ch.shape, ey), cy + ry * ey)
+            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        }
+        path.closeSubpath()
+        return path
+    }
+    var parts: [Path] = []
+    switch ch.shape {
+    case "cloud":
+        for (x, y, r) in [(0.0, 0.18, 0.78), (-0.52, 0.28, 0.5), (0.52, 0.28, 0.5), (-0.3, -0.3, 0.52), (0.28, -0.36, 0.56), (0, 0.5, 0.5)] {
+            parts.append(ellipse(cx + x * rx, cy + y * ry, r * rx, r * ry))
+        }
+    case "ghost":
         var path = Path()
         let top = cy - ry * 0.05
         for i in 0...32 {
@@ -184,21 +208,49 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
             }
         }
         path.closeSubpath()
-        g.fill(path, with: .color(color(body)))
-        bodyPath = path
-    } else {
-        let n = ch.shape == "cube" ? 5.0 : ch.shape == "capsule" ? 3.0 : 2.0
+        parts.append(path)
+    case "dome":
+        parts.append(polar(cx, cy - ry * 0.08, rx, ry * 1.06, clampBottom: cy + ry * 0.86) { a in
+            1 / pow(pow(abs(cos(a)), 2.6) + pow(abs(sin(a)), 2.6), 1 / 2.6)
+        })
+    case "blob":
+        parts.append(polar(cx, cy, rx, ry) { a in 1 + 0.07 * sin(3 * a + 0.6) + 0.045 * cos(5 * a) })
+    case "onigiri":
+        let v = [(cx, cy - ry * 1.05), (cx + rx * 1.08, cy + ry * 0.92), (cx - rx * 1.08, cy + ry * 0.92)]
+        func lerp(_ a: (Double, Double), _ b: (Double, Double), _ t: Double) -> (Double, Double) { (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t) }
         var path = Path()
-        for i in 0..<64 {
-            let a = Double(i) / 64 * .pi * 2
-            let c = cos(a), s = sin(a)
-            let ex2 = (c < 0 ? -1 : 1) * pow(abs(c), 2 / n), ey = (s < 0 ? -1 : 1) * pow(abs(s), 2 / n)
-            let p = P(cx + rx * ex2 * widthAt(ch.shape, ey), cy + ry * ey)
-            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        for i in 0..<3 {
+            let prev = v[(i + 2) % 3], cur = v[i], next = v[(i + 1) % 3]
+            let a = lerp(cur, prev, 0.3), b = lerp(cur, next, 0.3)
+            if i == 0 { path.move(to: P(a.0, a.1)) } else { path.addLine(to: P(a.0, a.1)) }
+            path.addQuadCurve(to: P(b.0, b.1), control: P(cur.0, cur.1))
         }
         path.closeSubpath()
-        g.fill(path, with: .color(color(body)))
-        bodyPath = path
+        parts.append(path)
+    case "cat":
+        for side in [-1.0, 1.0] {
+            var ear = Path()
+            ear.move(to: P(cx + side * rx * 0.86, cy - ry * 0.32))
+            ear.addLine(to: P(cx + side * rx * 0.7, cy - ry * 1.28))
+            ear.addQuadCurve(to: P(cx + side * rx * 0.52, cy - ry * 1.26), control: P(cx + side * rx * 0.62, cy - ry * 1.36))
+            ear.addLine(to: P(cx + side * rx * 0.1, cy - ry * 0.8))
+            ear.closeSubpath()
+            parts.append(ear)
+        }
+        parts.append(superellipse(2))
+    case "bear":
+        for side in [-1.0, 1.0] { parts.append(ellipse(cx + side * rx * 0.66, cy - ry * 0.78, rx * 0.3, ry * 0.3)) }
+        parts.append(superellipse(2))
+    case "bunny":
+        for side in [-1.0, 1.0] { parts.append(ellipse(cx + side * rx * 0.34, cy - ry * 1.12, rx * 0.17, ry * 0.52)) }
+        parts.append(superellipse(2))
+    default:
+        parts.append(superellipse(ch.shape == "cube" ? 5 : ch.shape == "capsule" ? 3 : 2))
+    }
+    var bodyPath = Path()
+    for part in parts {
+        g.fill(part, with: .color(color(body)))
+        bodyPath.addPath(part)
     }
 
     // Gloss, like a lit ball (the Grok Bot look): a highlight top-left, a soft shade at the bottom.

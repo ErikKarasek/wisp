@@ -13,49 +13,12 @@ const SHAPES: [MascotShape, string][] = [
   ["cube", "Kostka"],
   ["cloud", "Mráček"],
   ["ghost", "Duch"],
-];
-/** Ready-made characters to start from: the gallery's second half. */
-export const PRESETS: [string, Partial<MascotCharacter>][] = [
-  ["Borůvka", { shape: "round", color: "#6d7fe0" }],
-  ["Mátovka", { shape: "round", color: "#5fcfa8", aspect: 1.1 }],
-  ["Meruňka", { shape: "round", color: "#f2a65a", eyeSize: 1.2 }],
-  ["Malina", { shape: "round", color: "#f08a7e", eyeSpread: 0.8 }],
-  ["Citronka", { shape: "lemon", color: "#e8d25a" }],
-  ["Švestka", { shape: "lemon", color: "#8e5bb5", eyeColor: "#f4f5f8" }],
-  ["Kapka", { shape: "lemon", color: "#4fb3d9", aspect: 0.85 }],
-  ["Hruška", { shape: "lemon", color: "#7fc97a", aspect: 0.9, lean: -4 }],
-  ["Kostička", { shape: "cube", color: "#8b9cff" }],
-  ["Cihla", { shape: "cube", color: "#e0605a", aspect: 1.3, eyeSize: 0.85 }],
-  ["Krabička", { shape: "cube", color: "#c9a27e", aspect: 1.15 }],
-  ["Tofu", { shape: "cube", color: "#dfe3ec", eyeSize: 0.8, eyeSpread: 1.3 }],
-  ["Robot", { shape: "cube", color: "#8a909b", eyeColor: "#4fb3d9", aspect: 0.9 }],
-  ["Noční", { shape: "cube", color: "#3a3f4b", eyeColor: "#e8d25a" }],
-  ["Pilulka", { shape: "capsule", color: "#d980c9", aspect: 1.3 }],
-  ["Fazolka", { shape: "capsule", color: "#7fc97a", aspect: 1.2, lean: 6 }],
-  ["Marshmallow", { shape: "capsule", color: "#f4f5f8", eyeSize: 0.9 }],
-  ["Kokos", { shape: "capsule", color: "#c9a27e", aspect: 0.9, eyeSize: 1.25 }],
-  ["Levandule", { shape: "capsule", color: "#b4a1f0", eyeSpread: 1.25 }],
-  ["Obláček", { shape: "cloud", color: "#dfe3ec" }],
-  ["Bouřka", { shape: "cloud", color: "#3a3f4b", eyeColor: "#f4f5f8" }],
-  ["Cukrovka", { shape: "cloud", color: "#d980c9", eyeSize: 1.2 }],
-  ["Duha", { shape: "cloud", color: "#8b9cff", aspect: 1.2 }],
-  ["Pára", { shape: "cloud", color: "#4fb3d9", eyeSpread: 0.8 }],
-  ["Bubák", { shape: "ghost", color: "#f4f5f8" }],
-  ["Fantom", { shape: "ghost", color: "#b4a1f0", eyeSize: 1.2 }],
-  ["Strašidýlko", { shape: "ghost", color: "#5fcfa8", aspect: 0.9 }],
-  ["Dýňák", { shape: "ghost", color: "#f2a65a", eyeColor: "#3a1f14" }],
-  ["Půlnoc", { shape: "ghost", color: "#3a3f4b", eyeColor: "#e8d25a", eyeSize: 1.15 }],
-  ["Mlha", { shape: "ghost", color: "#8a909b", eyeSpread: 1.25 }],
-  ["Rubín", { shape: "round", color: "#e0605a", eyeColor: "#2b2140" }],
-  ["Smaragd", { shape: "round", color: "#3fae7a", eyeSize: 0.85 }],
-  ["Safír", { shape: "round", color: "#3b6fd8", eyeColor: "#f4f5f8" }],
-  ["Zlatíčko", { shape: "round", color: "#f2c94c", aspect: 1.2 }],
-  ["Uhlík", { shape: "round", color: "#2a2d35", eyeColor: "#ff8a5b" }],
-  ["Mochi", { shape: "round", color: "#f6e6dc", aspect: 1.25, eyeSize: 1.1 }],
-  ["Kakao", { shape: "lemon", color: "#8a5a3c", eyeColor: "#f4f5f8" }],
-  ["Ledňáček", { shape: "capsule", color: "#22b8cf", aspect: 1.05 }],
-  ["Korál", { shape: "cloud", color: "#ff7f6e" }],
-  ["Pistácie", { shape: "cube", color: "#a8d08d", eyeSpread: 0.85 }],
+  ["dome", "Kopeček"],
+  ["onigiri", "Onigiri"],
+  ["blob", "Želé"],
+  ["cat", "Kočka"],
+  ["bear", "Méďa"],
+  ["bunny", "Zajíc"],
 ];
 const BODY_COLORS = [
   "#6d7fe0", "#8b9cff", "#4fb3d9", "#5fcfa8", "#7fc97a", "#e8d25a",
@@ -218,9 +181,7 @@ export function openStudio(o: StudioOptions) {
         })
         .join("") +
       (sel.kind === "new" ? tile("new", draft.name || "Nová", draft.character, true) : "") +
-      `<button class="tile add" data-key="add"><b>+</b><span>Nová</span></button>` +
-      `<h6 class="gallery-head">Hotové postavičky</h6>` +
-      PRESETS.map(([name, ch], n) => tile(`preset:${n}`, name, ch, false)).join("");
+      `<button class="tile add" data-key="add"><b>+</b><span>Nová</span></button>`;
   }
 
   function renderNote() {
@@ -296,16 +257,6 @@ export function openStudio(o: StudioOptions) {
       const key = tile.dataset.key!;
       if (key === "add") return load({ kind: "new" });
       if (key === "new") return;
-      if (key.startsWith("preset:")) {
-        // A ready-made one: a new character to keep, tweak or wear.
-        const [name, ch] = PRESETS[Number(key.slice(7))];
-        sel = { kind: "new" };
-        draft = { name, character: fullCharacter(ch) };
-        source = "";
-        syncForm();
-        renderGallery();
-        return changed();
-      }
       return load(key === "auto" ? { kind: "auto" } : { kind: "saved", id: key });
     }
     const act = el.closest<HTMLElement>("[data-act]")?.dataset.act;

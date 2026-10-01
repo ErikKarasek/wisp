@@ -2,9 +2,13 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
+/// What the island draws: the state, or its settled form once it went stale.
+struct Shown { let state: DispecinkActivity.ContentState }
+
 struct DispecinkLiveActivity: Widget {
     var body: some WidgetConfiguration {
-        ActivityConfiguration(for: DispecinkActivity.self) { ctx in
+        ActivityConfiguration(for: DispecinkActivity.self) { raw in
+            let ctx = Shown(state: raw.isStale ? raw.state.settled : raw.state)
             // Lock screen and banner, like the Grok Bot card.
             HStack(spacing: 14) {
                 BotBadge(character: ctx.state.bot ?? .white, mode: ctx.state.mode, size: 62)
@@ -15,8 +19,9 @@ struct DispecinkLiveActivity: Widget {
             .background(ActivityGlow(mode: ctx.state.mode))
             .activityBackgroundTint(Color(white: 0.07))
             .activitySystemActionForegroundColor(.white)
-        } dynamicIsland: { ctx in
-            DynamicIsland {
+        } dynamicIsland: { raw in
+            let ctx = Shown(state: raw.isStale ? raw.state.settled : raw.state)
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     BotBadge(character: ctx.state.bot ?? .white, mode: ctx.state.mode, size: 50).padding(.leading, 6)
                 }
