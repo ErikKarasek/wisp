@@ -46,6 +46,8 @@ export function mascotSvg(
 
 export type MountedMascot = {
   setExpression(next: MascotExpression | ExpressionName): void;
+  /** A full roll over the top: the eyes leave upwards and come back from below. */
+  roll(ms?: number): void;
   setCharacter(next: Partial<MascotCharacter>): void;
   destroy(): void;
 };
@@ -91,6 +93,8 @@ export function mountMascot(
   let from = resolve(options.expression ?? "neutral");
   let to = from;
   let changedAt = 0;
+  let rollAt = 0;
+  let rollMs = 0;
   const transition = options.transition ?? 360;
   const seed = options.seed ?? Math.random() * 100;
   const still =
@@ -137,6 +141,11 @@ export function mountMascot(
     const k = transition > 0 ? settle((now - changedAt) / transition) : 1;
     const ex = k >= 1 ? to : blendExpressions(from, to, k);
     const pose = still ? stillPose(ex) : mascotPose(ex, now, seed);
+    if (rollMs && now - rollAt < rollMs) {
+      // Ease in and out, so it winds up, flips, and settles.
+      const t = (now - rollAt) / rollMs;
+      pose.spin = Math.PI * 2 * (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+    }
     const g = mascotFrame(character, pose);
     set(group, "transform", `rotate(${g.tilt} ${g.pivot.x} ${g.pivot.y})`);
     const nextKinds = g.primitives.map((p) => p.kind).join(",");
@@ -221,6 +230,11 @@ export function mountMascot(
       to = resolve(next);
       changedAt = now;
       if (still) paint(now);
+    },
+    roll(ms = 950) {
+      if (still) return;
+      rollAt = performance.now();
+      rollMs = ms;
     },
     setCharacter(next) {
       character = { ...character, ...next };

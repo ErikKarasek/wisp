@@ -85,6 +85,9 @@ export type MascotPose = {
   lift: number;
   /** Seconds, for things that drift on their own (the Zs). */
   time: number;
+  /** Extra head turn over the top, radians: a roll sends the eyes up and over
+   * and brings them back from below. Optional; 0 when missing. */
+  spin?: number;
 };
 
 export const DEFAULT_CHARACTER: MascotCharacter = {
@@ -185,6 +188,36 @@ export const EXPRESSIONS = {
     lookY: 0.35,
     tilt: -5,
     wander: 0.2,
+  },
+  // One eye shut into a dash, the other open, head tipped: "nice".
+  wink: {
+    ...NEUTRAL,
+    left: eye({ length: 0.9, width: 0.6, angle: 80, y: 0.03 }),
+    right: eye({ length: 0.62, width: 1.05, angle: -14, y: -0.02 }),
+    lookX: 0.25,
+    lookY: -0.25,
+    tilt: 9,
+    wander: 0,
+    blinks: false,
+  },
+  // Soft and glowing, looking up at you; the hearts come from the renderer.
+  love: {
+    ...NEUTRAL,
+    ...both({ length: 0.5, width: 1.15, angle: -18, y: -0.03 }),
+    lookY: -0.5,
+    tilt: -6,
+    bounce: 2,
+    wander: 0,
+    tint: "#ff7aa8",
+    tintAmount: 0.35,
+  },
+  // Out of breath: heavy lids, head down.
+  tired: {
+    ...NEUTRAL,
+    ...both({ length: 0.45, width: 1, angle: -8, y: 0.06 }),
+    lookY: 0.4,
+    tilt: 4,
+    wander: 0.15,
   },
   // Two dots, far off to the side.
   shy: {
@@ -472,7 +505,7 @@ export function mascotFrame(character: Partial<MascotCharacter>, pose: MascotPos
 
   // ── The head's rotation ─────────────────────────────────────────────────
   const yaw = clamp(ex.lookX + pose.lookX, -1, 1) * 0.62;
-  const pitch = clamp(ex.lookY + pose.lookY, -1, 1) * 0.42;
+  const pitch = clamp(ex.lookY + pose.lookY, -1, 1) * 0.42 - (pose.spin ?? 0);
   const cosY = Math.cos(yaw);
   const sinY = Math.sin(yaw);
   const cosP = Math.cos(pitch);

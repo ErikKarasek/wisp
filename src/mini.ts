@@ -188,6 +188,7 @@ export async function startNotch() {
         <div class="card cal"><div class="cal-head"><div class="my"><b></b><span></span></div><div class="week"></div></div><div class="cal-body"></div></div>
         <div class="card mirror" hidden><video autoplay playsinline muted></video><p class="muted"></p></div>
       </div>
+      <i class="countdown"></i>
     </div>`;
   const root = document.querySelector(".nt") as HTMLElement;
   root.style.setProperty("--bar-h", `${g.barHeight}px`);
@@ -206,12 +207,52 @@ export async function startNotch() {
   let look: [number, number] = [0, 0];
   let reacting = 0;
   let dancing = false;
+  let sleeping = false;
   const face = () => {
     if (Date.now() < reacting) return;
-    const ex = EXPRESSIONS[dancing && prefs.dance && base === "happy" ? "thriving" : base];
-    const shaped = prefs.follow ? { ...ex, lookX: look[0], lookY: look[1] * 0.85, wander: 0 } : ex;
+    const name: ExpressionName = sleeping ? "sleepy" : dancing && prefs.dance && base === "happy" ? "thriving" : base;
+    const ex = EXPRESSIONS[name];
+    // Asleep the eyes are shut; following the cursor would slide the dashes around.
+    const shaped = prefs.follow && !sleeping ? { ...ex, lookX: look[0], lookY: look[1] * 0.85, wander: 0 } : ex;
     tiny.setExpression(shaped);
     big.setExpression(shaped);
+  };
+  const sound = (name: keyof typeof sounds) => {
+    if (cfg.sounds !== false) (sounds[name] as () => void)();
+  };
+  /** A face for a moment, then back to the mood. */
+  const react = (ex: ExpressionName, ms: number) => {
+    reacting = Date.now() + ms;
+    tiny.setExpression(ex);
+    big.setExpression(ex);
+    setTimeout(face, ms + 50);
+  };
+  /** Little things rising from the bot: hearts, sparkles, sweat, Zs. */
+  const burst = (glyph: string, kind: string, n: number) => {
+    const host = root.classList.contains("is-open") ? $(".big-wrap") : $(".side.l .closed-only");
+    for (let i = 0; i < n; i += 1) {
+      const el = document.createElement("span");
+      el.className = `fx ${kind}`;
+      el.textContent = glyph;
+      el.style.left = `${15 + Math.random() * 70}%`;
+      el.style.animationDelay = `${i * 110}ms`;
+      host.appendChild(el);
+      setTimeout(() => el.remove(), 1900 + i * 110);
+    }
+  };
+  /** Something went well: a wink. */
+  const wink = () => {
+    sleeping = false;
+    react("wink", 1100);
+    sound("wink");
+  };
+  /** A long job finished: a roll over the top and sparkles. */
+  const celebrate = () => {
+    sleeping = false;
+    tiny.roll();
+    big.roll();
+    react("happy", 1500);
+    burst("✦", "spark", 6);
   };
   void listen<[number, number]>("notch-look", (e) => {
     look = e.payload;
@@ -221,6 +262,10 @@ export async function startNotch() {
   let pokes: number[] = [];
   for (const el of [$(".m.tiny"), $(".m.big")]) {
     el.addEventListener("click", () => {
+      if (carried) {
+        carried = false;
+        return;
+      }
       const now = Date.now();
       pokes = pokes.filter((t) => now - t < 2500).concat(now);
       const n = pokes.length;
@@ -242,16 +287,159 @@ export async function startNotch() {
     });
   }
 
+  // ----- hold the cursor still on the bot and it falls for you -----
+  for (const el of [$(".m.tiny"), $(".m.big")]) {
+    let timer = 0;
+    let at = [0, 0];
+    const arm = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        sleeping = false;
+        react("love", 2600);
+        burst("♥", "heart", 5);
+        sound("love");
+      }, 1900);
+    };
+    el.addEventListener("pointerenter", (e) => {
+      at = [e.screenX, e.screenY];
+      arm();
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (Math.hypot(e.screenX - at[0], e.screenY - at[1]) > 3) {
+        at = [e.screenX, e.screenY];
+        arm();
+      }
+    });
+    el.addEventListener("pointerleave", () => clearTimeout(timer));
+    el.addEventListener("pointerdown", () => clearTimeout(timer));
+  }
+
+  // ----- drag the bot out onto a window: it brings back a picture of it to ask about -----
+  let carry: [number, number] | null = null;
+  let carried = false;
+  for (const el of [$(".m.tiny"), $(".m.big")]) {
+    el.addEventListener("pointerdown", (e) => {
+      if (e.button === 0) carry = [e.screenX, e.screenY];
+    });
+  }
+  window.addEventListener("pointermove", (e) => {
+    if (!carry || carried || !(e.buttons & 1)) return;
+    if (Math.hypot(e.screenX - carry[0], e.screenY - carry[1]) > 7) {
+      carried = true;
+      carry = null;
+      root.classList.add("carried");
+      sound("wink");
+      void invoke("buddy_drag");
+    }
+  });
+  window.addEventListener("pointerup", () => (carry = null));
+  const landed = () => {
+    root.classList.remove("carried");
+    setTimeout(() => (carried = false), 300);
+  };
+  void listen("buddy-back", () => {
+    landed();
+    react("surprised", 600);
+  });
+  void listen<string>("buddy-failed", (e) => {
+    landed();
+    setMode("note");
+    steps.innerHTML = `<small class="who bad">Okno</small><div class="step past wrap">${escHtml(e.payload)}</div>`;
+  });
+  void listen<{ path: string; app: string; title: string }>("buddy-dropped", (e) => {
+    landed();
+    wink();
+    const { path, app, title } = e.payload;
+    showFile(path, `${app}${title ? ` · ${title}` : ""}`, "Vidím to okno. Na co se chceš zeptat? Odpoví Gemini.", "Třeba: co tu je špatně? shrň to");
+  });
+
+  // ----- the closing line: the last seconds before the notch folds away -----
+  const countdown = $(".countdown");
+  let countTimer = 0;
+  void listen<number>("notch-countdown", (e) => {
+    clearTimeout(countTimer);
+    countdown.classList.remove("run");
+    countdown.style.transitionDuration = "";
+    const ms = e.payload;
+    if (ms < 900) return;
+    const shown = Math.min(ms, 10_000);
+    countTimer = window.setTimeout(() => {
+      countdown.style.transitionDuration = `${shown}ms`;
+      void countdown.offsetWidth;
+      countdown.classList.add("run");
+    }, ms - shown);
+  });
+
+  // ----- away from the Mac: the closed notch hides, unless something needs you -----
+  let away = false;
+  void listen<boolean>("notch-away", (e) => {
+    away = e.payload;
+    redraw();
+  });
+
+  // ----- nothing happening for a while: a yawn, then sleep -----
+  let lastBusy = Date.now();
+  const SLEEP_AFTER = 10 * 60_000;
+  setInterval(() => {
+    if (sleeping || root.classList.contains("is-open") || Date.now() - lastBusy < SLEEP_AFTER || base !== "happy") return;
+    reacting = Date.now() + 1500;
+    tiny.setExpression("tired");
+    big.setExpression("tired");
+    for (const el of [$(".m.tiny"), $(".m.big")]) {
+      el.classList.remove("yawn");
+      void el.offsetWidth;
+      el.classList.add("yawn");
+    }
+    sound("yawn");
+    setTimeout(() => {
+      sleeping = true;
+      reacting = 0;
+      face();
+    }, 1500);
+  }, 15_000);
+  const wake = () => {
+    if (!sleeping) return;
+    sleeping = false;
+    react("surprised", 700);
+  };
+
+  // ----- Claude's limit used up: the bot is out of breath -----
+  setInterval(() => {
+    if (base === "tired" && !sleeping && Date.now() > reacting) burst("💧", "sweat", 1);
+  }, 1600);
+
   // ----- open and close -----
   // When closed, the cards leave the page entirely: a transparent WebKit window
   // otherwise keeps faint ghosts of layers that were only faded out.
   let goneTimer = 0;
   void listen<boolean>("notch-open", (e) => {
     clearTimeout(goneTimer);
+    // A new opening starts without a closing line; the native side sends a fresh one.
+    clearTimeout(countTimer);
+    countdown.classList.remove("run");
     if (e.payload) {
+      wake();
+      // The four small faces beside the closed notch grow into the crew's pills.
+      const from = new Map<string, DOMRect>();
+      const ids = ($(".faces4").dataset.ids ?? "").split("|");
+      [...$(".faces4").children].forEach((c, n) => ids[n] && from.set(ids[n], c.getBoundingClientRect()));
       panes.classList.remove("gone");
       void panes.offsetWidth; // let the cards exist for a frame before they animate in
       root.classList.add("is-open");
+      if (!root.classList.contains("away")) {
+        crew.querySelectorAll<HTMLElement>(".pill").forEach((pill, n) => {
+          const a = from.get(pill.dataset.id!);
+          const m = pill.querySelector<HTMLElement>(".m");
+          if (!a || !m || !a.width) return;
+          const b = m.getBoundingClientRect();
+          if (!b.width) return;
+          m.style.transition = "none";
+          m.style.transform = `translate(${a.left - b.left}px, ${a.top - b.top}px) scale(${a.width / b.width})`;
+          void m.offsetWidth;
+          m.style.transition = `transform .52s ${n * 35}ms cubic-bezier(.32, 1.22, .42, 1)`;
+          m.style.transform = "";
+        });
+      }
     } else {
       root.classList.remove("is-open");
       closeMirror();
@@ -281,6 +469,47 @@ export async function startNotch() {
 
   // ----- the bot's card: what the working agent does, and the rest as a row of faces -----
   const steps = $(".steps");
+  /** The card switches to something else: the new content blurs in (Coucou's transition). */
+  const setMode = (mode: string) => {
+    if (steps.dataset.mode === mode) return;
+    steps.dataset.mode = mode;
+    if (mode !== "work") tickerSig = "";
+    steps.classList.remove("enter");
+    void steps.offsetWidth;
+    steps.classList.add("enter");
+  };
+  // What the working agent does, as lines that slide up as new steps come in;
+  // the current one shimmers.
+  let tickerSig = "";
+  const ROW = 24;
+  function renderTicker(name: string, lines: string[]) {
+    let roll = steps.querySelector<HTMLElement>(".ticker .roll");
+    if (steps.dataset.mode !== "work" || !roll) {
+      setMode("work");
+      steps.innerHTML = `<small class="who"></small><div class="ticker"><div class="roll"></div></div>`;
+      roll = steps.querySelector<HTMLElement>(".ticker .roll")!;
+      tickerSig = "";
+    }
+    (steps.querySelector(".who") as HTMLElement).textContent = `${name} pracuje`;
+    const shown = lines.filter(Boolean).slice(-4);
+    const sig = shown.join("\n");
+    if (sig === tickerSig) return;
+    const moved = tickerSig !== "" && tickerSig.split("\n").at(-1) !== shown.at(-1);
+    tickerSig = sig;
+    roll.innerHTML = shown
+      .map((l, i) => {
+        const now = i === shown.length - 1;
+        return `<div class="step ${now ? "now" : "past"}">${now ? TERM : COPY}<span class="tx">${escHtml(l)}</span></div>`;
+      })
+      .join("");
+    if (moved) {
+      roll.style.transition = "none";
+      roll.style.transform = `translateY(${ROW}px)`;
+      void roll.offsetWidth;
+      roll.style.transition = "";
+      roll.style.transform = "";
+    }
+  }
   const crew = $(".crew");
   const crewMascots = new Map<string, MountedMascot>();
   const LIVE_WING = 170;
@@ -355,12 +584,14 @@ export async function startNotch() {
     } else if (kind === "done") {
       // Only a turn that took a while is worth a sound and a peek.
       const long = cur.busy && now - cur.since > 30_000;
+      const wasBusy = cur.busy;
       cur.busy = false;
       ccDone = { project, text, at: now };
       if (long) {
         if (cfg.sounds !== false) sounds.done();
         void invoke("notch_peek", { millis: 5000 });
-      }
+        celebrate();
+      } else if (wasBusy) wink();
     } else if (kind === "waiting") {
       cur.busy = false;
     }
@@ -381,6 +612,7 @@ export async function startNotch() {
     const p = perms[0];
     if (permShown === p.id) return;
     permShown = p.id;
+    setMode(`perm:${p.id}`);
     const tool = p.tool === "Bash" ? "chce spustit" : p.tool === "Edit" || p.tool === "Write" || p.tool === "MultiEdit" ? "chce upravit" : `chce použít ${p.tool}`;
     steps.innerHTML = `<small class="who warn">${escHtml(p.project)} · Claude ${tool}${perms.length > 1 ? ` <i>(+${perms.length - 1})</i>` : ""}</small>
       <div class="step now cmd">${escHtml(p.detail)}</div>
@@ -393,6 +625,7 @@ export async function startNotch() {
     steps.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) =>
       b.addEventListener("click", () => {
         void invoke("cc_decide", { id: p.id, answer: b.dataset.a });
+        if (b.dataset.a === "allow" || b.dataset.a === "always") wink();
         perms = perms.filter((x) => x.id !== p.id);
         permShown = null;
         redraw();
@@ -416,15 +649,20 @@ export async function startNotch() {
   } catch {
     /* no drag and drop here */
   }
-  function showFile(path: string) {
-    const name = path.split("/").pop() ?? path;
+  function showFile(
+    path: string,
+    name = path.split("/").pop() ?? path,
+    hint = "Na co se chceš zeptat? Odpoví Gemini z tvého AI Pro.",
+    example = "Třeba: kolik to dělá celkem?",
+  ) {
     fileAsk = { path, name };
     quickAsk = false;
     root.classList.add("asking");
     permShown = null;
+    setMode(`file:${path}`);
     steps.innerHTML = `<small class="who">${escHtml(name)}<button class="x" title="Zavřít">✕</button></small>
-      <div class="step past wrap reply">Na co se chceš zeptat? Odpoví Gemini z tvého AI Pro.</div>
-      <div class="answer"><input type="text" placeholder="Třeba: kolik to dělá celkem?" spellcheck="false"><button>Zeptat se</button></div>`;
+      <div class="step past wrap reply">${escHtml(hint)}</div>
+      <div class="answer"><input type="text" placeholder="${escHtml(example)}" spellcheck="false"><button>Zeptat se</button></div>`;
     const input = steps.querySelector("input") as HTMLInputElement;
     const go = steps.querySelector(".answer button") as HTMLButtonElement;
     const reply = steps.querySelector(".reply") as HTMLElement;
@@ -441,6 +679,7 @@ export async function startNotch() {
       try {
         const text = await invoke<string>("ask_file", { path, question: q });
         reply.textContent = text.replace(/\*\*|__|`/g, "");
+        wink();
         input.value = "";
         input.placeholder = "Další otázka…";
       } catch (err) {
@@ -466,6 +705,7 @@ export async function startNotch() {
     fileAsk = null;
     permShown = null;
     root.classList.add("asking");
+    setMode("quick");
     let clip = e.payload.trim();
     const preview = clip.replace(/\s+/g, " ").slice(0, 90);
     steps.innerHTML = `<small class="who">Rychlá otázka · Gemini<button class="x" title="Zavřít (Esc)">✕</button></small>
@@ -490,6 +730,7 @@ export async function startNotch() {
       try {
         const text = (await invoke<string>("ask_quick", { question: q, context: clip })).replace(/\*\*|__|`/g, "");
         reply.innerHTML = `${escHtml(text)} <button class="copy">Kopírovat</button>`;
+        wink();
         reply.querySelector(".copy")!.addEventListener("click", async (ev) => {
           await navigator.clipboard.writeText(text).catch(() => {});
           (ev.target as HTMLButtonElement).textContent = "Zkopírováno";
@@ -521,6 +762,11 @@ export async function startNotch() {
     const chat = tab !== "home";
     chatcard.hidden = !chat;
     homeCards().forEach((c) => c.classList.toggle("tabbed-out", chat));
+    for (const c of chat ? [chatcard] : homeCards()) {
+      c.classList.remove("enter");
+      void c.offsetWidth;
+      c.classList.add("enter");
+    }
     if (chat) void renderChat();
   }
   root.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab as typeof tab)));
@@ -611,6 +857,7 @@ export async function startNotch() {
   function renderFailure(bad: MiniItem) {
     if (steps.dataset.fail === bad.id) return;
     steps.dataset.fail = bad.id;
+    setMode(`fail:${bad.id}`);
     steps.innerHTML = `<small class="who bad">${escHtml(bad.name)} selhal</small>
       <div class="step past wrap failtext">${escHtml(bad.doing)}</div>
       <div class="perm"><button class="go retry">Zkusit znovu</button><button data-open>Otevřít</button></div>`;
@@ -626,6 +873,7 @@ export async function startNotch() {
   // ----- poked too hard: the bot takes a beating and needs a moment -----
   let beatenUntil = 0;
   function renderBeaten() {
+    setMode("beaten");
     steps.innerHTML = `<div class="beaten"><span class="spin"></span><div><b>Dostal jsem nakládačku.</b><small>Vzpamatovávám se…</small></div></div>`;
   }
 
@@ -638,7 +886,14 @@ export async function startNotch() {
     root.classList.toggle("focus", !!s.focus);
 
     root.classList.toggle("err", s.items.some((i) => i.state === "bad"));
-    base = s.focus && worst(s) !== "bad" ? "thriving" : faceFor(worst(s));
+    // Claude's limit used up (session or week): out of breath, unless something failed.
+    const spent = Math.max(s.usage?.session?.percent ?? 0, s.usage?.week?.percent ?? 0) >= 95;
+    base = s.focus && worst(s) !== "bad" ? "thriving" : spent && worst(s) !== "bad" ? "tired" : faceFor(worst(s));
+    const busy = s.counts.run > 0 || s.counts.attention > 0 || s.items.some((i) => i.state === "bad") || !!ccWorking() || perms.length > 0;
+    if (busy) {
+      lastBusy = Date.now();
+      wake();
+    }
     face();
     const bad = s.items.filter((i) => i.state === "bad").length;
     const st = $(".st");
@@ -664,7 +919,10 @@ export async function startNotch() {
     // Only Paperclip agents widen the notch with their step; Claude Code in a
     // terminal shows its dots here and the steps in the open notch.
     const wide = !!s.live?.[0];
-    const wing = (wide ? LIVE_WING : 46) + extra;
+    // Away from the Mac, only what needs you keeps the notch out.
+    const hide = away && !perms.length && !s.counts.attention && !s.items.some((i) => i.state === "bad");
+    root.classList.toggle("away", hide);
+    const wing = hide ? 0 : (wide ? LIVE_WING : 46) + extra;
     if (wing !== lastWing) {
       lastWing = wing;
       root.style.setProperty("--wing", `${wing}px`);
@@ -734,16 +992,15 @@ export async function startNotch() {
     }
     askFor = null;
     if (working) {
-      const lines = working.lines.slice(-3);
-      while (lines.length < 3) lines.unshift("");
-      steps.innerHTML =
-        `<small class="who">${escHtml(working.name)} pracuje</small>` +
-        lines.map((l, i) => `<div class="step ${i === lines.length - 1 ? "now" : "past"}">${l ? (i === lines.length - 1 ? TERM : COPY) : ""}${escHtml(l)}</div>`).join("");
+      renderTicker(working.name, working.lines);
     } else if (doneCc) {
+      setMode(`done:${doneCc.at}`);
       steps.innerHTML = `<small class="who">${escHtml(doneCc.project)} · Claude</small><div class="step now big-text">Hotovo</div><div class="step past wrap">${escHtml(doneCc.text)}</div>`;
     } else if (fresh) {
+      setMode(`news:${fresh.id}`);
       steps.innerHTML = `<small class="who">${escHtml(fresh.name)}</small><div class="step now big-text">${escHtml(fresh.chip)}</div><div class="step past${fresh.id === "morning" ? " wrap" : ""}">${escHtml(fresh.doing)}</div>`;
     } else {
+      setMode("idle");
       steps.innerHTML = `<small class="who">Dispečink</small><div class="step now big-text">${escHtml(headline(s))}</div><div class="step past">${s.counts.run} pracuje · ${s.counts.sleep} spí</div>`;
     }
 
@@ -756,6 +1013,7 @@ export async function startNotch() {
   async function showAsk(item: MiniItem) {
     const ask = item.ask!;
     askFor = ask.issueId;
+    setMode(`ask:${ask.issueId}`);
     steps.innerHTML = `<small class="who">${escHtml(item.name)} se ptá</small><div class="step now big-text small">${escHtml(ask.title)}</div>
       <div class="step past wrap q">…</div>
       <div class="answer"><input type="text" placeholder="Odpověz ${escHtml(item.name)}…" spellcheck="false"><button>Poslat</button></div>`;
@@ -984,4 +1242,22 @@ export async function startNotch() {
   }
 
   applyPrefs();
+}
+
+// ---------- the bot carried out of the notch ----------
+
+export async function startBuddy() {
+  document.body.innerHTML = `<div class="bd"><div class="m"></div></div>`;
+  const look = async () => {
+    const cfg = await invoke<Cfg>("config_load").catch(() => ({}) as Cfg);
+    const prefs: NotchPrefs = { ...defaultNotchPrefs(), ...(cfg.notchPrefs ?? {}) };
+    const saved = prefs.bot ? cfg.characters?.find((c) => c.id === prefs.bot) : null;
+    return saved ? saved.character : WHITE_BOT;
+  };
+  const m = mountMascot(document.querySelector(".bd .m") as HTMLElement, { character: await look(), expression: "surprised", transition: 160, seed: 9 });
+  void listen("buddy-carry", async () => {
+    m.setCharacter(await look());
+    m.setExpression("surprised");
+    setTimeout(() => m.setExpression("thriving"), 500);
+  });
 }

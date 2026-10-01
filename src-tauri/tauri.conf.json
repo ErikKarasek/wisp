@@ -70,6 +70,22 @@
         "focus": false,
         "shadow": false,
         "visibleOnAllWorkspaces": true
+      },
+      {
+        "label": "buddy",
+        "url": "index.html?view=buddy",
+        "title": "Dispečink bot",
+        "width": 64,
+        "height": 64,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false,
+        "shadow": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {

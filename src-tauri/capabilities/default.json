@@ -6,7 +6,8 @@
     "main",
     "panel",
     "notch",
-    "glow"
+    "glow",
+    "buddy"
   ],
   "permissions": [
     "core:default",

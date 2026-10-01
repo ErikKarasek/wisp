@@ -110,7 +110,7 @@ pub fn geometry() -> Option<Geometry> {
 }
 
 /// Float above the menu bar, on every Space and over full-screen apps.
-fn float_over_menu_bar(window: &tauri::WebviewWindow) {
+pub(crate) fn float_over_menu_bar(window: &tauri::WebviewWindow) {
     let Ok(ns) = window.ns_window() else { return };
     let ns = ns as *mut AnyObject;
     // NSStatusWindowLevel (25) + 1, above the menu bar itself.
@@ -135,14 +135,30 @@ struct CGPoint {
 extern "C" {
     fn CGEventCreate(source: *const c_void) -> *mut c_void;
     fn CGEventGetLocation(event: *mut c_void) -> CGPoint;
+    fn CGEventSourceSecondsSinceLastEventType(state: i32, event_type: u32) -> f64;
+    fn CGEventSourceButtonState(state: i32, button: u32) -> bool;
 }
+
+/// Seconds since the last key press, click or mouse move anywhere.
+pub fn idle_secs() -> f64 {
+    // kCGEventSourceStateCombinedSessionState, kCGAnyInputEventType
+    unsafe { CGEventSourceSecondsSinceLastEventType(0, u32::MAX) }
+}
+
+/// Whether the left mouse button is held down right now.
+pub fn left_down() -> bool {
+    unsafe { CGEventSourceButtonState(0, 0) }
+}
+
+/// Away from the Mac this long, the closed notch hides; alerts still show.
+const AWAY_SECS: f64 = 180.0;
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
     fn CFRelease(cf: *const c_void);
 }
 
 /// The cursor in global top-left coordinates, from any thread.
-fn cursor() -> Option<(f64, f64)> {
+pub(crate) fn cursor() -> Option<(f64, f64)> {
     unsafe {
         let event = CGEventCreate(std::ptr::null());
         if event.is_null() {
@@ -164,6 +180,8 @@ struct State {
     last_look: (f64, f64),
     /// Whether the window currently lets clicks through to what is below it.
     click_through: bool,
+    away: bool,
+    away_checked: Option<Instant>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -175,9 +193,11 @@ static STATE: Mutex<State> = Mutex::new(State {
     peek_until: None,
     last_look: (0.0, 0.0),
     click_through: false,
+    away: false,
+    away_checked: None,
 });
 
-fn inside(p: (f64, f64), r: (f64, f64, f64, f64), margin: f64) -> bool {
+pub(crate) fn inside(p: (f64, f64), r: (f64, f64, f64, f64), margin: f64) -> bool {
     p.0 >= r.0 - margin && p.0 <= r.0 + r.2 + margin && p.1 >= r.1 - margin && p.1 <= r.1 + r.3 + margin
 }
 
@@ -233,12 +253,24 @@ pub fn setup(app: &AppHandle) {
         // Eyes follow the cursor wherever it is on the screen.
         let cx = closed.0 + closed.2 / 2.0;
         let (dx, dy) = (p.0 - cx, p.1 - g.screen_y);
-        let half = (g.screen_width / 2.0).max(1.0);
-        let tall = (g.screen_height * 0.7).max(1.0);
-        let look = ((dx / half).clamp(-1.0, 1.0), (dy / tall).clamp(-1.0, 1.0));
+        // tanh: a quick turn for the cursor close by, easing off towards the
+        // screen's edges, so small moves near the notch still read.
+        let half = (g.screen_width / 4.0).max(1.0);
+        let tall = (g.screen_height / 3.0).max(1.0);
+        let look = ((dx / half).tanh(), (dy / tall).tanh());
         if (look.0 - s.last_look.0).abs() > 0.015 || (look.1 - s.last_look.1).abs() > 0.015 {
             s.last_look = look;
             let _ = app.emit_to(LABEL, "notch-look", look);
+        }
+
+        // Away from the Mac: the closed notch hides (the page decides, alerts still show).
+        if s.away_checked.is_none_or(|t| now.duration_since(t) > Duration::from_secs(1)) {
+            s.away_checked = Some(now);
+            let away = idle_secs() >= AWAY_SECS;
+            if away != s.away {
+                s.away = away;
+                let _ = app.emit_to(LABEL, "notch-away", away);
+            }
         }
 
         // Only the drawn notch takes clicks; the rest of the window is see-through.
@@ -264,11 +296,17 @@ pub fn setup(app: &AppHandle) {
         } else {
             let peeking = s.peek_until.is_some_and(|t| now < t);
             if inside(p, g.open(), 10.0) {
+                if s.outside_since.is_some() || s.peek_until.is_some() {
+                    let _ = app.emit_to(LABEL, "notch-countdown", 0u64);
+                }
                 s.outside_since = None;
                 s.peek_until = None; // the user took over; stay open while they look
             } else if !peeking {
-                let since = *s.outside_since.get_or_insert(now);
                 let wait = CLOSE_MS.load(std::sync::atomic::Ordering::Relaxed);
+                if s.outside_since.is_none() {
+                    let _ = app.emit_to(LABEL, "notch-countdown", wait);
+                }
+                let since = *s.outside_since.get_or_insert(now);
                 if now.duration_since(since) > Duration::from_millis(wait) {
                     s.open = false;
                     s.outside_since = None;
@@ -312,6 +350,7 @@ pub fn peek(app: &AppHandle, millis: u64) {
         }
         s.peek_until = Some(Instant::now() + Duration::from_millis(millis));
         s.outside_since = None;
+        let _ = app.emit_to(LABEL, "notch-countdown", millis);
         if s.open {
             return;
         }
@@ -344,6 +383,11 @@ pub fn release() {
     }
 }
 
+/// Where the open notch is drawn, in global top-left coordinates.
+pub fn open_rect() -> (f64, f64, f64, f64) {
+    current_geometry().open()
+}
+
 pub fn current_geometry() -> Geometry {
     STATE.lock().map(|s| s.geometry).unwrap_or_default()
 }
@@ -361,5 +405,6 @@ pub fn set_close_delay(millis: u64) {
 
 /// Wider wings while an agent works; back to the plain notch when it's done.
 pub fn set_wing(width: f64) {
-    WING.store(width.clamp(40.0, 320.0) as u32, std::sync::atomic::Ordering::Relaxed);
+    // 0 hides the wings entirely (away from the Mac): only the notch itself is left.
+    WING.store(width.clamp(0.0, 320.0) as u32, std::sync::atomic::Ordering::Relaxed);
 }

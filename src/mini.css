@@ -331,3 +331,49 @@ body.mini button { font: inherit; color: inherit; }
 .nt .run-bar { height: 6px; border-radius: 3px; background: rgba(95, 207, 168, .18); overflow: hidden; margin: 4px 0; }
 .nt .run-bar i { display: block; width: 40%; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #4fbf7d, #9be8c2); animation: runbar 1.3s ease-in-out infinite; }
 @keyframes runbar { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+/* ---------- Coucou-style touches ---------- */
+/* New content blurs in when the card switches to something else. */
+.nt .steps.enter, .nt .card.enter { animation: ntEnter .3s .06s var(--ease) both; }
+@keyframes ntEnter { from { opacity: 0; filter: blur(8px); transform: scale(.97); } }
+
+/* What the agent does, sliding up line by line; the current one shimmers. */
+.nt .ticker { height: 72px; overflow: hidden; position: relative;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 40%); mask-image: linear-gradient(to bottom, transparent 0, #000 40%); }
+.nt .ticker .roll { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; transition: transform .45s cubic-bezier(.3, .9, .3, 1); }
+.nt .ticker .step { height: 24px; line-height: 24px; display: flex; align-items: center; gap: 6px; }
+.nt .ticker .step .ic { flex: none; width: 14px; height: 14px; }
+.nt .ticker .step .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nt .ticker .step.now .tx { background: linear-gradient(90deg, #8a909b 0%, #fff 45%, #fff 55%, #8a909b 100%) 0 0 / 220% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.2s linear infinite; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -120% 0; } }
+
+/* Hearts, sparkles and sweat rising off the bot. */
+.nt .fx { position: absolute; bottom: 45%; pointer-events: none; font-size: 9px; line-height: 1; opacity: 0; animation: fxUp 1.7s ease-out forwards; }
+.nt.is-open .fx { bottom: 55%; font-size: 15px; }
+.nt .fx.heart { color: #ff5d8f; }
+.nt .fx.spark { color: #ffd76a; animation-name: fxSpark; }
+.nt .fx.sweat { font-size: 7px; bottom: 60%; animation: fxDrop 1.2s ease-in forwards; }
+.nt.is-open .fx.sweat { font-size: 12px; }
+@keyframes fxUp { 0% { opacity: 0; transform: translateY(0) scale(.6); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(-30px) scale(1.1) rotate(-12deg); } }
+@keyframes fxSpark { 0% { opacity: 0; transform: scale(.2) rotate(0); } 30% { opacity: 1; transform: translateY(-10px) scale(1.2) rotate(45deg); } 100% { opacity: 0; transform: translateY(-26px) scale(.6) rotate(140deg); } }
+@keyframes fxDrop { 0% { opacity: 0; transform: translate(6px, 0); } 25% { opacity: .9; } 100% { opacity: 0; transform: translate(10px, 18px); } }
+
+/* A yawn: a long vertical stretch before falling asleep. */
+.nt .yawn { animation: yawn 1.4s ease-in-out; }
+@keyframes yawn { 35% { transform: scale(.9, 1.16); } 70% { transform: scale(1.04, .94); } }
+
+/* Carried out of the notch: the floating copy is the bot now. */
+.nt.carried .m.tiny, .nt.carried .m.big { opacity: 0; transition: opacity .12s; }
+
+/* Away from the Mac: just the black notch. */
+.nt.away .closed-only { opacity: 0; }
+
+/* The last seconds before the notch folds: a line shrinking to nothing. */
+.nt .countdown { position: absolute; left: 50%; bottom: 7px; width: 160px; height: 2px; border-radius: 1px; margin-left: -80px;
+  background: rgba(255, 255, 255, .35); opacity: 0; transform-origin: center; transform: scaleX(1); pointer-events: none; }
+.nt.is-open .countdown.run { opacity: 1; transform: scaleX(0); transition-property: transform; transition-timing-function: linear; }
+
+/* ---------- the bot carried out of the notch ---------- */
+.bd { width: 64px; height: 64px; display: grid; place-items: center; }
+.bd .m { width: 54px; height: 54px; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .4)); }

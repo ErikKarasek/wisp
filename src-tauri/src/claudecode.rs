@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Sender};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -63,6 +64,9 @@ fn key() -> &'static str {
         let k: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         let _ = std::fs::create_dir_all(dirs_config());
         let _ = std::fs::write(&path, &k);
+        // Only Erik's account may read it.
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         k
     })
 }
@@ -230,48 +234,89 @@ pub fn start(app: &AppHandle) {
             return;
         }
     };
+    // The key file from older versions was readable by every account on the Mac.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = key();
+        let _ = std::fs::set_permissions(dirs_config().join("cc-hook-key"), std::fs::Permissions::from_mode(0o600));
+    }
     let app = app.clone();
     std::thread::spawn(move || {
-        for mut req in server.incoming_requests() {
-            let mut body = String::new();
-            let _ = req.as_reader().take(1 << 20).read_to_string(&mut body);
-            let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
-            let (path, query) = req.url().split_once('?').unwrap_or((req.url(), ""));
-            let path = path.to_string();
-            // Claude Code's hooks carry the secret; anything else gets nothing.
-            if path.starts_with("/cc/") && !query.split('&').any(|p| p == format!("k={}", key())) {
-                let _ = req.respond(tiny_http::Response::from_string("").with_status_code(403));
+        for req in server.incoming_requests() {
+            // Each request on its own thread, so one slow sender can't hold up the
+            // rest; a cap keeps a flood from spawning without end.
+            if BUSY.fetch_add(1, Ordering::SeqCst) >= MAX_BUSY {
+                BUSY.fetch_sub(1, Ordering::SeqCst);
+                let _ = req.respond(tiny_http::Response::from_string("").with_status_code(503));
                 continue;
             }
-            match path.as_str() {
-                "/cc/event" => {
-                    if let Some(e) = event(&v) {
-                        let _ = app.emit("cc-event", e);
-                    }
-                    respond(req, String::new());
-                }
-                "/cc/permission" => {
-                    // Each prompt waits on its own thread, so sessions don't queue behind each other.
-                    let app = app.clone();
-                    std::thread::spawn(move || {
-                        let out = permission(&app, &v);
-                        respond(req, out);
-                    });
-                }
-                // Local scripts (the watchers in ~/Developer/hlidaci): a message for Erik.
-                "/notify" => {
-                    let _ = app.emit_to("main", "notify", v.clone());
-                    respond(req, String::new());
-                }
-                // A Shortcuts automation when a macOS Focus turns on or off.
-                "/focus/on" | "/focus/off" => {
-                    let _ = app.emit("focus", path == "/focus/on");
-                    respond(req, String::new());
-                }
-                _ => respond(req, String::new()),
-            }
+            let app = app.clone();
+            std::thread::spawn(move || {
+                handle(&app, req);
+                BUSY.fetch_sub(1, Ordering::SeqCst);
+            });
         }
     });
+}
+
+/// Requests in flight, and how many may be at once (permission prompts wait for minutes).
+static BUSY: AtomicUsize = AtomicUsize::new(0);
+const MAX_BUSY: usize = 32;
+/// Hook payloads are small; a file Claude writes can make one bigger, never this big.
+const MAX_BODY: u64 = 1 << 20;
+
+/// Only local programs that talk to us directly. A web page in a browser can
+/// also send to 127.0.0.1, but it always says where it comes from (Origin), and
+/// a rebound domain name shows up in Host; curl and the scripts send neither.
+fn from_local_program(req: &tiny_http::Request) -> bool {
+    let header = |name: &'static str| req.headers().iter().find(|h| h.field.equiv(name)).map(|h| h.value.as_str().to_ascii_lowercase());
+    if header("Origin").is_some() || header("Sec-Fetch-Site").is_some() {
+        return false;
+    }
+    header("Host").is_none_or(|h| h == format!("127.0.0.1:{PORT}") || h == format!("localhost:{PORT}"))
+}
+
+fn handle(app: &AppHandle, mut req: tiny_http::Request) {
+    if !from_local_program(&req) || req.body_length().is_some_and(|n| n as u64 > MAX_BODY) {
+        let _ = req.respond(tiny_http::Response::from_string("").with_status_code(403));
+        return;
+    }
+    let (path, query) = req.url().split_once('?').unwrap_or((req.url(), ""));
+    let path = path.to_string();
+    // Claude Code's hooks carry the secret; anything else gets nothing, before its body is even read.
+    if path.starts_with("/cc/") && !query.split('&').any(|p| p == format!("k={}", key())) {
+        let _ = req.respond(tiny_http::Response::from_string("").with_status_code(403));
+        return;
+    }
+    if !matches!(path.as_str(), "/cc/event" | "/cc/permission" | "/notify" | "/focus/on" | "/focus/off") {
+        let _ = req.respond(tiny_http::Response::from_string("").with_status_code(404));
+        return;
+    }
+    let mut body = String::new();
+    let _ = req.as_reader().take(MAX_BODY).read_to_string(&mut body);
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    match path.as_str() {
+        "/cc/event" => {
+            if let Some(e) = event(&v) {
+                let _ = app.emit("cc-event", e);
+            }
+            respond(req, String::new());
+        }
+        "/cc/permission" => {
+            let out = permission(app, &v);
+            respond(req, out);
+        }
+        // Local scripts (the watchers in ~/Developer/hlidaci): a message for Erik.
+        "/notify" => {
+            let _ = app.emit_to("main", "notify", v);
+            respond(req, String::new());
+        }
+        // A Shortcuts automation when a macOS Focus turns on or off.
+        _ => {
+            let _ = app.emit("focus", path == "/focus/on");
+            respond(req, String::new());
+        }
+    }
 }
 
 // ---------- the hooks in ~/.claude/settings.json ----------

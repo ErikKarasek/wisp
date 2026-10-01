@@ -1,4 +1,5 @@
 mod ask;
+mod buddy;
 mod calendar;
 mod claudecode;
 mod cloudflare;
@@ -437,6 +438,12 @@ fn notch_peek(app: AppHandle, millis: u64) {
     notch::peek(&app, millis.min(10_000));
 }
 
+/// The bot is being dragged out of the notch: carry it until the button is let go.
+#[tauri::command]
+fn buddy_drag(app: AppHandle) {
+    buddy::start(&app);
+}
+
 #[tauri::command]
 fn notch_set_width(app: AppHandle, width: f64) {
     notch::set_width(&app, width);
@@ -562,6 +569,7 @@ pub fn run() {
             notch_set_width,
             notch_set_close_delay,
             notch_set_wing,
+            buddy_drag,
             cloudflare_snapshot,
             github_snapshot,
             github_discover,
