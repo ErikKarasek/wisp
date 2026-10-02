@@ -259,14 +259,23 @@ extern "C" {
     fn CFRelease(cf: CfRef);
 }
 
-/// The hottest CPU die sensor, in °C.
-fn cpu_temp() -> Option<f64> {
-    const UTF8: u32 = 0x0800_0100;
-    const TEMPERATURE: i64 = 15;
-    unsafe {
+fn cf_release(cf: CfRef) {
+    // CFRelease(NULL) crashes; anything here may have failed to be created.
+    if !cf.is_null() {
+        unsafe { CFRelease(cf) }
+    }
+}
+
+const UTF8: u32 = 0x0800_0100;
+
+/// The HID client matched to temperature sensors, made once: creating one is an IPC
+/// round trip to hidd, too much for every tick. Kept for the app's whole life.
+fn sensor_client() -> Option<CfRef> {
+    static CLIENT: OnceLock<usize> = OnceLock::new();
+    let ptr = *CLIENT.get_or_init(|| unsafe {
         let client = IOHIDEventSystemClientCreate(std::ptr::null());
         if client.is_null() {
-            return None;
+            return 0;
         }
         let (page, usage): (i32, i32) = (0xff00, 5);
         let keys = [
@@ -278,9 +287,30 @@ fn cpu_temp() -> Option<f64> {
             CFNumberCreate(std::ptr::null(), 3, &page as *const i32 as *const _),
             CFNumberCreate(std::ptr::null(), 3, &usage as *const i32 as *const _),
         ];
-        let matching = CFDictionaryCreate(std::ptr::null(), keys.as_ptr(), values.as_ptr(), 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        IOHIDEventSystemClientSetMatching(client, matching);
+        if keys.iter().chain(values.iter()).all(|p| !p.is_null()) {
+            let matching = CFDictionaryCreate(std::ptr::null(), keys.as_ptr(), values.as_ptr(), 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+            if !matching.is_null() {
+                IOHIDEventSystemClientSetMatching(client, matching);
+                cf_release(matching);
+            }
+        }
+        for k in keys.into_iter().chain(values) {
+            cf_release(k);
+        }
+        client as usize
+    });
+    (ptr != 0).then_some(ptr as CfRef)
+}
+
+/// The hottest CPU die sensor, in °C. Only called from tick, which runs under the state lock.
+fn cpu_temp() -> Option<f64> {
+    const TEMPERATURE: i64 = 15;
+    let client = sensor_client()?;
+    unsafe {
         let product = CFStringCreateWithCString(std::ptr::null(), c"Product".as_ptr(), UTF8);
+        if product.is_null() {
+            return None;
+        }
         let services = IOHIDEventSystemClientCopyServices(client);
         let mut hottest: Option<f64> = None;
         if !services.is_null() {
@@ -292,7 +322,7 @@ fn cpu_temp() -> Option<f64> {
                 }
                 let mut buf = [0 as std::ffi::c_char; 64];
                 let ok = CFStringGetCString(name, buf.as_mut_ptr(), 64, UTF8);
-                CFRelease(name);
+                cf_release(name);
                 if !ok || !std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().contains("tdie") {
                     continue;
                 }
@@ -301,22 +331,14 @@ fn cpu_temp() -> Option<f64> {
                     continue;
                 }
                 let t = IOHIDEventGetFloatValue(event, (TEMPERATURE as i32) << 16);
-                CFRelease(event);
+                cf_release(event);
                 if (1.0..130.0).contains(&t) {
                     hottest = Some(hottest.map_or(t, |h: f64| h.max(t)));
                 }
             }
-            CFRelease(services);
+            cf_release(services);
         }
-        for k in keys {
-            CFRelease(k);
-        }
-        for v in values {
-            CFRelease(v);
-        }
-        CFRelease(product);
-        CFRelease(matching);
-        CFRelease(client);
+        cf_release(product);
         hottest
     }
 }
@@ -659,7 +681,9 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
         } else if idle >= p.sleep_after_min as u64 * 60 {
             inner.sleep_pending = false;
             // A film or music holds the display or the speakers: that's someone watching, not idle.
-            let watching = inner.status.others.iter().any(|h| h.app == "Zvuk" || h.what == "nezhasíná displej");
+            // Asked now, not from the 20 s old list: playback may have just started.
+            let own = inner.caffeinate.as_ref().map(|(c, _)| c.id());
+            let watching = others(own).iter().any(|h| h.app == "Zvuk" || h.what == "nezhasíná displej");
             if !watching {
                 sleep_now();
             }
