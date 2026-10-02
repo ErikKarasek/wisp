@@ -124,6 +124,8 @@ pub struct Status {
     pub lid_closed: bool,
     /// 0 nominal, 1 fair, 2 serious, 3 critical.
     pub thermal: u8,
+    /// The hottest CPU die sensor, °C.
+    pub temp: Option<u8>,
     pub cpu: u8,
     pub idle_secs: u64,
     pub others: Vec<Holder>,
@@ -228,6 +230,95 @@ fn thermal() -> u8 {
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGEventSourceSecondsSinceLastEventType(source: i32, event: u32) -> f64;
+}
+
+// The temperature sensors, through the HID event system (no root needed). The
+// same private calls tools like Stats use; "PMU tdie*" are the CPU die sensors.
+type CfRef = *const std::ffi::c_void;
+#[repr(C)]
+struct CfDictCallbacks([usize; 6]);
+#[link(name = "IOKit", kind = "framework")]
+extern "C" {
+    fn IOHIDEventSystemClientCreate(alloc: CfRef) -> CfRef;
+    fn IOHIDEventSystemClientSetMatching(client: CfRef, matching: CfRef) -> i32;
+    fn IOHIDEventSystemClientCopyServices(client: CfRef) -> CfRef;
+    fn IOHIDServiceClientCopyProperty(service: CfRef, key: CfRef) -> CfRef;
+    fn IOHIDServiceClientCopyEvent(service: CfRef, kind: i64, options: i32, timestamp: i64) -> CfRef;
+    fn IOHIDEventGetFloatValue(event: CfRef, field: i32) -> f64;
+}
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    static kCFTypeDictionaryKeyCallBacks: CfDictCallbacks;
+    static kCFTypeDictionaryValueCallBacks: CfDictCallbacks;
+    fn CFStringCreateWithCString(alloc: CfRef, s: *const std::ffi::c_char, encoding: u32) -> CfRef;
+    fn CFStringGetCString(s: CfRef, buf: *mut std::ffi::c_char, size: isize, encoding: u32) -> bool;
+    fn CFNumberCreate(alloc: CfRef, kind: isize, value: *const std::ffi::c_void) -> CfRef;
+    fn CFDictionaryCreate(alloc: CfRef, keys: *const CfRef, values: *const CfRef, n: isize, kc: *const CfDictCallbacks, vc: *const CfDictCallbacks) -> CfRef;
+    fn CFArrayGetCount(a: CfRef) -> isize;
+    fn CFArrayGetValueAtIndex(a: CfRef, i: isize) -> CfRef;
+    fn CFRelease(cf: CfRef);
+}
+
+/// The hottest CPU die sensor, in °C.
+fn cpu_temp() -> Option<f64> {
+    const UTF8: u32 = 0x0800_0100;
+    const TEMPERATURE: i64 = 15;
+    unsafe {
+        let client = IOHIDEventSystemClientCreate(std::ptr::null());
+        if client.is_null() {
+            return None;
+        }
+        let (page, usage): (i32, i32) = (0xff00, 5);
+        let keys = [
+            CFStringCreateWithCString(std::ptr::null(), c"PrimaryUsagePage".as_ptr(), UTF8),
+            CFStringCreateWithCString(std::ptr::null(), c"PrimaryUsage".as_ptr(), UTF8),
+        ];
+        // kCFNumberSInt32Type
+        let values = [
+            CFNumberCreate(std::ptr::null(), 3, &page as *const i32 as *const _),
+            CFNumberCreate(std::ptr::null(), 3, &usage as *const i32 as *const _),
+        ];
+        let matching = CFDictionaryCreate(std::ptr::null(), keys.as_ptr(), values.as_ptr(), 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        IOHIDEventSystemClientSetMatching(client, matching);
+        let product = CFStringCreateWithCString(std::ptr::null(), c"Product".as_ptr(), UTF8);
+        let services = IOHIDEventSystemClientCopyServices(client);
+        let mut hottest: Option<f64> = None;
+        if !services.is_null() {
+            for i in 0..CFArrayGetCount(services) {
+                let svc = CFArrayGetValueAtIndex(services, i);
+                let name = IOHIDServiceClientCopyProperty(svc, product);
+                if name.is_null() {
+                    continue;
+                }
+                let mut buf = [0 as std::ffi::c_char; 64];
+                let ok = CFStringGetCString(name, buf.as_mut_ptr(), 64, UTF8);
+                CFRelease(name);
+                if !ok || !std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().contains("tdie") {
+                    continue;
+                }
+                let event = IOHIDServiceClientCopyEvent(svc, TEMPERATURE, 0, 0);
+                if event.is_null() {
+                    continue;
+                }
+                let t = IOHIDEventGetFloatValue(event, (TEMPERATURE as i32) << 16);
+                CFRelease(event);
+                if (1.0..130.0).contains(&t) {
+                    hottest = Some(hottest.map_or(t, |h: f64| h.max(t)));
+                }
+            }
+            CFRelease(services);
+        }
+        for k in keys {
+            CFRelease(k);
+        }
+        for v in values {
+            CFRelease(v);
+        }
+        CFRelease(product);
+        CFRelease(matching);
+        CFRelease(client);
+        hottest
+    }
 }
 
 /// Seconds since the last key or mouse event.
@@ -464,6 +555,7 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
     let (pct, on_ac, charging) = battery();
     let closed = lid_closed();
     let heat = thermal();
+    let temp = cpu_temp().map(|t| t.round() as u8);
     let (cpu, mut tools) = processes();
     tools.extend(claude_sessions());
     let idle = idle_secs();
@@ -619,6 +711,7 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
         charging,
         lid_closed: closed,
         thermal: heat,
+        temp,
         cpu,
         idle_secs: idle,
         others: inner.status.others.clone(),
@@ -632,6 +725,8 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
     b.idle_secs = 0;
     a.cpu /= 10;
     b.cpu /= 10;
+    a.temp = a.temp.map(|t| t / 3);
+    b.temp = b.temp.map(|t| t / 3);
     inner.status = next;
     if a != b {
         let _ = app.emit("awake-state", &inner.status);

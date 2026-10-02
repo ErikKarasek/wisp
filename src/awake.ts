@@ -29,6 +29,8 @@ export type Awake = {
   charging: boolean;
   lidClosed: boolean;
   thermal: number;
+  /** The hottest CPU die sensor, °C. */
+  temp: number | null;
   cpu: number;
   idleSecs: number;
   others: { app: string; what: string }[];
@@ -132,7 +134,8 @@ export function mountAwake(host: HTMLElement, onChange: (a: Awake) => void) {
       (el.querySelector("b") as HTMLElement).textContent = text;
     };
     pill("bat", a.battery == null ? "–" : `${a.battery} %${a.charging ? " ⚡" : ""}`, a.battery != null && !a.onAc && a.battery <= p.batteryStop ? "warn" : "");
-    pill("heat", HEAT[a.thermal] ?? "–", a.thermal >= 2 ? "warn" : "");
+    pill("heat", a.temp != null ? `${a.temp} °C` : (HEAT[a.thermal] ?? "–"), a.thermal >= 2 || (a.temp ?? 0) >= 95 ? "warn" : "");
+    q<HTMLElement>('[data-p="heat"]').title = `Procesor: ${HEAT[a.thermal] ?? ""}`;
     pill("cpu", `${a.cpu} %`);
     pill("lid", a.lidActive ? "víko zap" : a.lidClosed ? "zavřené" : "víko vyp", a.lidActive ? "on" : "");
 
@@ -208,6 +211,8 @@ export function mountAwake(host: HTMLElement, onChange: (a: Awake) => void) {
 
   void listen<Awake>("awake-state", (e) => render(e.payload));
   void invoke<Awake>("awake_status").then(render).catch(() => {});
-  // The "still N min" texts move on their own.
-  setInterval(() => cur && render(cur), 30_000);
+  // Temperature and CPU move all the time; while the panel is open, ask every few seconds.
+  setInterval(() => {
+    if (document.visibilityState === "visible") void invoke<Awake>("awake_status").then(render).catch(() => {});
+  }, 3000);
 }
