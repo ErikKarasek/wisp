@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
   <key>NSCalendarsFullAccessUsageDescription</key>
-  <string>Dispečink ukazuje v notchi tvoje dnešní a zítřejší události.</string>
+  <string>Wisp ukazuje v notchi tvoje dnešní a zítřejší události.</string>
   <key>NSCalendarsUsageDescription</key>
-  <string>Dispečink ukazuje v notchi tvoje dnešní a zítřejší události.</string>
+  <string>Wisp ukazuje v notchi tvoje dnešní a zítřejší události.</string>
   <key>NSCameraUsageDescription</key>
   <string>Zrcátko v notchi ukazuje obraz z kamery. Nikam se neukládá ani neposílá.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>Dispečink ukazuje, co hraje ve Spotify nebo v Hudbě, a umí je pozastavit nebo přeskočit.</string>
+  <string>Wisp ukazuje, co hraje ve Spotify nebo v Hudbě, a umí je pozastavit nebo přeskočit.</string>
 </dict>
 </plist>

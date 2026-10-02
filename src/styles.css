@@ -117,7 +117,10 @@ button { font: inherit; color: inherit; }
 .detail {
   flex: none; border-top: 1px solid var(--line); background: var(--side); padding: 14px 20px 16px;
   display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 16px; align-items: start; max-height: 44vh;
+  /* A long log or task list scrolls; the buttons stay in reach at the bottom. */
+  overflow-y: auto; overscroll-behavior: contain;
 }
+.detail .btns { position: sticky; bottom: -16px; padding: 10px 0 16px; margin-bottom: -16px; background: linear-gradient(transparent, var(--side) 12px); z-index: 1; }
 .detail[hidden] { display: none; }
 .detail .m { width: 88px; height: 88px; padding: 0; border: 0; background: none; border-radius: 16px; cursor: pointer; }
 .detail .m:hover { background: var(--panel); }

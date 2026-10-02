@@ -578,8 +578,11 @@ export async function startNotch() {
     const [id, v] = [...ccSessions.entries()].filter(([, v]) => v.busy && now - v.at < 120_000).sort((a, b) => b[1].at - a[1].at)[0] ?? [];
     return v ? { id: `cc:${id}`, name: `${v.project} · Claude`, character: {}, lines: v.lines } : undefined;
   };
+  /** "agent:<id>" from a Paperclip agent's Claude → that agent's name. */
+  const nameOf = (project: string) => (project.startsWith("agent:") ? lastSnap?.items.find((i) => i.id === project)?.name ?? "Agent" : project);
   void listen<CcEvent>("cc-event", (e) => {
-    const { session, project, kind, text } = e.payload;
+    const { session, kind, text } = e.payload;
+    const project = nameOf(e.payload.project);
     const now = Date.now();
     if (kind === "end") {
       ccSessions.delete(session);
@@ -989,7 +992,9 @@ export async function startNotch() {
     showLook(who && Object.keys(who).length ? who : botLook());
 
     // Claude Code asking for permission comes first, then a dropped file.
-    root.classList.toggle("asking", perms.length > 0 || !!fileAsk || quickAsk);
+    // An agent's question gets the whole card too, like a quick question.
+    const agentAsks = !working && s.items.some((i) => i.ask);
+    root.classList.toggle("asking", perms.length > 0 || !!fileAsk || quickAsk || agentAsks);
     if (perms.length) {
       renderPerm();
       return renderCrew(s, working);
@@ -1249,6 +1254,7 @@ export async function startNotch() {
   $("[data-act=mirror]").addEventListener("click", () => (mirror.hidden ? void openMirror() : closeMirror()));
   async function openMirror() {
     mirror.hidden = false;
+    root.classList.add("mirroring");
     $("[data-act=mirror]").classList.add("on");
     const note = mirror.querySelector(".muted") as HTMLElement;
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -1269,6 +1275,7 @@ export async function startNotch() {
     const video = mirror.querySelector("video") as HTMLVideoElement;
     video.srcObject = null;
     mirror.hidden = true;
+    root.classList.remove("mirroring");
     $("[data-act=mirror]").classList.remove("on");
   }
 

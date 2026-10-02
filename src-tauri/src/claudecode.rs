@@ -141,7 +141,20 @@ fn rule(tool: &str, input: &Value) -> String {
 }
 
 fn project(v: &Value) -> String {
-    file_name(v.get("cwd").and_then(Value::as_str).unwrap_or("").trim_end_matches('/'))
+    let cwd = v.get("cwd").and_then(Value::as_str).unwrap_or("").trim_end_matches('/');
+    // A Paperclip agent's Claude works in .paperclip/…/workspaces/<agent id>: name it by the
+    // agent ("agent:<id>"), the notch turns that into the agent's name.
+    if let Some(id) = agent_workspace(cwd) {
+        return format!("agent:{id}");
+    }
+    file_name(cwd)
+}
+
+/// The agent id when this Claude session is one of Paperclip's agents, not Erik in a terminal.
+fn agent_workspace(cwd: &str) -> Option<&str> {
+    let (_, rest) = cwd.split_once("/.paperclip/")?;
+    let (_, id) = rest.split_once("/workspaces/")?;
+    Some(id.split('/').next().unwrap_or(id))
 }
 
 fn event(v: &Value) -> Option<CcEvent> {
@@ -167,6 +180,11 @@ fn respond(req: tiny_http::Request, body: String) {
 }
 
 fn permission(app: &AppHandle, v: &Value) -> String {
+    // An agent's own Claude decides by its own permission mode; asking Erik in the notch would
+    // only hold the agent up for a minute on every step.
+    if agent_workspace(v.get("cwd").and_then(Value::as_str).unwrap_or("")).is_some() {
+        return String::new();
+    }
     let tool = v.get("tool_name").and_then(Value::as_str).unwrap_or("").to_string();
     let input = v.get("tool_input").cloned().unwrap_or(Value::Null);
     let id = v
