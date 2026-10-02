@@ -45,21 +45,31 @@ pub struct CcPermission {
 
 static PENDING: Mutex<Option<HashMap<String, Sender<String>>>> = Mutex::new(None);
 /// A secret in the hook URLs, so another local program can't feed Claude permission answers.
-static KEY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+static KEY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
-/// The secret, made once and kept in the app's config folder.
-fn key() -> &'static str {
+/// The secret, made once and kept in the app's config folder. `None` when the
+/// random bytes for it couldn't be read: a key that isn't random is no secret,
+/// so Wisp then does without the hooks instead of trusting a guessable one.
+fn key() -> Option<&'static str> {
     KEY.get_or_init(|| {
         let path = dirs_config().join("cc-hook-key");
         if let Ok(k) = std::fs::read_to_string(&path) {
             let k = k.trim().to_string();
             if k.len() >= 32 {
-                return k;
+                return Some(k);
             }
         }
         let mut bytes = [0u8; 24];
-        if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-            let _ = f.read_exact(&mut bytes);
+        let mut f = match std::fs::File::open("/dev/urandom") {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("Claude Code hooks: /dev/urandom can't be opened ({e})");
+                return None;
+            }
+        };
+        if let Err(e) = f.read_exact(&mut bytes) {
+            eprintln!("Claude Code hooks: /dev/urandom can't be read ({e})");
+            return None;
         }
         let k: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         let _ = std::fs::create_dir_all(dirs_config());
@@ -67,8 +77,9 @@ fn key() -> &'static str {
         // Only Erik's account may read it.
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        k
+        Some(k)
     })
+    .as_deref()
 }
 
 fn dirs_config() -> PathBuf {
@@ -245,6 +256,11 @@ pub fn decide(id: &str, answer: &str) -> bool {
 }
 
 pub fn start(app: &AppHandle) {
+    // The secret guards the permission answers. Without one the server still runs for /notify and /focus, which
+    // local scripts use without a key, and every /cc/ request gets 403, so Claude Code asks in the terminal.
+    if key().is_none() {
+        eprintln!("Claude Code hooks: no secret, so /cc/ stays closed");
+    }
     let server = match tiny_http::Server::http(("127.0.0.1", PORT)) {
         Ok(s) => s,
         Err(e) => {
@@ -255,7 +271,6 @@ pub fn start(app: &AppHandle) {
     // The key file from older versions was readable by every account on the Mac.
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = key();
         let _ = std::fs::set_permissions(dirs_config().join("cc-hook-key"), std::fs::Permissions::from_mode(0o600));
     }
     let app = app.clone();
@@ -302,7 +317,7 @@ fn handle(app: &AppHandle, mut req: tiny_http::Request) {
     let (path, query) = req.url().split_once('?').unwrap_or((req.url(), ""));
     let path = path.to_string();
     // Claude Code's hooks carry the secret; anything else gets nothing, before its body is even read.
-    if path.starts_with("/cc/") && !query.split('&').any(|p| p == format!("k={}", key())) {
+    if path.starts_with("/cc/") && !key().is_some_and(|k| query.split('&').any(|p| p == format!("k={k}"))) {
         let _ = req.respond(tiny_http::Response::from_string("").with_status_code(403));
         return;
     }
@@ -345,13 +360,13 @@ fn settings_path() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".claude/settings.json")
 }
 
-fn hook(url: &str, timeout: u64, async_: bool) -> Value {
+fn hook(key: &str, url: &str, timeout: u64, async_: bool) -> Value {
     // curl, not an http hook: when Wisp is off it fails silently instead
     // of leaving an error notice in every session.
     let max = if async_ { 2 } else { timeout - 5 };
     let mut h = json!({
         "type": "command",
-        "command": format!("curl -s -m {max} -H 'content-type: application/json' --data-binary @- 'http://{MARK}{url}?k={}' 2>/dev/null || true", key()),
+        "command": format!("curl -s -m {max} -H 'content-type: application/json' --data-binary @- 'http://{MARK}{url}?k={key}' 2>/dev/null || true"),
         "timeout": timeout,
     });
     if async_ {
@@ -388,6 +403,10 @@ pub fn set_hooks(on: bool) -> Result<(), String> {
     }
     hooks.retain(|_, list| list.as_array().is_none_or(|a| !a.is_empty()));
     if on {
+        // No secret, no hooks: settings.json stays as it is.
+        let Some(key) = key() else {
+            return Err("Tajný klíč pro hooky se nepodařilo vytvořit.".into());
+        };
         let add = |hooks: &mut serde_json::Map<String, Value>, event: &str, h: Value| {
             let list = hooks.entry(event).or_insert_with(|| json!([]));
             if let Some(a) = list.as_array_mut() {
@@ -395,9 +414,9 @@ pub fn set_hooks(on: bool) -> Result<(), String> {
             }
         };
         for event in ["SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop", "SessionEnd"] {
-            add(hooks, event, hook("event", 5, true));
+            add(hooks, event, hook(key, "event", 5, true));
         }
-        add(hooks, "PermissionRequest", hook("permission", HOLD_AWAY.as_secs() + 15, false));
+        add(hooks, "PermissionRequest", hook(key, "permission", HOLD_AWAY.as_secs() + 15, false));
     }
     let out = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.dispecink-tmp");
