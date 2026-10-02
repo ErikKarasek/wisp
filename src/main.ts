@@ -200,7 +200,10 @@ async function guardClaude(u: ClaudeUsage | null) {
     const agents = paperclip.companies.flatMap((c) => c.agents).filter((a) => a.adapterType === "claude_local" && a.status !== "terminated");
     let paused = guardPaused();
     if (session >= 90 || week >= 95) {
-      const now = agents.filter((a) => a.status !== "paused" && !paused.includes(a.id));
+      // A pause cancels the run in progress, and the retry pays for that work all over again. So a running agent
+      // finishes its run and is paused once idle; only right at the limit (97 %, week 98 %) is it cut off.
+      const hard = session >= 97 || week >= 98;
+      const now = agents.filter((a) => a.status !== "paused" && !paused.includes(a.id) && (hard || a.status !== "running"));
       if (now.length && !paused.length) localStorage.setItem(GUARD_SINCE, new Date().toISOString());
       for (const a of now) {
         await invoke("paperclip_action", { kind: "agentPause", id: a.id }).catch(() => {});
