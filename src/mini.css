@@ -52,6 +52,7 @@ body.mini button { font: inherit; color: inherit; }
 .awr[data-row="auto"] > i { color: #d980c9; }
 .awr[data-row="charging"] > i { color: #e8c46a; }
 .awr[data-row="lid"] > i { color: #8b9cff; }
+.awr[data-row="remote"] > i { color: #5fcfa8; }
 .awr .t { flex: 1; min-width: 0; }
 .awr .t b { display: block; font-size: 13px; font-weight: 500; }
 .awr .t small { display: block; font-size: 11px; color: #858c99; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

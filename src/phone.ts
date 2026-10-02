@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { pc } from "./live";
+import type { Awake } from "./awake";
 
 type Obj = Record<string, any>;
 
@@ -28,8 +29,39 @@ const HELP = [
   "/stav – kdo pracuje a co čeká na tebe",
   "/agenti – kdo tu je a na čem běží",
   "/limity – Claude, ChatGPT, Gemini",
+  "",
+  "/mac – baterie, teplota a jestli Mac drží vzhůru",
+  "/vzhuru – držet Mac vzhůru (/vzhuru 2h na dvě hodiny, /vzhuru vyp)",
+  "/viko – běžet i se zavřeným víkem (/viko vyp)",
+  "/nadalku – v nabíječce nespát, ať se k Macu vždycky dostaneš (/nadalku vyp)",
+  "/spi – uspat Mac",
   "/pomoc – tahle zpráva",
 ].join("\n");
+
+/** "2h", "90", "90 min", "1,5 h" → minutes; null when it isn't a time. */
+function minutes(arg: string): number | null {
+  const m = /^(\d+(?:[.,]\d+)?)\s*(h|hod\w*|m|min\w*)?$/.exec(arg.trim());
+  if (!m) return null;
+  const n = Number(m[1].replace(",", "."));
+  return Math.round(m[2]?.startsWith("h") ? n * 60 : n);
+}
+const OFF = /^(vyp\w*|off|ne|stop|konec)$/;
+
+/** The Mac in a few lines, for /mac and as the answer to the awake commands. */
+function macText(a: Awake): string {
+  const heat = a.temp != null ? `${a.temp} °C` : ["v pohodě", "teplý", "horký", "přehřátý"][a.thermal];
+  const lines = [
+    `💻 ${a.why}`,
+    `Baterie ${a.battery ?? "–"} %${a.charging ? " (nabíjí)" : a.onAc ? " (v nabíječce)" : ""} · procesor ${heat} · CPU ${a.cpu} %${a.lidClosed ? " · víko zavřené" : ""}`,
+  ];
+  if (a.working.length) lines.push(`Pracuje: ${a.working.join(", ")}`);
+  const on: string[] = [];
+  if (a.prefs.remote) on.push("na dálku");
+  if (a.prefs.manual) on.push(a.prefs.untilMs ? `vzhůru do ${new Date(a.prefs.untilMs).toLocaleTimeString("cs-CZ", { hour: "numeric", minute: "2-digit" })}` : "vzhůru");
+  if (a.prefs.lid) on.push("zavřené víko");
+  if (on.length) lines.push(`Zapnuto: ${on.join(", ")}`);
+  return lines.join("\n");
+}
 
 export function startPhone(ctx: PhoneContext) {
   const send = (text: string) => {
@@ -45,6 +77,40 @@ export function startPhone(ctx: PhoneContext) {
       if (/^\/(start|pomoc|help)\b/i.test(text)) return send(HELP);
       if (/^\/stav\b/i.test(text)) return send(ctx.status().join("\n"));
       if (/^\/limity\b/i.test(text)) return send(ctx.limits().join("\n") || "Limity zatím nemám načtené.");
+
+      // The Mac itself: keep it awake, closed lid, remote, sleep.
+      const cmd = /^\/(mac|vzhuru|viko|nadalku|spi)\b\s*(.*)$/is.exec(plain(text));
+      if (cmd) {
+        const [, name, rawArg] = cmd;
+        const arg = rawArg.trim();
+        const set = (patch: Record<string, unknown>) => invoke<Awake>("awake_set", { patch });
+        if (name === "mac") return send(macText(await invoke<Awake>("awake_status")));
+        if (name === "spi") {
+          await invoke("telegram_send", { chat: ctx.chat(), text: "Uspávám Mac. Probudí ho otevření víka nebo klávesa." }).catch(() => {});
+          return void setTimeout(() => void invoke("awake_sleep"), 2000);
+        }
+        if (name === "vzhuru") {
+          if (OFF.test(arg)) return send(macText(await set({ manual: false, timerMin: 0 })));
+          const min = arg ? minutes(arg) : 0;
+          if (min == null) return send("Nerozumím času. Zkus /vzhuru 2h, /vzhuru 90 nebo /vzhuru vyp.");
+          return send(macText(await set({ manual: true, timerMin: min })));
+        }
+        if (name === "viko") {
+          const a = await invoke<Awake>("awake_status");
+          if (!a.lidReady) return send("Zavřené víko ještě není nastavené. U Macu otevři panel Wispu a u „Zavřené víko“ klikni na Nastavit (jednou zadáš heslo).");
+          return send(macText(await set({ lid: !OFF.test(arg) })));
+        }
+        if (name === "nadalku") {
+          const on = !OFF.test(arg);
+          const a = await set({ remote: on });
+          const note = on
+            ? a.onAc
+              ? "V nabíječce teď Mac neusne, ani se zavřeným víkem. Displej zhasne jako obvykle."
+              : "Až bude v nabíječce, přestane usínat. Na baterii usne jako vždy."
+            : "Mac zase usíná jako obvykle.";
+          return send(`${note}\n\n${macText(a)}`);
+        }
+      }
       if (/^\/agenti\b/i.test(text)) {
         const engine: Record<string, string> = { claude_local: "Claude", codex_local: "ChatGPT" };
         const list = agents().filter((a) => a.status !== "terminated");

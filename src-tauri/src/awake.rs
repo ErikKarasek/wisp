@@ -65,6 +65,9 @@ pub struct Prefs {
     pub battery_stop: u8,
     /// After work Wisp held the Mac for: sleep once nobody touched it for this long (0 = never).
     pub sleep_after_min: u32,
+    /// Remote: on the charger the Mac never sleeps (lid closed too, display off), so the
+    /// phone can always reach it. A sleeping Mac can't be woken over the internet.
+    pub remote: bool,
 }
 
 impl Default for Prefs {
@@ -79,6 +82,7 @@ impl Default for Prefs {
             until_ms: None,
             battery_stop: 20,
             sleep_after_min: 10,
+            remote: false,
         }
     }
 }
@@ -632,8 +636,9 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
     }
     let lid_allowed = power_ok && t >= inner.thermal_lock_until;
 
-    let lid_want = p.lid && lid_allowed && (p.manual || busy || !p.lid_until_done);
-    let hold_want = lid_want || (power_ok && (p.manual || (p.auto && busy)));
+    let remote_on = p.remote && on_ac && !inner.battery_lock;
+    let lid_want = lid_allowed && ((p.lid && (p.manual || busy || !p.lid_until_done)) || (remote_on && inner.status.lid_ready));
+    let hold_want = lid_want || remote_on || (power_ok && (p.manual || (p.auto && busy)));
 
     if let Err(e) = apply_lid(inner, lid_want) {
         error = Some(format!("Víko: {e}"));
@@ -663,7 +668,7 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
         (Some(_), false) => {
             let lid = inner.episode.as_ref().is_some_and(|e| e.lid);
             close_episode(inner, t);
-            if !p.manual {
+            if !p.manual && !remote_on {
                 if closed && lid {
                     notify(app, "Všechno doběhlo, uspávám Mac.", false);
                     sleep_now();
@@ -706,7 +711,9 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
     }
 
     let why = if !hold_want {
-        if inner.battery_lock {
+        if p.remote && !on_ac && !inner.battery_lock {
+            "Na dálku: čekám na nabíječku".to_string()
+        } else if inner.battery_lock {
             "Slabá baterie, nedržím".to_string()
         } else if p.charging_only && !on_ac {
             "Čekám na nabíječku".to_string()
@@ -717,6 +724,8 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
         }
     } else if lid_want {
         if busy && p.lid_until_done && !p.manual { "Víko: běží, dokud práce nedoběhne".into() } else { "Víko: běží i zavřený".into() }
+    } else if remote_on && !busy && !p.manual {
+        "Na dálku: v nabíječce nespím".into()
     } else if p.manual {
         "Držím vzhůru".into()
     } else {
@@ -878,6 +887,44 @@ pub fn sleep(app: &AppHandle) {
         let _ = app.emit("awake-state", &i.status);
     });
     sleep_now();
+}
+
+/// For the Monday summary: last week's extra hours and who they were for, most first.
+pub fn week(since_ms: u64, until_ms: u64) -> Option<String> {
+    with(|i| {
+        let mut total = 0u64;
+        let mut by: BTreeMap<String, u64> = BTreeMap::new();
+        let mut lid = 0u64;
+        for e in i.saved.episodes.iter().filter(|e| e.end >= since_ms && e.start < until_ms) {
+            let ms = e.end.min(until_ms) - e.start.max(since_ms);
+            total += ms;
+            if e.lid {
+                lid += ms;
+            }
+            for w in &e.who {
+                *by.entry(w.clone()).or_default() += ms;
+            }
+        }
+        if total < 60_000 {
+            return None;
+        }
+        let fmt = |ms: u64| {
+            let (h, m) = (ms / 3_600_000, (ms % 3_600_000) / 60_000);
+            if h > 0 { format!("{h} h {m} min") } else { format!("{m} min") }
+        };
+        let mut top: Vec<(String, u64)> = by.into_iter().collect();
+        top.sort_by_key(|t| std::cmp::Reverse(t.1));
+        let names: Vec<String> = top.iter().take(3).map(|(n, ms)| format!("{n} {}", fmt(*ms))).collect();
+        let mut text = format!("Minulý týden Mac pracoval navíc {}", fmt(total));
+        if lid > 0 {
+            text.push_str(&format!(", z toho {} se zavřeným víkem", fmt(lid)));
+        }
+        if !names.is_empty() {
+            text.push_str(&format!(". Nejvíc pro: {}", names.join(", ")));
+        }
+        Some(text)
+    })
+    .flatten()
 }
 
 /// For the morning summary: what kept the Mac awake overnight (since 18:00 yesterday).

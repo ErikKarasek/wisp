@@ -1376,6 +1376,15 @@ async function morning(force = false) {
   if (failed.size) parts.push(`Selhalo: ${[...failed].join(", ")}.`);
   const kept = await invoke<string | null>("awake_night", { sinceMs: since.getTime() }).catch(() => null);
   if (kept) parts.push(`${kept}.`);
+  // Mondays: last week's extra hours, also to Telegram on their own (like LidRun's weekly report).
+  if (now.getDay() === 1) {
+    const monday = new Date(today).getTime();
+    const week = await invoke<string | null>("awake_week", { sinceMs: monday - 7 * 86_400_000, untilMs: monday }).catch(() => null);
+    if (week) {
+      parts.push(`${week}.`);
+      if (cfg.telegram.enabled && cfg.telegram.chat && !m.telegram) void invoke("telegram_send", { chat: cfg.telegram.chat, text: `Týden Macu\n${week}.` }).catch(() => {});
+    }
+  }
   if (waiting.length) parts.push(`Čeká na tebe: ${waiting.map((i) => i.name).join(", ")}.`);
   parts.push(events.length ? `Dnes: ${events.slice(0, 3).map((e) => `${e.allDay ? "" : hm(e.startMs) + " "}${e.title}`).join(", ")}.` : "V kalendáři dnes nic.");
   // All three subscriptions, and what runs on its own today.

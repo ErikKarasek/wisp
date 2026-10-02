@@ -15,6 +15,8 @@ export type AwakePrefs = {
   untilMs: number | null;
   batteryStop: number;
   sleepAfterMin: number;
+  /** On the charger the Mac never sleeps, so the phone can always reach it. */
+  remote: boolean;
 };
 
 export type Awake = {
@@ -47,6 +49,7 @@ const ICON = {
   timer: svg(`<circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M9.5 2.5h5"/>`),
   lid: svg(`<rect x="4" y="5" width="16" height="10.5" rx="1.5"/><path d="M2 19h20"/>`),
   display: svg(`<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>`),
+  remote: svg(`<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/><path d="M3.5 8.5a6 6 0 0 1 0 7M20.5 8.5a6 6 0 0 1 0 7"/>`),
   moon: svg(`<path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10z"/>`),
   list: svg(`<path d="M8 6.5h12M8 12h12M8 17.5h12"/><circle cx="4" cy="6.5" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="17.5" r="1"/>`),
   gear: svg(`<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>`),
@@ -66,7 +69,7 @@ const hours = (min: number) => (min >= 60 ? `${Math.round(min / 6) / 10} h`.repl
 /** A short line for the panel's header, and the mode pill beside it. */
 export function awakeHeadline(a: Awake | null): { line: string; mode: string; on: boolean } {
   if (!a) return { line: "", mode: "", on: false };
-  const mode = a.lidActive ? "víko" : a.prefs.manual ? "ručně" : a.prefs.auto ? "auto" : "vyp";
+  const mode = a.lidActive && !a.prefs.lid ? "dálka" : a.lidActive ? "víko" : a.prefs.manual ? "ručně" : a.prefs.remote && a.holding ? "dálka" : a.prefs.auto ? "auto" : "vyp";
   if (!a.holding) return { line: a.why, mode, on: false };
   const who = a.working.slice(0, 2).join(", ");
   return { line: who ? `Držím vzhůru · ${who}` : a.why, mode, on: true };
@@ -92,6 +95,7 @@ export function mountAwake(host: HTMLElement, onChange: (a: Awake) => void) {
       ${row("timer", ICON.timer, "Časovač", `<select data-sel="timer">${TIMERS.map(([m, t]) => `<option value="${m}">${t}</option>`).join("")}</select>`)}
       ${row("lid", ICON.lid, "Zavřené víko", `${sw("lid")}<button class="awbtn" data-act="lid-setup" hidden>Nastavit</button>`)}
       ${row("display", ICON.display, "Nezhasínat displej", sw("display"))}
+      ${row("remote", ICON.remote, "Na dálku", sw("remote"))}
       <div class="awsep"></div>
       <button class="awr act" data-act="sleep"><i>${ICON.moon}</i><div class="t"><b>Uspat teď</b><small>Pustí všechno a Mac usne</small></div></button>
       <details class="awmore" data-d="others"><summary class="awr"><i>${ICON.list}</i><div class="t"><b>Co drží Mac vzhůru</b><small></small></div><span class="chev">›</span></summary><div class="awlist"></div></details>
@@ -144,6 +148,7 @@ export function mountAwake(host: HTMLElement, onChange: (a: Awake) => void) {
     sub("charging", p.chargingOnly ? (a.onAc ? "Nabíječka je zapojená" : "Na baterii nedržím") : "I na baterii");
     sub("timer", p.untilMs ? `Vypne se v ${new Date(p.untilMs).toLocaleTimeString("cs-CZ", { hour: "numeric", minute: "2-digit" })}` : "Drží, dokud nevypneš");
     sub("display", p.display ? "Displej nezhasne" : "Displej zhasne jako obvykle");
+    sub("remote", p.remote ? (a.onAc ? "V nabíječce nespí, ovládáš ho z mobilu" : "Na baterii spí, čeká na nabíječku") : "Uspaný Mac na dálku neprobudíš");
     const lidSw = q<HTMLElement>('[data-sw="lid"]');
     const setup = q<HTMLElement>('[data-act="lid-setup"]');
     lidSw.hidden = !a.lidReady;

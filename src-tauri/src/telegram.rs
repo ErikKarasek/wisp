@@ -199,6 +199,11 @@ pub fn start_listening(app: &AppHandle) {
                         { "command": "stav", "description": "Co se děje: kdo pracuje, co čeká na tebe" },
                         { "command": "agenti", "description": "Agenti a jak jim dát úkol" },
                         { "command": "limity", "description": "Limity Claude, ChatGPT a Gemini" },
+                        { "command": "mac", "description": "Baterie, teplota a jestli Mac drží vzhůru" },
+                        { "command": "vzhuru", "description": "Držet Mac vzhůru (třeba /vzhuru 2h, /vzhuru vyp)" },
+                        { "command": "viko", "description": "Běžet i se zavřeným víkem (/viko vyp)" },
+                        { "command": "nadalku", "description": "V nabíječce nespát, ať se k Macu vždycky dostaneš" },
+                        { "command": "spi", "description": "Uspat Mac" },
                         { "command": "pomoc", "description": "Jak se mnou mluvit" }
                     ] }))
                     .send()
