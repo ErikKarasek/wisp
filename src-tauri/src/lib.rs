@@ -471,6 +471,11 @@ fn awake_night(since_ms: u64) -> Option<String> {
     awake::night(since_ms)
 }
 
+#[tauri::command]
+fn awake_week(since_ms: u64, until_ms: u64) -> Option<String> {
+    awake::week(since_ms, until_ms)
+}
+
 /// The panel sizes itself to its content.
 #[tauri::command]
 fn panel_fit(app: AppHandle, height: f64) {
@@ -614,6 +619,7 @@ pub fn run() {
             awake_sleep,
             awake_lid_setup,
             awake_night,
+            awake_week,
             panel_fit,
             claude_usage,
             codex_command,
