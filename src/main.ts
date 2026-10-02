@@ -208,7 +208,8 @@ async function guardClaude(u: ClaudeUsage | null) {
       }
       if (now.length) warn(`Limit Claude je na ${Math.max(session, week)} %: pozastavil jsem ${now.map((a) => a.name).join(", ")}, ať ho nedočerpají. Až se limit obnoví, sami se rozjedou.`);
     } else if (session < 60 && week < 90 && paused.length) {
-      const back = agents.filter((a) => paused.includes(a.id));
+      // One un-paused by hand in the meantime is already running: only wake the ones still asleep.
+      const back = agents.filter((a) => paused.includes(a.id) && a.status === "paused");
       const since = localStorage.getItem(GUARD_SINCE);
       for (const a of back) {
         await invoke("paperclip_action", { kind: "agentResume", id: a.id }).catch(() => {});
