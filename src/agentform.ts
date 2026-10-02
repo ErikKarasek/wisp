@@ -130,7 +130,7 @@ export async function openAgentForm(o: AgentFormOptions) {
   const cfg = agent?.adapterConfig ?? {};
   let engine: Engine = agent?.adapterType === "codex_local" ? "codex_local" : "claude_local";
   const startEngine = engine;
-  const model = cfg.model ?? (engine === "codex_local" ? models.codex_local[0]?.id : "claude-sonnet-5") ?? "";
+  const model = cfg.model ?? (engine === "codex_local" ? models.codex_local[0]?.id : "claude-sonnet-5-5") ?? "";
   if (model && !models[engine].some((m) => m.id === model)) models[engine].unshift({ id: model, label: model });
   const modelOptions = (e: Engine, current: string) =>
     models[e].map((m) => `<option value="${esc(m.id)}" ${m.id === current ? "selected" : ""}>${esc(m.label)}</option>`).join("");
