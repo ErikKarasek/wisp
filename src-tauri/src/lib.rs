@@ -80,6 +80,11 @@ async fn paperclip_request(method: String, path: String, body: Option<serde_json
 }
 
 #[tauri::command]
+async fn paperclip_alive() -> bool {
+    paperclip::alive().await
+}
+
+#[tauri::command]
 async fn paperclip_action(kind: String, id: String) -> Result<(), String> {
     paperclip::action(&kind, &id).await
 }
@@ -547,6 +552,7 @@ pub fn run() {
             paperclip_snapshot,
             paperclip_action,
             paperclip_request,
+            paperclip_alive,
             show_main_window,
             quit_app,
             claude_usage,

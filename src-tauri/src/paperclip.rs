@@ -103,6 +103,15 @@ pub async fn action(kind: &str, id: &str) -> Result<(), String> {
     }
 }
 
+/// Whether the server answers at all, given plenty of time. A Mac busy with a build or several agent runs can make
+/// Paperclip slower than the 5 s the snapshot allows, and restarting it then would kill the runs it is serving.
+pub async fn alive() -> bool {
+    let Ok(c) = reqwest::Client::builder().timeout(Duration::from_secs(30)).build() else {
+        return false;
+    };
+    matches!(c.get(format!("{BASE}/api/health")).send().await, Ok(res) if res.status().is_success())
+}
+
 /// The calls Wisp makes, and only those. `{id}` stands for one id segment.
 const ALLOWED: &[(&str, &str)] = &[
     // tasks and their comments

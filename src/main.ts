@@ -313,10 +313,12 @@ function warn(text: string) {
   if (cfg.telegram.enabled && cfg.telegram.chat) void invoke("telegram_send", { chat: cfg.telegram.chat, text: `Wisp: ${text}` }).catch(() => {});
 }
 
-// Paperclip runs the agents; when it stops answering twice in a row, launchd restarts it (at most every 10 min).
+// Paperclip runs the agents; when it stops answering twice in a row and then doesn't answer a patient health check
+// either, launchd restarts it (at most every 10 min). Slow alone isn't dead: a restart kills the agents' runs.
 const PAPERCLIP_JOB = "ing.paperclip.paperclipai";
 let paperclipDown = 0;
 let paperclipKicked = 0;
+let paperclipProbing = false;
 async function watchPaperclip(online: boolean) {
   if (online) {
     if (paperclipKicked && paperclipDown) warn("Paperclip zase běží, agenti můžou pracovat.");
@@ -326,6 +328,11 @@ async function watchPaperclip(online: boolean) {
   paperclipDown++;
   if (paperclipDown < 2 || Date.now() - paperclipKicked < 10 * 60_000) return;
   if (!jobs.some((j) => j.label === PAPERCLIP_JOB)) return;
+  if (paperclipProbing) return;
+  paperclipProbing = true;
+  const alive = await invoke<boolean>("paperclip_alive").catch(() => false);
+  paperclipProbing = false;
+  if (alive) return;
   paperclipKicked = Date.now();
   const ok = await invoke("job_action", { label: PAPERCLIP_JOB, action: "restart" }).then(() => true).catch(() => false);
   warn(ok ? "Paperclip neodpovídal, restartoval jsem ho." : "Paperclip neodpovídá a restart se nepovedl. Mrkni na něj.");
