@@ -110,6 +110,7 @@ const ALLOWED: &[(&str, &str)] = &[
     ("PATCH", "/issues/{id}"),
     ("GET", "/issues/{id}/comments"),
     ("POST", "/issues/{id}/comments"),
+    ("POST", "/issues/{id}/recovery-actions/resolve"),
     ("POST", "/companies/{id}/issues"),
     ("GET", "/companies/{id}/issues"),
     // what an agent is doing: its runs and their logs

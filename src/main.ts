@@ -181,6 +181,8 @@ void listen<{ title?: string; text?: string; urgent?: boolean }>("notify", async
 
 /** Agents the guard paused itself, so it only ever wakes those, never one Erik paused. */
 const GUARD_KEY = "wisp.guard.paused";
+/** When the guard paused them, so a resume only touches tasks Paperclip blocked after that. */
+const GUARD_SINCE = "wisp.guard.since";
 const guardPaused = (): string[] => {
   try {
     return JSON.parse(localStorage.getItem(GUARD_KEY) ?? "[]");
@@ -199,6 +201,7 @@ async function guardClaude(u: ClaudeUsage | null) {
     let paused = guardPaused();
     if (session >= 90 || week >= 95) {
       const now = agents.filter((a) => a.status !== "paused" && !paused.includes(a.id));
+      if (now.length && !paused.length) localStorage.setItem(GUARD_SINCE, new Date().toISOString());
       for (const a of now) {
         await invoke("paperclip_action", { kind: "agentPause", id: a.id }).catch(() => {});
         paused.push(a.id);
@@ -206,17 +209,59 @@ async function guardClaude(u: ClaudeUsage | null) {
       if (now.length) warn(`Limit Claude je na ${Math.max(session, week)} %: pozastavil jsem ${now.map((a) => a.name).join(", ")}, ať ho nedočerpají. Až se limit obnoví, sami se rozjedou.`);
     } else if (session < 60 && week < 90 && paused.length) {
       const back = agents.filter((a) => paused.includes(a.id));
+      const since = localStorage.getItem(GUARD_SINCE);
       for (const a of back) {
         await invoke("paperclip_action", { kind: "agentResume", id: a.id }).catch(() => {});
+        if (since) await unstrand(a.id, since);
         // Woken right away, so the tasks it left half done get finished.
         await invoke("paperclip_action", { kind: "agentInvoke", id: a.id }).catch(() => {});
       }
       if (back.length) warn(`Limit Claude se obnovil: ${back.map((a) => a.name).join(", ")} zase pracuje a dodělá rozdělané úkoly.`);
       paused = [];
+      localStorage.removeItem(GUARD_SINCE);
     }
     localStorage.setItem(GUARD_KEY, JSON.stringify(paused));
   } finally {
     guarding = false;
+  }
+}
+
+/**
+ * While an agent is paused, Paperclip blocks its tasks ("…assignee is not invokable"): new ones assigned to it, and
+ * the ones whose run the pause cut off. A resumed agent never picks a blocked task up, so after a resume every task
+ * blocked since the pause goes back: to review when the agent already linked a PR, otherwise to todo.
+ */
+async function unstrand(agentId: string, since: string) {
+  if (!paperclip?.online) return;
+  type Obj = Record<string, any>;
+  const list = (v: Obj[] | { items: Obj[] }) => (Array.isArray(v) ? v : v.items ?? []);
+  const pc = (method: string, path: string, body: Obj | null = null) => invoke<Obj[] | { items: Obj[] }>("paperclip_request", { method, path, body });
+  for (const c of paperclip.companies) {
+    if (!c.agents.some((a) => a.id === agentId)) continue;
+    const issues = list(await pc("GET", `/companies/${c.company.id}/issues`).catch(() => []));
+    const stranded = issues.filter((x) => x.assigneeAgentId === agentId && x.status === "blocked" && Date.parse(x.blockedTransitionAt) >= Date.parse(since));
+    for (const i of stranded) {
+      const comments = list(await pc("GET", `/issues/${i.id}/comments`).catch(() => []));
+      const pr = comments.some((m) => m.authorAgentId === agentId && /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/.test(String(m.body ?? "")));
+      const status = pr ? "in_review" : "todo";
+      // A run the pause cut off holds the task until someone confirms it stopped; a plain status change gets undone.
+      const full = (await pc("GET", `/issues/${i.id}`).catch(() => null)) as Obj | null;
+      const held: Obj | null = full?.executionBlocker?.cause === "legacy_execution_requires_reconciliation" ? full.executionBlocker : null;
+      if (held)
+        await pc("POST", `/issues/${i.id}/recovery-actions/resolve`, {
+          actionId: held.recoveryActionId,
+          outcome: "restored",
+          sourceIssueStatus: status,
+          executionReconciliation: {
+            runId: held.runId,
+            providerStopped: true,
+            actionOutcome: "mixed",
+            outcomeEvidence: "Wisp paused the agent at the Claude limit and that cancelled this run; part of the work (branch, PR) may exist, so the agent checks before acting.",
+          },
+          resolutionNote: "Wisp: the Claude limit guard paused the agent; it is resumed now.",
+        }).catch(() => {});
+      else await pc("PATCH", `/issues/${i.id}`, { status }).catch(() => {});
+    }
   }
 }
 
