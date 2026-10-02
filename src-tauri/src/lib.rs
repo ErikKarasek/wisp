@@ -1,4 +1,6 @@
 mod ask;
+mod awake;
+mod botwatch;
 mod buddy;
 mod calendar;
 mod claudecode;
@@ -428,6 +430,55 @@ async fn github_pr_action(repo: String, number: u64, action: String) -> Result<(
     blocking(move || github::pr_action(&repo, number, &action)).await?
 }
 
+// ---------- keeping the Mac awake ----------
+
+#[tauri::command]
+fn awake_status() -> awake::Status {
+    awake::status()
+}
+
+#[tauri::command]
+async fn awake_set(app: AppHandle, patch: serde_json::Value) -> Result<awake::Status, String> {
+    blocking(move || awake::set(&app, patch)).await
+}
+
+/// What the page sees working: agents and jobs in "run", busy Claude Code sessions.
+#[tauri::command]
+fn awake_work(names: Vec<String>) {
+    awake::set_work(names);
+}
+
+#[tauri::command]
+async fn awake_sleep(app: AppHandle) -> Result<(), String> {
+    if let Some(p) = app.get_webview_window("panel") {
+        let _ = p.hide();
+    }
+    blocking(move || awake::sleep(&app)).await
+}
+
+/// The one-time sudoers rule for the closed lid; macOS asks for the password.
+#[tauri::command]
+async fn awake_lid_setup(app: AppHandle) -> Result<awake::Status, String> {
+    if let Some(p) = app.get_webview_window("panel") {
+        let _ = p.hide();
+    }
+    blocking(awake::lid_setup).await??;
+    blocking(move || awake::refresh_lid_ready(&app)).await
+}
+
+#[tauri::command]
+fn awake_night(since_ms: u64) -> Option<String> {
+    awake::night(since_ms)
+}
+
+/// The panel sizes itself to its content.
+#[tauri::command]
+fn panel_fit(app: AppHandle, height: f64) {
+    if let Some(p) = app.get_webview_window("panel") {
+        let _ = p.set_size(tauri::LogicalSize::new(340.0, height.clamp(300.0, 900.0)));
+    }
+}
+
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
@@ -526,6 +577,8 @@ pub fn run() {
             claudecode::start(handle);
             telegram::start_listening(handle);
             relay::start(handle);
+            awake::start(handle);
+            botwatch::start(handle);
             Ok(())
         })
         // Closing the window only hides it; the tray keeps watching.
@@ -555,6 +608,13 @@ pub fn run() {
             paperclip_alive,
             show_main_window,
             quit_app,
+            awake_status,
+            awake_set,
+            awake_work,
+            awake_sleep,
+            awake_lid_setup,
+            awake_night,
+            panel_fit,
             claude_usage,
             codex_command,
             set_tray_title,
@@ -607,8 +667,11 @@ pub fn run() {
 
     app.run(|app, event| {
         // Clicking the Dock icon brings the hidden window back.
-        if let RunEvent::Reopen { .. } = event {
-            show_main(app);
+        match event {
+            RunEvent::Reopen { .. } => show_main(app),
+            // Never leave the lid rule on or a caffeinate behind.
+            RunEvent::Exit => awake::shutdown(),
+            _ => {}
         }
     });
 }
