@@ -10,6 +10,7 @@ import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_S
 import { defaultNotchPrefs, type NotchPrefs, type SavedCharacter } from "./config";
 import { SEVERITY, STATES, type State } from "./model";
 import { sounds } from "./sounds";
+import { awakeHeadline, mountAwake } from "./awake";
 import "./mini.css";
 
 const escHtml = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -83,7 +84,8 @@ function subscribe(onState: (s: Snapshot) => void) {
 export function startPanel() {
   document.body.innerHTML = `
     <div class="pn">
-      <header><div class="m face"></div><div><b>Wisp</b><small class="head">Načítám…</small></div></header>
+      <header><div class="m face"></div><div class="ht"><b>Wisp</b><small class="head">Načítám…</small><small class="awake-line"></small></div><span class="mode"></span></header>
+      <section class="aw"></section>
       <div class="tiles">
         <div class="tile s-you"><b data-c="attention">–</b><small>čeká na tebe</small></div>
         <div class="tile s-run"><b data-c="run">–</b><small>pracuje</small></div>
@@ -99,6 +101,29 @@ export function startPanel() {
     </div>`;
   const face = mountMascot(document.querySelector(".face") as HTMLElement, { expression: "happy", seed: 4 });
   const render = rowList(document.querySelector(".list") as HTMLElement);
+  mountAwake(document.querySelector(".aw") as HTMLElement, (a) => {
+    const h = awakeHeadline(a);
+    const line = document.querySelector(".awake-line") as HTMLElement;
+    line.textContent = h.line;
+    line.classList.toggle("on", h.on);
+    const mode = document.querySelector(".mode") as HTMLElement;
+    mode.textContent = h.mode;
+    mode.classList.toggle("on", h.on);
+  });
+  // The panel window follows its content (details open and close, rows come and go).
+  const pn = document.querySelector(".pn") as HTMLElement;
+  // Never taller than the screen under the menu bar: the list at the bottom scrolls instead.
+  const fitScreen = () => pn.style.setProperty("--maxh", `${Math.max(320, screen.availHeight - 16)}px`);
+  fitScreen();
+  window.addEventListener("resize", fitScreen);
+  let fitted = 0;
+  new ResizeObserver(() => {
+    const h = Math.ceil(pn.getBoundingClientRect().height);
+    if (h !== fitted) {
+      fitted = h;
+      void invoke("panel_fit", { height: h });
+    }
+  }).observe(pn);
   subscribe((s) => {
     face.setExpression(faceFor(worst(s)));
     (document.querySelector(".head") as HTMLElement).textContent = headline(s);
@@ -107,7 +132,7 @@ export function startPanel() {
       if (el) el.textContent = String(v);
     }
     // What needs you or is working first, then the rest.
-    render([...s.items].sort(byUrgency).slice(0, 7));
+    render([...s.items].sort(byUrgency).slice(0, 6));
   });
   document.querySelector("footer")!.addEventListener("click", (e) => {
     const act = (e.target as HTMLElement).closest<HTMLElement>("[data-act]")?.dataset.act;

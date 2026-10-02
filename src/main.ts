@@ -143,6 +143,24 @@ function updateGlow() {
 }
 setInterval(updateGlow, 5000);
 
+// ---------- keeping the Mac awake: awake.rs decides, it only needs to know what works ----------
+
+/** Agents and jobs on this Mac working right now, and busy Claude Code sessions. Cloud work doesn't count. */
+function workingNames(): string[] {
+  const local = new Set(localGroups.flatMap((g) => g.items.map((i) => i.id)));
+  const names = allItems().filter((i) => local.has(i.id) && i.state === "run").map((i) => i.name);
+  const cc = ccLive().map((s) => s.name.replace(/ · Claude$/, " · Claude Code"));
+  return [...new Set([...names, ...cc])];
+}
+setInterval(() => void invoke("awake_work", { names: workingNames() }).catch(() => {}), 5000);
+/** Wisp holds the Mac awake: the tray icon gets a dot, like LidRun's. */
+let awakeHolding = false;
+void listen<{ holding: boolean }>("awake-state", (e) => {
+  if (e.payload.holding === awakeHolding) return;
+  awakeHolding = e.payload.holding;
+  void updateTray();
+});
+
 /** Claude Code sessions working right now, as "live" entries. */
 function ccLive() {
   const now = Date.now();
@@ -1162,7 +1180,8 @@ async function updateTray() {
   if (prCount) lines.push(`Ke kontrole: ${prCount} PR`);
   if (!lines.length) lines.push("Všechno v pořádku");
   const tooltip = attention.length ? `Wisp: ${attention.length} potřebuje pozornost` : "Wisp: všechno v pořádku";
-  const sig = `${face}|${lines.join("|")}`;
+  if (awakeHolding) lines.push("Držím Mac vzhůru");
+  const sig = `${face}|${lines.join("|")}|${awakeHolding}`;
   if (sig === traySig) return;
   traySig = sig;
   try {
@@ -1173,12 +1192,24 @@ async function updateTray() {
     const svg = failed
       ? mascotSvg({ color: "#e0605a", eyeColor: "#2a0d0b" }, EXPRESSIONS[face], 44)
       : mascotSvg({ color: "#000000", eyeColor: "#ffffff" }, EXPRESSIONS[face], 44);
-    const png = await renderPng(svg, 44, !failed);
+    const png = await renderPng(awakeHolding ? withDot(svg, failed) : svg, 44, !failed);
     await invoke("set_tray", { png: Array.from(png), tooltip, lines, template: !failed });
   } catch {
     // Drawing the tray icon failed; the next refresh tries again.
     traySig = "";
   }
+}
+
+/** A dot in the icon's corner while the Mac is held awake, cut out of the face so it reads in the menu bar. */
+function withDot(svg: string, failed: boolean): string {
+  const m = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(svg);
+  if (!m) return svg;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  const r = w * 0.15;
+  const [cx, cy] = [w - r, h - r];
+  const fill = failed ? "#e0605a" : "#000000";
+  return svg.replace("</svg>", `<circle cx="${cx}" cy="${cy}" r="${r * 1.45}" fill="${failed ? "none" : "#ffffff"}"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/></svg>`);
 }
 
 async function renderPng(svg: string, size: number, cutOutLight = false): Promise<Uint8Array> {
@@ -1343,6 +1374,8 @@ async function morning(force = false) {
   const parts: string[] = [];
   parts.push(done.size ? `Přes noc doběhlo: ${[...done].join(", ")}.` : "Přes noc se nic nedělo.");
   if (failed.size) parts.push(`Selhalo: ${[...failed].join(", ")}.`);
+  const kept = await invoke<string | null>("awake_night", { sinceMs: since.getTime() }).catch(() => null);
+  if (kept) parts.push(`${kept}.`);
   if (waiting.length) parts.push(`Čeká na tebe: ${waiting.map((i) => i.name).join(", ")}.`);
   parts.push(events.length ? `Dnes: ${events.slice(0, 3).map((e) => `${e.allDay ? "" : hm(e.startMs) + " "}${e.title}`).join(", ")}.` : "V kalendáři dnes nic.");
   // All three subscriptions, and what runs on its own today.
