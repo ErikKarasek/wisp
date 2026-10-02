@@ -256,11 +256,10 @@ pub fn decide(id: &str, answer: &str) -> bool {
 }
 
 pub fn start(app: &AppHandle) {
-    // The secret guards the permission answers, so without one the server
-    // doesn't listen at all; Claude Code then asks in the terminal as usual.
+    // The secret guards the permission answers. Without one the server still runs for /notify and /focus, which
+    // local scripts use without a key, and every /cc/ request gets 403, so Claude Code asks in the terminal.
     if key().is_none() {
-        eprintln!("Claude Code hooks: without a secret the server doesn't start");
-        return;
+        eprintln!("Claude Code hooks: no secret, so /cc/ stays closed");
     }
     let server = match tiny_http::Server::http(("127.0.0.1", PORT)) {
         Ok(s) => s,
