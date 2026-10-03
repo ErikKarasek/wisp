@@ -66,6 +66,35 @@ unsafe fn number(obj: *mut AnyObject) -> f64 {
     }
 }
 
+/// The frontmost ordinary window of another app: its app and title (what was in front when a
+/// part of the screen was marked, see snip.rs).
+pub fn front_window() -> Option<(String, String)> {
+    let me = std::process::id() as f64;
+    objc2::rc::autoreleasepool(|_| unsafe {
+        let list = CGWindowListCopyWindowInfo((1 << 0) | (1 << 4), 0);
+        if list.is_null() {
+            return None;
+        }
+        let arr = list as *mut AnyObject;
+        let count: usize = msg_send![arr, count];
+        let mut found = None;
+        for i in 0..count {
+            let w: *mut AnyObject = msg_send![arr, objectAtIndex: i];
+            if number(get(w, "kCGWindowLayer")) != 0.0 || number(get(w, "kCGWindowOwnerPID")) == me {
+                continue;
+            }
+            let b = get(w, "kCGWindowBounds");
+            if number(get(b, "Width")) < 120.0 || number(get(b, "Height")) < 80.0 {
+                continue;
+            }
+            found = Some((text(get(w, "kCGWindowOwnerName")), text(get(w, "kCGWindowName"))));
+            break;
+        }
+        CFRelease(list);
+        found
+    })
+}
+
 /// The frontmost ordinary window of another app under a point: its number, app and title.
 fn window_at(p: (f64, f64)) -> Option<(u32, String, String)> {
     let me = std::process::id() as f64;

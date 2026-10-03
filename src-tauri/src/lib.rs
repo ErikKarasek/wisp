@@ -11,6 +11,7 @@ mod media;
 mod notch;
 mod paperclip;
 mod relay;
+mod snip;
 mod store;
 mod telegram;
 mod usage;
@@ -361,6 +362,41 @@ async fn ask_quick(question: String, context: String) -> Result<String, String> 
     blocking(move || ask::ask_quick(&question, &context)).await?
 }
 
+/// ⌃⌥E: the crosshair to mark an error, then the notch takes it from there (snip.rs).
+fn snip_start(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // What was in front: a hint for which project the error came from.
+        let (owner, title) = buddy::front_window().unwrap_or_default();
+        let Some(path) = snip::capture() else { return };
+        notch::peek(&app, 120_000);
+        let _ = tauri::Emitter::emit_to(&app, "notch", "snip", serde_json::json!({ "path": path.to_string_lossy(), "app": owner, "title": title }));
+    });
+}
+
+#[tauri::command]
+async fn snip_read(path: String, app: String, title: String) -> Result<snip::Reading, String> {
+    blocking(move || snip::read(&path, &app, &title)).await?
+}
+
+#[tauri::command]
+async fn snip_fix(app: AppHandle, project: String, text: String, cause: String, file: Option<String>) -> Result<snip::Fixed, String> {
+    let fixed = blocking(move || snip::fix(&project, &text, &cause, file.as_deref())).await?;
+    // It may have taken minutes: show the notch again with the result.
+    notch::peek(&app, 60_000);
+    fixed
+}
+
+#[tauri::command]
+async fn snip_undo(id: String) -> Result<(), String> {
+    blocking(move || snip::undo(&id)).await?
+}
+
+#[tauri::command]
+fn snip_keep(id: String) {
+    snip::keep(&id);
+}
+
 /// The Mac cleanup, only on Erik's button: ~/Developer/hlidaci/uklid.py --apply,
 /// which reports back through /notify when it's done.
 #[tauri::command]
@@ -536,12 +572,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             // ⌃⌥Space anywhere: the notch opens with a question box (Gemini answers).
+            // ⌃⌥E: mark an error on the screen, Gemini reads it, Claude fixes it.
             tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcuts(["ctrl+alt+space"])
+                .with_shortcuts(["ctrl+alt+space", "ctrl+alt+e"])
                 .expect("shortcut")
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        quick_ask(app);
+                        if shortcut.key == tauri_plugin_global_shortcut::Code::KeyE {
+                            snip_start(app);
+                        } else {
+                            quick_ask(app);
+                        }
                     }
                 })
                 .build(),
@@ -634,6 +675,10 @@ pub fn run() {
             ask_file,
             ask_report,
             ask_quick,
+            snip_read,
+            snip_fix,
+            snip_undo,
+            snip_keep,
             run_cleanup,
             relay_push,
             glow_set,

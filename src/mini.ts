@@ -738,6 +738,7 @@ export async function startNotch() {
   ) {
     fileAsk = { path, name };
     quickAsk = false;
+    snipOn = false;
     root.classList.add("asking");
     permShown = null;
     setMode(`file:${path}`);
@@ -784,6 +785,7 @@ export async function startNotch() {
   void listen<string>("quick-ask", (e) => {
     quickAsk = true;
     fileAsk = null;
+    snipOn = false;
     permShown = null;
     root.classList.add("asking");
     setMode("quick");
@@ -830,6 +832,100 @@ export async function startNotch() {
       if (ev.key === "Escape") closeQuick();
     });
     setTimeout(() => input.focus(), 60);
+  });
+
+  // ----- ⌃⌥E: an error marked on the screen. Gemini reads it, Claude fixes it on a button -----
+  type Reading = { error: boolean; summary: string; text: string; project: string | null; file: string | null; cause: string };
+  type Fixed = { id: string; summary: string; files: string[] };
+  let snipOn = false;
+  /** A fix waiting for Nechat or Vrátit; closing the card keeps it. */
+  let snipPending: string | null = null;
+  const closeSnip = () => {
+    if (snipPending) void invoke("snip_keep", { id: snipPending });
+    snipPending = null;
+    snipOn = false;
+    redraw();
+  };
+  const snipCard = (head: string, body: string) => {
+    snipOn = true;
+    fileAsk = null;
+    quickAsk = false;
+    permShown = null;
+    root.classList.add("asking");
+    setMode("snip");
+    steps.innerHTML = `<small class="who">${escHtml(head)}<button class="x" title="Zavřít (Esc)">✕</button></small>${body}`;
+    steps.querySelector(".x")!.addEventListener("click", closeSnip);
+  };
+  const clean = (t: string) => t.replace(/\*\*|__|`/g, "");
+  void listen<{ path: string; app: string; title: string }>("snip", async (e) => {
+    if (snipPending) void invoke("snip_keep", { id: snipPending });
+    snipPending = null;
+    snipCard("Výřez · Gemini", `<div class="step past wrap"><div class="run-bar"><i></i></div><small>Gemini čte, co jsi označil…</small></div>`);
+    let r: Reading;
+    try {
+      r = await invoke<Reading>("snip_read", e.payload);
+    } catch (err) {
+      snipCard("Výřez", `<div class="step past wrap">${escHtml(String(err))}</div>`);
+      return;
+    }
+    if (!snipOn) return;
+    wink();
+    if (!r.error) {
+      snipCard("Výřez · Gemini", `<div class="step past wrap">${escHtml(clean(r.summary))}</div>${r.cause ? `<div class="step past wrap"><small>${escHtml(clean(r.cause))}</small></div>` : ""}`);
+      return;
+    }
+    const where = r.project ? `${r.project}${r.file ? ` · ${r.file}` : ""}` : "projekt jsem nepoznal";
+    snipCard(
+      `Chyba · ${where}`,
+      `<div class="step past wrap">${escHtml(clean(r.summary))}</div>
+      <div class="step past wrap"><small>${escHtml(clean(r.cause))}</small></div>
+      <div class="perm">
+        <button data-a="copy">Kopírovat chybu</button>
+        ${r.project ? `<button data-a="fix" class="go">Opravit s Claudem</button>` : ""}
+      </div>`,
+    );
+    steps.querySelector<HTMLButtonElement>('[data-a="copy"]')!.addEventListener("click", async (ev) => {
+      await navigator.clipboard.writeText(r.text || r.summary).catch(() => {});
+      (ev.target as HTMLButtonElement).textContent = "Zkopírováno";
+    });
+    steps.querySelector<HTMLButtonElement>('[data-a="fix"]')?.addEventListener("click", () => void runFix(r));
+    void invoke("notch_peek", { millis: 60_000 });
+  });
+  async function runFix(r: Reading) {
+    const project = r.project!;
+    snipCard(`Claude · ${project}`, `<div class="step past wrap"><div class="run-bar"><i></i></div><small>Claude hledá příčinu a opravuje. Může to pár minut trvat, klidně dělej něco jiného.</small></div>`);
+    let f: Fixed;
+    try {
+      f = await invoke<Fixed>("snip_fix", { project, text: r.text || r.summary, cause: r.cause, file: r.file });
+    } catch (err) {
+      snipCard(`Claude · ${project}`, `<div class="step past wrap">${escHtml(String(err))}</div>`);
+      return;
+    }
+    wink();
+    snipPending = f.files.length ? f.id : null;
+    const list = f.files.slice(0, 5).map(escHtml).join(", ") + (f.files.length > 5 ? ` a ${f.files.length - 5} dalších` : "");
+    snipCard(
+      `Claude · ${project}`,
+      `<div class="step past wrap reply">${escHtml(clean(f.summary || "Hotovo."))}</div>
+      ${f.files.length ? `<div class="step past wrap"><small>Změněno: ${list}. Necommitnuto.</small></div>
+      <div class="perm"><button data-a="undo">Vrátit</button><button data-a="keep" class="go">Nechat</button></div>` : `<div class="step past wrap"><small>Nic se nezměnilo.</small></div>`}`,
+    );
+    steps.querySelector('[data-a="keep"]')?.addEventListener("click", closeSnip);
+    steps.querySelector<HTMLButtonElement>('[data-a="undo"]')?.addEventListener("click", async () => {
+      const id = snipPending;
+      snipPending = null;
+      if (!id) return;
+      try {
+        await invoke("snip_undo", { id });
+        snipCard(`Claude · ${project}`, `<div class="step past wrap">Vráceno, soubory jsou jako předtím.</div>`);
+      } catch (err) {
+        snipCard(`Claude · ${project}`, `<div class="step past wrap">${escHtml(String(err))}</div>`);
+      }
+      void invoke("notch_peek", { millis: 6000 });
+    });
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && snipOn) closeSnip();
   });
 
   // ----- tabs: the overview, a chat with the agents, a new task -----
@@ -1065,13 +1161,13 @@ export async function startNotch() {
     // Claude Code asking for permission comes first, then a dropped file.
     // An agent's question gets the whole card too, like a quick question.
     const agentAsks = !working && s.items.some((i) => i.ask);
-    root.classList.toggle("asking", perms.length > 0 || !!fileAsk || quickAsk || agentAsks);
+    root.classList.toggle("asking", perms.length > 0 || !!fileAsk || quickAsk || snipOn || agentAsks);
     if (perms.length) {
       renderPerm();
       return renderCrew(s, working);
     }
     permShown = null;
-    if (fileAsk || quickAsk) return renderCrew(s, working);
+    if (fileAsk || quickAsk || snipOn) return renderCrew(s, working);
     if (Date.now() < beatenUntil) return renderCrew(s, working);
     const failed = !working ? s.items.find((i) => i.state === "bad") : undefined;
     if (failed) {
