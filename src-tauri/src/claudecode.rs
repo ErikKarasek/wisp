@@ -184,6 +184,38 @@ fn event(v: &Value) -> Option<CcEvent> {
     Some(CcEvent { session, project: project(v), kind, text })
 }
 
+// ---------- Wisp Buddy ----------
+
+/// The last state the page sent to the notch ("dispecink-state"), for Wisp Buddy to read.
+static STATE: Mutex<Option<Value>> = Mutex::new(None);
+
+pub fn remember_state(json: &str) {
+    if let (Ok(v), Ok(mut s)) = (serde_json::from_str::<Value>(json), STATE.lock()) {
+        *s = Some(v);
+    }
+}
+
+/// What the buddy needs, and no more: who works, who failed or waits, and Claude's limits.
+/// No agent conversations, no tokens.
+fn buddy_summary() -> Value {
+    let Some(s) = STATE.lock().ok().and_then(|s| s.clone()) else { return json!({ "ready": false }) };
+    let item = |i: &Value| json!({ "id": i["id"], "name": i["name"], "state": i["state"], "doing": i["doing"], "character": i["character"] });
+    let items: Vec<Value> = s["items"].as_array().map(|a| a.iter().map(item).collect()).unwrap_or_default();
+    let live: Vec<Value> = s["live"]
+        .as_array()
+        .map(|a| a.iter().map(|l| json!({ "name": l["name"], "lines": l["lines"], "character": l["character"] })).collect())
+        .unwrap_or_default();
+    json!({
+        "ready": true,
+        "at": s["at"],
+        "counts": s["counts"],
+        "items": items,
+        "live": live,
+        "claude": { "session": s["usage"]["session"]["percent"], "week": s["usage"]["week"]["percent"] },
+        "focus": s["focus"],
+    })
+}
+
 fn respond(req: tiny_http::Request, body: String) {
     let header = tiny_http::Header::from_bytes("Content-Type", "application/json").unwrap();
     let _ = req.respond(tiny_http::Response::from_string(body).with_header(header));
@@ -316,10 +348,14 @@ fn handle(app: &AppHandle, mut req: tiny_http::Request) {
     }
     let (path, query) = req.url().split_once('?').unwrap_or((req.url(), ""));
     let path = path.to_string();
-    // Claude Code's hooks carry the secret; anything else gets nothing, before its body is even read.
-    if path.starts_with("/cc/") && !key().is_some_and(|k| query.split('&').any(|p| p == format!("k={k}"))) {
+    // Claude Code's hooks and Wisp Buddy carry the secret; anything else gets nothing, before
+    // its body is even read.
+    if (path.starts_with("/cc/") || path.starts_with("/buddy/")) && !key().is_some_and(|k| query.split('&').any(|p| p == format!("k={k}"))) {
         let _ = req.respond(tiny_http::Response::from_string("").with_status_code(403));
         return;
+    }
+    if path == "/buddy/state" {
+        return respond(req, buddy_summary().to_string());
     }
     if !matches!(path.as_str(), "/cc/event" | "/cc/permission" | "/notify" | "/focus/on" | "/focus/off") {
         let _ = req.respond(tiny_http::Response::from_string("").with_status_code(404));
