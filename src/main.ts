@@ -11,7 +11,7 @@ import { startRelay } from "./relay";
 const VIEWS = ["settings", "tasks", "reviews", "chat"];
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import { fullCharacter, loadConfig, NOTCH_WIDTH, saveConfig, type Config } from "./config";
+import { fullCharacter, loadConfig, newId, NOTCH_WIDTH, saveConfig, type Config } from "./config";
 import { EXPRESSIONS, type MascotCharacter } from "./mascot/mascot";
 import { mascotSvg, mountMascot, type MountedMascot } from "./mascot/svg";
 import {
@@ -428,6 +428,35 @@ async function save() {
   await saveConfig(cfg);
   compose();
   render();
+}
+
+/** Claude Code at work: the character picked in the notch settings, or Claude's clay orange. */
+const claudeLook = (): Partial<MascotCharacter> =>
+  (cfg.notchPrefs.claude ? cfg.characters.find((c) => c.id === cfg.notchPrefs.claude)?.character : undefined) ?? { color: "#d97757", eyeColor: "#2a1610" };
+
+/**
+ * Who wears what, from the phone. `target` is an item id, "bot" or "claude". With a look, the
+ * saved character `charId` is edited in place (everyone wearing it changes, as in the studio),
+ * or a new one is saved when there is none; without a look, `charId` is just put on, and no
+ * `charId` gives the item its automatic face back.
+ */
+async function setLook(target: string, charId: string | null, name: string | null, look: Partial<MascotCharacter> | null) {
+  let id = charId && cfg.characters.some((c) => c.id === charId) ? charId : null;
+  if (look) {
+    const saved = id ? cfg.characters.find((c) => c.id === id) : undefined;
+    if (saved) {
+      saved.character = fullCharacter(look);
+      if (name) saved.name = name;
+    } else {
+      id = newId();
+      cfg.characters.push({ id, name: name || "Postavička", character: fullCharacter(look) });
+    }
+  }
+  if (target === "bot" || target === "claude") cfg.notchPrefs[target] = id;
+  else if (id) cfg.assignments[target] = id;
+  else delete cfg.assignments[target];
+  await save();
+  await emit(EV_NOTCH_PREFS);
 }
 
 // ---------- cards ----------
@@ -1523,7 +1552,11 @@ async function start() {
           job: i.id.startsWith("job:") ? i.id.slice(4) : null,
         })),
         bot: cfg.notchPrefs.bot ? cfg.characters.find((c) => c.id === cfg.notchPrefs.bot)?.character ?? null : null,
-        live: [...s.live.map((l) => ({ id: l.id, name: l.name, lines: l.lines, character: l.character })), ...ccLive().map((l) => ({ ...l, id: "cc", character: { color: "#d97757", eyeColor: "#2a1610" } }))],
+        live: [...s.live.map((l) => ({ id: l.id, name: l.name, lines: l.lines, character: l.character })), ...ccLive().map((l) => ({ ...l, id: "cc", character: claudeLook() }))],
+        // For the phone's character editor: the gallery and who wears which of it.
+        gallery: cfg.characters.map((c) => ({ id: c.id, name: c.name, character: c.character })),
+        looks: { bot: cfg.notchPrefs.bot, claude: cfg.notchPrefs.claude, items: cfg.assignments },
+        claude: claudeLook(),
         // Where things run, by name, so the phone can group them like the sidebar.
         groups: groups.map((g) => ({ id: g.id, name: groupLabel(g) })),
         history: history.slice(-30).reverse().map((h) => ({ id: h.id, name: h.name, state: h.state, at: h.at, text: h.text })),
@@ -1555,6 +1588,7 @@ async function start() {
       };
     },
     character: (id) => allItems().find((i) => i.id === id)?.character ?? {},
+    setLook,
     toast: (t) => toast(t),
   });
   // A permission prompt, or its answer, goes to the phone at once, not at the next minute.

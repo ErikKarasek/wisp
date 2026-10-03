@@ -165,7 +165,7 @@ const hm = (ms: number) => new Date(ms).toLocaleTimeString("cs-CZ", { hour: "num
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const midnight = (ms: number) => new Date(new Date(ms).toDateString()).getTime();
 const WHITE_BOT: Partial<MascotCharacter> = { color: "#e6e8ef", eyeColor: "#15161a" };
-/** Claude Code in a terminal has no character of its own: Claude's clay orange. */
+/** Claude Code at work, unless the notch settings give it a character: Claude's clay orange. */
 const CLAUDE_BOT: Partial<MascotCharacter> = { color: "#d97757", eyeColor: "#2a1610" };
 /** The crew shows only who is doing something or wants something, not everyone there is. */
 const ACTIVE: State[] = ["run", "you", "new", "bad", "done"];
@@ -230,6 +230,7 @@ export async function startNotch() {
     const saved = prefs.bot ? cfg.characters?.find((c) => c.id === prefs.bot) : null;
     return saved ? saved.character : WHITE_BOT;
   };
+  const claudeLook = () => (prefs.claude ? cfg.characters?.find((c) => c.id === prefs.claude)?.character : undefined) ?? CLAUDE_BOT;
   // The bot takes the look of whoever it is showing right now: the agent at work,
   // the one that failed or asks, Claude in a terminal; your own bot otherwise.
   let shownLook = "";
@@ -1013,7 +1014,7 @@ export async function startNotch() {
 
     const failedItem = !working ? s.items.find((i) => i.state === "bad") : undefined;
     const askingItem = !working ? s.items.find((i) => i.ask) : undefined;
-    const who = perms.length ? CLAUDE_BOT : working ? (working.id.startsWith("cc:") ? CLAUDE_BOT : working.character) : failedItem?.character ?? askingItem?.character;
+    const who = perms.length ? claudeLook() : working ? (working.id.startsWith("cc:") ? claudeLook() : working.character) : failedItem?.character ?? askingItem?.character;
     showLook(who && Object.keys(who).length ? who : botLook());
 
     // Claude Code asking for permission comes first, then a dropped file.

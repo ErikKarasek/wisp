@@ -65,6 +65,10 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
         <option value="">Bílá (výchozí)</option>
         ${ctx.cfg.characters.map((c) => `<option value="${esc(c.id)}" ${ctx.cfg.notchPrefs.bot === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
       </select></div>
+      <div class="prow"><span>Claude Code</span><select data-np="claude">
+        <option value="">Oranžová Claude (výchozí)</option>
+        ${ctx.cfg.characters.map((c) => `<option value="${esc(c.id)}" ${ctx.cfg.notchPrefs.claude === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+      </select></div>
       <div class="prow"><span>Šířka po rozbalení</span><div class="seg">${(["s", "m", "l"] as const)
         .map((w) => `<button data-width="${w}" class="${ctx.cfg.notchPrefs.width === w ? "on" : ""}">${{ s: "Úzká", m: "Střední", l: "Široká" }[w]}</button>`)
         .join("")}</div></div>
