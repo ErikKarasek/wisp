@@ -39,10 +39,17 @@ extension PhoneState {
 struct LooksView: View {
     @EnvironmentObject var store: Store
     @State private var open: LookTarget?
+    /// This phone's own switch (the Mac has its own in Settings); Mascot.swift reads it every frame.
+    @AppStorage(MascotMotion.key) private var motion = true
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Toggle("Postavičky se hýbou", isOn: $motion)
+                } footer: {
+                    Text("Sluníčku se točí kolečka, kočka cuká ušima, chobotnička vlní chapadly. Mrkání a dýchání zůstává.")
+                }
                 if let s = store.state {
                     Section("V notchi") {
                         row(LookTarget(id: "bot", title: "Bot", current: s.bot ?? .white))
