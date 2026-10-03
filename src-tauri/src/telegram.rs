@@ -40,6 +40,23 @@ pub async fn send(token: &str, chat: &str, text: &str) -> Result<(), String> {
     check(&v)
 }
 
+/// Like `send`, but without a sound on the phone (the night shift reports in the night).
+pub async fn send_quiet(token: &str, chat: &str, text: &str) -> Result<(), String> {
+    if !valid_chat(chat) {
+        return Err("Chat id musí být číslo.".into());
+    }
+    let v: Value = client()?
+        .post(format!("https://api.telegram.org/bot{token}/sendMessage"))
+        .json(&json!({ "chat_id": chat, "text": text, "disable_web_page_preview": true, "disable_notification": true }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    check(&v)
+}
+
 /// Chats that recently wrote to the bot, so the user can pick theirs.
 pub async fn recent_chats(token: &str) -> Result<Vec<Value>, String> {
     let v: Value = client()?

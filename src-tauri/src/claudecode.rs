@@ -195,6 +195,11 @@ pub fn remember_state(json: &str) {
     }
 }
 
+/// Claude's five-hour limit, used so far in percent (as the page last saw it).
+pub fn claude_session_percent() -> Option<f64> {
+    STATE.lock().ok()?.as_ref()?["usage"]["session"]["percent"].as_f64()
+}
+
 /// What the buddy needs, and no more: who works, who failed or waits, and Claude's limits.
 /// No agent conversations, no tokens.
 fn buddy_summary() -> Value {

@@ -241,7 +241,8 @@ fn fix_locked(dir: &Path, claude: &Path, project: &str, text: &str, cause: &str,
     ]
     .join(",");
     let mut child = Command::new(claude)
-        .args(["-p", &prompt, "--output-format", "json", "--permission-mode", "acceptEdits", "--allowedTools", &tools])
+        // Without hooks: Wisp's would ask in the notch about every command; the list above is the answer.
+        .args(["-p", &prompt, "--output-format", "json", "--permission-mode", "acceptEdits", "--allowedTools", &tools, "--settings", r#"{"disableAllHooks":true}"#])
         .current_dir(dir)
         .env("PATH", path_env())
         .stdin(Stdio::null())

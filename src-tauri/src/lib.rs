@@ -8,6 +8,7 @@ mod cloudflare;
 mod github;
 mod launchd;
 mod media;
+mod night;
 mod notch;
 mod paperclip;
 mod relay;
@@ -397,6 +398,11 @@ fn snip_keep(id: String) {
     snip::keep(&id);
 }
 
+#[tauri::command]
+fn night_command(app: AppHandle, arg: String) -> String {
+    night::command(&app, &arg)
+}
+
 /// The Mac cleanup, only on Erik's button: ~/Developer/hlidaci/uklid.py --apply,
 /// which reports back through /notify when it's done.
 #[tauri::command]
@@ -627,6 +633,7 @@ pub fn run() {
             relay::start(handle);
             awake::start(handle);
             botwatch::start(handle);
+            night::start(handle.clone());
             Ok(())
         })
         // Closing the window only hides it; the tray keeps watching.
@@ -679,6 +686,7 @@ pub fn run() {
             snip_fix,
             snip_undo,
             snip_keep,
+            night_command,
             run_cleanup,
             relay_push,
             glow_set,
