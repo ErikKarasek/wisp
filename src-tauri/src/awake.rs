@@ -406,6 +406,9 @@ fn claude_sessions() -> Vec<String> {
     out
 }
 
+/// The last answer of paperclip_runs(), refreshed every few seconds outside the lock.
+static PAPERCLIP_WORK: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 /// Paperclip agents with a run queued or in progress, asked here rather than left to the page.
 /// With the display off macOS throttles the hidden page's timers, and on 2026-10-03 the page
 /// saw Fixer's runs, queued by the nightly review's last step, only after Wisp had slept the
@@ -615,7 +618,8 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
     let temp = cpu_temp().map(|t| t.round() as u8);
     let (cpu, mut tools) = processes();
     tools.extend(claude_sessions());
-    tools.extend(paperclip_runs());
+    // Asked by its own thread (start): a slow Paperclip must not hold this lock up.
+    tools.extend(PAPERCLIP_WORK.lock().map(|w| w.clone()).unwrap_or_default());
     let idle = idle_secs();
     inner.tool_work = tools;
     let mut error: Option<String> = None;
@@ -805,6 +809,14 @@ fn with<T>(f: impl FnOnce(&mut Inner) -> T) -> Option<T> {
 }
 
 pub fn start(app: &AppHandle) {
+    // Paperclip's live runs, looked up away from the state lock: two curls can take seconds.
+    std::thread::spawn(|| loop {
+        let runs = paperclip_runs();
+        if let Ok(mut w) = PAPERCLIP_WORK.lock() {
+            *w = runs;
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    });
     let dir = app.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("/tmp"));
     let saved: Saved = std::fs::read_to_string(file(&dir)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     // Wisp died with the lid rule on: switch it off before anything else.
