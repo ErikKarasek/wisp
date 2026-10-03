@@ -30,6 +30,8 @@ const HELP = [
   "/agenti – kdo tu je a na čem běží",
   "/limity – Claude, ChatGPT, Gemini",
   "",
+  "/noc projekt: úkol – Claude to udělá, až budeš pryč (v noci nebo po 20 min), a pošle PR. /noc hned … začne hned, /noc ukáže frontu",
+  "",
   "/mac – baterie, teplota a jestli Mac drží vzhůru",
   "/vzhuru – držet Mac vzhůru (/vzhuru 2h na dvě hodiny, /vzhuru vyp)",
   "/viko – běžet i se zavřeným víkem (/viko vyp)",
@@ -77,6 +79,9 @@ export function startPhone(ctx: PhoneContext) {
       if (/^\/(start|pomoc|help)\b/i.test(text)) return send(HELP);
       if (/^\/stav\b/i.test(text)) return send(ctx.status().join("\n"));
       if (/^\/limity\b/i.test(text)) return send(ctx.limits().join("\n") || "Limity zatím nemám načtené.");
+      // The night shift: Claude works on a task while Erik is away (night.rs).
+      const noc = /^\/noc\b\s*([\s\S]*)$/i.exec(text);
+      if (noc) return send(await invoke<string>("night_command", { arg: noc[1] }));
 
       // The Mac itself: keep it awake, closed lid, remote, sleep.
       const cmd = /^\/(mac|vzhuru|viko|nadalku|spi)\b\s*(.*)$/is.exec(plain(text));
