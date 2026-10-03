@@ -42,6 +42,7 @@ enum Filter: String, CaseIterable, Identifiable {
 struct OverviewView: View {
     @EnvironmentObject var store: Store
     @State private var filter: Filter = .all
+    @State private var looks = false
 
     var body: some View {
         NavigationStack {
@@ -83,7 +84,13 @@ struct OverviewView: View {
             .background(Color.black)
             .refreshable { await store.refresh() }
             .navigationTitle("Wisp")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { HelpButton() } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { looks = true } label: { Image(systemName: "face.smiling") }.accessibilityLabel("Postavičky")
+                }
+                ToolbarItem(placement: .topBarTrailing) { HelpButton() }
+            }
+            .sheet(isPresented: $looks) { LooksView().environmentObject(store).presentationDetents([.large]) }
         }
     }
 
@@ -238,6 +245,7 @@ struct ItemSheet: View {
     @EnvironmentObject var store: Store
     let item: PhoneState.Item
     @State private var done: String?
+    @State private var editLook = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -265,10 +273,14 @@ struct ItemSheet: View {
                     else { act("Pozastavit", ["kind": "agent", "agentId": id, "action": "agentPause"]) }
                 }
             }
+            Button("Změnit postavičku") { editLook = true }.buttonStyle(.bordered)
             if let done { Text(done).font(.caption).foregroundStyle(.secondary) }
             Spacer()
         }
         .padding(20)
+        .sheet(isPresented: $editLook) {
+            LookEditor(target: LookTarget(id: item.id, title: item.name, current: item.character ?? MascotCharacter())).environmentObject(store)
+        }
     }
 
     private func act(_ title: String, _ cmd: [String: String]) -> some View {

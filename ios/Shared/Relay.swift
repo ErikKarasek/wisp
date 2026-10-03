@@ -21,6 +21,14 @@ struct PhoneState: Decodable {
     let groups: [Group]?
     let history: [Event]?
     let prs: [PR]?
+    /// The Mac's saved characters and who wears which, for the character editor.
+    let gallery: [Saved]?
+    let looks: Looks?
+    /// What Claude Code wears at work.
+    let claude: MascotCharacter?
+
+    struct Saved: Decodable, Identifiable { let id: String; let name: String; let character: MascotCharacter }
+    struct Looks: Decodable { let bot: String?; let claude: String?; let items: [String: String]? }
 
     struct Counts: Decodable { let attention: Int; let run: Int; let sleep: Int; let ok: Int; let off: Int }
     struct Item: Decodable, Identifiable {

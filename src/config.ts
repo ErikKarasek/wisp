@@ -18,6 +18,8 @@ export type NotchPrefs = {
   glow: boolean;
   /** A character from the gallery for the bot; null for the plain white one. */
   bot: string | null;
+  /** A character from the gallery for Claude Code at work; null for Claude's clay orange. */
+  claude: string | null;
   /** Dance while music plays. */
   dance: boolean;
   /** Open for a moment when something happens. */
@@ -39,6 +41,7 @@ export const defaultNotchPrefs = (): NotchPrefs => ({
   showLimits: true,
   glow: true,
   bot: null,
+  claude: null,
   dance: true,
   peek: true,
   follow: true,
