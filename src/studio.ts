@@ -19,6 +19,14 @@ const SHAPES: [MascotShape, string][] = [
   ["cat", "Kočka"],
   ["bear", "Méďa"],
   ["bunny", "Zajíc"],
+  ["sun", "Sluníčko"],
+  ["flower", "Kytička"],
+  ["planet", "Planetka"],
+  ["star", "Hvězdička"],
+  ["octopus", "Chobotnička"],
+  ["sprout", "Klíček"],
+  ["crown", "Princátko"],
+  ["flame", "Plamínek"],
 ];
 const BODY_COLORS = [
   "#6d7fe0", "#8b9cff", "#4fb3d9", "#5fcfa8", "#7fc97a", "#e8d25a",
@@ -82,6 +90,7 @@ export function openStudio(o: StudioOptions) {
           <div class="form">
             ${item ? `<label class="row">Jméno na kartě<input type="text" data-f="cardName" maxlength="40" placeholder="${esc(o.defaultName ?? item.name)}"></label>` : ""}
             <label class="row">Jméno postavičky<input type="text" data-f="name" maxlength="30"></label>
+            <div class="row wear"><span>V notchi</span><div class="seg"><button data-wear="bot" title="Bot v notchi nosí tuhle postavičku">Bot</button><button data-wear="claude" title="Claude Code ji nosí, když pracuje">Claude Code</button></div></div>
             <div class="row"><span>Tvar</span><div class="shapes"></div></div>
             <div class="row"><span>Barva</span><div class="swatches" data-f="color"></div></div>
             <div class="row"><span>Oči</span><div class="swatches" data-f="eyeColor"></div></div>
@@ -131,6 +140,15 @@ export function openStudio(o: StudioOptions) {
     source = next.kind === "new" ? "" : JSON.stringify(draft);
     syncForm();
     renderGallery();
+    syncWear();
+  }
+
+  /** Bot and Claude Code wear a saved character; a new or automatic one has to be saved first. */
+  function syncWear() {
+    q<HTMLElement>(".row.wear").hidden = sel.kind !== "saved";
+    root.querySelectorAll<HTMLButtonElement>("[data-wear]").forEach((b) => {
+      b.classList.toggle("on", sel.kind === "saved" && cfg.notchPrefs[b.dataset.wear as "bot" | "claude"] === sel.id);
+    });
   }
 
   function randomCharacter(): MascotCharacter {
@@ -259,6 +277,12 @@ export function openStudio(o: StudioOptions) {
       if (key === "new") return;
       return load(key === "auto" ? { kind: "auto" } : { kind: "saved", id: key });
     }
+    const wear = el.closest<HTMLElement>("[data-wear]")?.dataset.wear as "bot" | "claude" | undefined;
+    if (wear && sel.kind === "saved") {
+      cfg.notchPrefs[wear] = cfg.notchPrefs[wear] === sel.id ? null : sel.id;
+      await o.save(cfg);
+      return syncWear();
+    }
     const act = el.closest<HTMLElement>("[data-act]")?.dataset.act;
     if (act === "close") return close();
     if (act === "random") {
@@ -283,6 +307,8 @@ export function openStudio(o: StudioOptions) {
       }
       cfg.characters = cfg.characters.filter((c) => c.id !== id);
       for (const [k, v] of Object.entries(cfg.assignments)) if (v === id) delete cfg.assignments[k];
+      if (cfg.notchPrefs.bot === id) cfg.notchPrefs.bot = null;
+      if (cfg.notchPrefs.claude === id) cfg.notchPrefs.claude = null;
       await o.save(cfg);
       return load(item ? { kind: "auto" } : cfg.characters[0] ? { kind: "saved", id: cfg.characters[0].id } : { kind: "new" });
     }

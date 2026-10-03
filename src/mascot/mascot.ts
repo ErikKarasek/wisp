@@ -22,7 +22,10 @@ export type MascotPrimitive =
   | { kind: "path"; d: string; fill: string }
   | { kind: "stroke"; d: string; stroke: string; width: number };
 
-export type MascotShape = "round" | "capsule" | "lemon" | "cube" | "cloud" | "ghost" | "dome" | "onigiri" | "blob" | "cat" | "bear" | "bunny";
+export type MascotShape =
+  | "round" | "capsule" | "lemon" | "cube" | "cloud" | "ghost" | "dome" | "onigiri" | "blob" | "cat" | "bear" | "bunny"
+  // Made of more than one piece, some of them moving: dots round a sun, moons round a planet.
+  | "sun" | "flower" | "planet" | "star" | "octopus" | "sprout" | "crown" | "flame";
 
 export type MascotCharacter = {
   shape: MascotShape;
@@ -519,11 +522,166 @@ function cloudPuffs(cx: number, cy: number, rx: number, ry: number, fill: string
   );
 }
 
+/** How big the body is drawn: smaller where ears, petals, rays or a ring need the room. */
+function bodyScale(shape: MascotShape): number {
+  "worklet";
+  if (shape === "bunny") return 0.74;
+  if (shape === "sun" || shape === "flower") return 0.68;
+  if (shape === "planet") return 0.74;
+  if (shape === "cat" || shape === "bear") return 0.84;
+  if (shape === "sprout" || shape === "crown" || shape === "flame") return 0.82;
+  return 1;
+}
+
+/** Shapes that hang in the middle of the picture instead of standing on the ground. */
+function floats(shape: MascotShape): boolean {
+  "worklet";
+  return shape === "sun" || shape === "flower" || shape === "planet";
+}
+
+const GOLD = "#f5c84c";
+const LEAF = "#6cc070";
+
+const dot = (x: number, y: number, r: number, fill: string): MascotPrimitive => ({ kind: "ellipse", cx: r2(x), cy: r2(y), rx: r2(r), ry: r2(r), fill });
+
+/** A colour that stands out against the body: lighter on a dark one, darker on a light one. */
+function contrast(fill: string, amount: number): string {
+  "worklet";
+  return luminance(fill) > 0.45 ? mixHex(fill, "#000000", amount * 0.6) : mixHex(fill, "#ffffff", amount);
+}
+
+/** A planet's ring: a flat ellipse, tilted, as points for angles a0…a1 (back half is sin < 0). */
+function ringPoint(cx: number, cy: number, rx: number, ry: number, a: number): [number, number] {
+  "worklet";
+  const tilt = -0.28;
+  const x = Math.cos(a) * rx * 1.62;
+  const y = Math.sin(a) * ry * 0.36;
+  return [cx + x * Math.cos(tilt) - y * Math.sin(tilt), cy + x * Math.sin(tilt) + y * Math.cos(tilt)];
+}
+function ringArc(cx: number, cy: number, rx: number, ry: number, a0: number, a1: number): string {
+  "worklet";
+  const pts: string[] = [];
+  for (let i = 0; i <= 24; i += 1) {
+    const [x, y] = ringPoint(cx, cy, rx, ry, a0 + ((a1 - a0) * i) / 24);
+    pts.push(`${r2(x)} ${r2(y)}`);
+  }
+  return `M${pts.join(" L")}`;
+}
+
+/** What is drawn over the body but under the eyes: a ring's near half, moons passing in front, a crown. */
+function frontPrimitives(shape: MascotShape, cx: number, cy: number, rx: number, ry: number, fill: string, time: number): MascotPrimitive[] {
+  "worklet";
+  if (shape === "planet") {
+    const ring = contrast(fill, 0.5);
+    const out: MascotPrimitive[] = [{ kind: "stroke", d: ringArc(cx, cy, rx, ry, 0, Math.PI), stroke: ring, width: 3.4 }];
+    for (const m of moons(time)) if (Math.sin(m) >= 0) out.push(dot(...ringPoint(cx, cy, rx, ry, m), 4.4, ring));
+    return out;
+  }
+  if (shape === "crown") {
+    // Three points with a ball on each, sitting on top of the head.
+    const base = cy - ry * 0.72;
+    const w = rx * 0.62;
+    const h = ry * 0.55;
+    const xs = [-1, -0.5, 0, 0.5, 1].map((t) => cx + t * w);
+    const d =
+      `M${r2(xs[0])} ${r2(base)} L${r2(xs[0])} ${r2(base - h)} L${r2(xs[1])} ${r2(base - h * 0.45)} L${r2(xs[2])} ${r2(base - h * 1.15)} ` +
+      `L${r2(xs[3])} ${r2(base - h * 0.45)} L${r2(xs[4])} ${r2(base - h)} L${r2(xs[4])} ${r2(base)} Q${r2(cx)} ${r2(base + ry * 0.12)} ${r2(xs[0])} ${r2(base)} Z`;
+    return [{ kind: "path", d, fill: GOLD }, dot(xs[0], base - h, 2.4, GOLD), dot(xs[2], base - h * 1.15, 2.6, GOLD), dot(xs[4], base - h, 2.4, GOLD)];
+  }
+  return [];
+}
+
+/** Where a planet's two moons are on the ring, going round slowly. */
+function moons(time: number): number[] {
+  "worklet";
+  const a = time * 0.55;
+  return [a, a + Math.PI * 0.9];
+}
+
 /** The body as one or more shapes of its colour: puffs for a cloud, ears for the animals. */
-function bodyPrimitives(shape: MascotShape, cx: number, cy: number, rx: number, ry: number, fill: string): MascotPrimitive[] {
+function bodyPrimitives(shape: MascotShape, cx: number, cy: number, rx: number, ry: number, fill: string, time = 0): MascotPrimitive[] {
   "worklet";
   if (shape === "cloud") return cloudPuffs(cx, cy, rx, ry, fill);
   const round: MascotPrimitive = { kind: "path", d: bodyPath("round", cx, cy, rx, ry), fill };
+  if (shape === "sun") {
+    // Eight dots around it, turning slowly.
+    const turn = time * 0.25;
+    const out: MascotPrimitive[] = [];
+    for (let i = 0; i < 8; i += 1) {
+      const a = turn + (i * Math.PI) / 4;
+      out.push(dot(cx + Math.cos(a) * rx * 1.42, cy + Math.sin(a) * ry * 1.42, Math.min(rx, ry) * 0.17, fill));
+    }
+    return [...out, round];
+  }
+  if (shape === "flower") {
+    // Six petals of a lighter shade behind a round middle, swaying a little.
+    const petal = contrast(fill, 0.45);
+    const sway = Math.sin(time * 0.8) * 0.12;
+    const out: MascotPrimitive[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      const a = sway + (i * Math.PI) / 3 - Math.PI / 2;
+      out.push(dot(cx + Math.cos(a) * rx * 0.98, cy + Math.sin(a) * ry * 0.98, Math.min(rx, ry) * 0.52, petal));
+    }
+    return [...out, round];
+  }
+  if (shape === "planet") {
+    const ring = contrast(fill, 0.5);
+    const out: MascotPrimitive[] = [{ kind: "stroke", d: ringArc(cx, cy, rx, ry, Math.PI, Math.PI * 2), stroke: ring, width: 3.4 }];
+    for (const m of moons(time)) if (Math.sin(m) < 0) out.push(dot(...ringPoint(cx, cy, rx, ry, m), 4.4, ring));
+    return [...out, round];
+  }
+  if (shape === "star") {
+    // Five soft points, one straight up.
+    return [{ kind: "path", d: polar(cx, cy, rx * 1.05, ry * 1.05, (a) => 0.8 + 0.3 * Math.pow((1 + Math.cos(5 * (a + Math.PI / 2))) / 2, 1.6)), fill }];
+  }
+  if (shape === "octopus") {
+    // A dome with five legs along the bottom that keep wiggling.
+    const pts: string[] = [];
+    const top = cy - ry * 0.12;
+    for (let i = 0; i <= 32; i += 1) {
+      const a = Math.PI + (i / 32) * Math.PI;
+      pts.push(`${r2(cx + rx * Math.cos(a))} ${r2(top + ry * 0.92 * Math.sin(a))}`);
+    }
+    const hem = cy + ry * 0.55;
+    for (let j = 0; j <= 60; j += 1) {
+      const u = j / 60;
+      const lobe = Math.pow(Math.abs(Math.sin(u * 5 * Math.PI)), 0.55);
+      const wiggle = Math.sin(time * 3 + u * 9) * ry * 0.05;
+      pts.push(`${r2(cx + rx - 2 * rx * u + wiggle * 0.6)} ${r2(hem + ry * 0.42 * lobe + wiggle)}`);
+    }
+    return [{ kind: "path", d: `M${pts.join(" L")} Z`, fill }];
+  }
+  if (shape === "sprout") {
+    // A stem with two leaves out of the top of the head, swaying.
+    const sway = Math.sin(time * 1.4) * 0.18;
+    const bx = cx;
+    const by = cy - ry * 0.9;
+    const tx = bx + Math.sin(sway) * ry * 0.42;
+    const ty = by - Math.cos(sway) * ry * 0.42;
+    const leaf = (side: number): MascotPrimitive => {
+      const ex = tx + side * rx * 0.42;
+      const ey = ty - ry * 0.12 + side * sway * 4;
+      return {
+        kind: "path",
+        d: `M${r2(tx)} ${r2(ty)} Q${r2((tx + ex) / 2)} ${r2(ty - ry * 0.3)} ${r2(ex)} ${r2(ey)} Q${r2((tx + ex) / 2)} ${r2(ty + ry * 0.12)} ${r2(tx)} ${r2(ty)} Z`,
+        fill: LEAF,
+      };
+    };
+    return [{ kind: "stroke", d: `M${r2(bx)} ${r2(cy - ry * 0.6)} L${r2(tx)} ${r2(ty)}`, stroke: LEAF, width: 2.6 }, leaf(-1), leaf(1), round];
+  }
+  if (shape === "flame") {
+    // A drop pointing up whose tip flickers and sways.
+    const sway = Math.sin(time * 2.3) * 0.5 + Math.sin(time * 5.1) * 0.15;
+    const pts: string[] = [];
+    for (let i = 0; i < 72; i += 1) {
+      const a = (i / 72) * Math.PI * 2;
+      const up = Math.max(0, -Math.sin(a));
+      const x = cx + rx * Math.cos(a) * (1 - 0.3 * up) + sway * rx * 0.28 * Math.pow(up, 3);
+      const y = cy + ry * Math.sin(a) * (1 + 0.6 * up * up);
+      pts.push(`${r2(x)} ${r2(y)}`);
+    }
+    return [{ kind: "path", d: `M${pts.join(" L")} Z`, fill }];
+  }
   if (shape === "cat") {
     const ear = (side: number) =>
       `M${r2(cx + side * rx * 0.86)} ${r2(cy - ry * 0.32)} L${r2(cx + side * rx * 0.7)} ${r2(cy - ry * 1.28)} ` +
@@ -563,12 +721,12 @@ export function mascotFrame(character: Partial<MascotCharacter>, pose: MascotPos
   const groundY = 92;
 
   // Animals leave headroom for their ears.
-  const baseR = 38 * (ch.shape === "bunny" ? 0.74 : ch.shape === "cat" || ch.shape === "bear" ? 0.84 : 1);
+  const baseR = 38 * bodyScale(ch.shape);
   const cloud = ch.shape === "cloud";
   const rx = baseR * Math.sqrt(ch.aspect) * (1 + pose.squash * 0.5) * (cloud ? 0.92 : 1);
   const ry = (baseR / Math.sqrt(ch.aspect)) * (1 - pose.squash) * (cloud ? 0.72 : 1);
   const cx = 50;
-  const cy = groundY - ry - pose.lift - (cloud ? 8 : 0);
+  const cy = floats(ch.shape) ? 51 - pose.lift * 0.6 : groundY - ry - pose.lift - (cloud ? 8 : 0);
 
   const tinted = ex.tint && ex.tintAmount > 0;
   const color = tinted ? mixHex(ch.color, ex.tint, ex.tintAmount) : ch.color;
@@ -584,8 +742,9 @@ export function mascotFrame(character: Partial<MascotCharacter>, pose: MascotPos
     ? mixHex(baseEye, mixHex(ex.tint, "#000000", 0.6), ex.tintAmount)
     : baseEye;
 
-  const primitives: MascotPrimitive[] = bodyPrimitives(ch.shape, cx, cy, rx, ry, color);
+  const primitives: MascotPrimitive[] = bodyPrimitives(ch.shape, cx, cy, rx, ry, color, pose.time);
   const bodyCount = primitives.length;
+  primitives.push(...frontPrimitives(ch.shape, cx, cy, rx, ry, color, pose.time));
 
   // ── The head's rotation ─────────────────────────────────────────────────
   const yaw = clamp(ex.lookX + pose.lookX, -1, 1) * 0.62;

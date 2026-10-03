@@ -135,16 +135,31 @@ private func luminance(_ hex: String) -> Double {
 
 private func widthAt(_ shape: String, _ v: Double) -> Double { shape == "lemon" ? 0.8 + 0.2 * v : 1 }
 
+/// How big the body is drawn: smaller where ears, petals, rays or a ring need the room (mascot.ts bodyScale).
+private func bodyScale(_ shape: String) -> Double {
+    switch shape {
+    case "bunny": return 0.74
+    case "sun", "flower": return 0.68
+    case "planet": return 0.74
+    case "cat", "bear": return 0.84
+    case "sprout", "crown", "flame": return 0.82
+    default: return 1
+    }
+}
+/// Shapes that hang in the middle instead of standing on the ground.
+private func floats(_ shape: String) -> Bool { ["sun", "flower", "planet"].contains(shape) }
+private let GOLD = "#f5c84c", LEAF = "#6cc070"
+
 func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: MascotCharacter, expression ex: MascotExpression, pose: MascotPose) {
     let scale = min(size.width, size.height) / 100
     let ox = (size.width - 100 * scale) / 2, oy = (size.height - 100 * scale) / 2
     func P(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: ox + x * scale, y: oy + y * scale) }
 
     // Animals leave headroom for their ears.
-    let groundY = 92.0, baseR = 38.0 * (ch.shape == "bunny" ? 0.74 : ch.shape == "cat" || ch.shape == "bear" ? 0.84 : 1), cloud = ch.shape == "cloud"
+    let groundY = 92.0, baseR = 38.0 * bodyScale(ch.shape), cloud = ch.shape == "cloud"
     let rx = baseR * sqrt(ch.aspect) * (1 + pose.squash * 0.5) * (cloud ? 0.92 : 1)
     let ry = (baseR / sqrt(ch.aspect)) * (1 - pose.squash) * (cloud ? 0.72 : 1)
-    let cx = 50.0, cy = groundY - ry - pose.lift - (cloud ? 8 : 0)
+    let cx = 50.0, cy = floats(ch.shape) ? 51 - pose.lift * 0.6 : groundY - ry - pose.lift - (cloud ? 8 : 0)
 
     let tinted = !ex.tint.isEmpty && ex.tintAmount > 0
     let body = tinted ? mixHex(ch.color, ex.tint, ex.tintAmount) : rgb(ch.color)
@@ -185,8 +200,106 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
         path.closeSubpath()
         return path
     }
+    func dot(_ x: Double, _ y: Double, _ r: Double) -> Path { ellipse(x, y, r, r) }
+    /// A colour that stands out against the body: lighter on a dark one, darker on a light one.
+    func contrast(_ amount: Double) -> (Double, Double, Double) {
+        let h = hexString(body)
+        return luminance(h) > 0.45 ? mixHex(h, "#000000", amount * 0.6) : mixHex(h, "#ffffff", amount)
+    }
+    func ringPoint(_ a: Double) -> (Double, Double) {
+        let tilt = -0.28, x = cos(a) * rx * 1.62, y = sin(a) * ry * 0.36
+        return (cx + x * cos(tilt) - y * sin(tilt), cy + x * sin(tilt) + y * cos(tilt))
+    }
+    func ringArc(_ a0: Double, _ a1: Double) -> Path {
+        var path = Path()
+        for i in 0...24 {
+            let p = ringPoint(a0 + (a1 - a0) * Double(i) / 24)
+            if i == 0 { path.move(to: P(p.0, p.1)) } else { path.addLine(to: P(p.0, p.1)) }
+        }
+        return path
+    }
+    let moons = [pose.time * 0.55, pose.time * 0.55 + .pi * 0.9]
+
+    /// Pieces in their own colour: behind the body (petals, a ring's far half, leaves) or over it (a crown).
+    enum Piece { case fill(Path, (Double, Double, Double)), stroke(Path, (Double, Double, Double), Double) }
+    var behind: [Piece] = [], front: [Piece] = []
     var parts: [Path] = []
     switch ch.shape {
+    case "sun":
+        for i in 0..<8 {
+            let a = pose.time * 0.25 + Double(i) * .pi / 4
+            parts.append(dot(cx + cos(a) * rx * 1.42, cy + sin(a) * ry * 1.42, min(rx, ry) * 0.17))
+        }
+        parts.append(superellipse(2))
+    case "flower":
+        let petal = contrast(0.45), sway = sin(pose.time * 0.8) * 0.12
+        for i in 0..<6 {
+            let a = sway + Double(i) * .pi / 3 - .pi / 2
+            behind.append(.fill(dot(cx + cos(a) * rx * 0.98, cy + sin(a) * ry * 0.98, min(rx, ry) * 0.52), petal))
+        }
+        parts.append(superellipse(2))
+    case "planet":
+        let ring = contrast(0.5)
+        behind.append(.stroke(ringArc(.pi, .pi * 2), ring, 3.4))
+        front.append(.stroke(ringArc(0, .pi), ring, 3.4))
+        for m in moons {
+            let p = ringPoint(m)
+            if sin(m) < 0 { behind.append(.fill(dot(p.0, p.1, 4.4), ring)) } else { front.append(.fill(dot(p.0, p.1, 4.4), ring)) }
+        }
+        parts.append(superellipse(2))
+    case "star":
+        parts.append(polar(cx, cy, rx * 1.05, ry * 1.05) { a in 0.8 + 0.3 * pow((1 + cos(5 * (a + .pi / 2))) / 2, 1.6) })
+    case "octopus":
+        var path = Path()
+        let top = cy - ry * 0.12
+        for i in 0...32 {
+            let a = Double.pi + Double(i) / 32 * .pi
+            let p = P(cx + rx * cos(a), top + ry * 0.92 * sin(a))
+            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        }
+        let hem = cy + ry * 0.55
+        for j in 0...60 {
+            let u = Double(j) / 60
+            let lobe = pow(abs(sin(u * 5 * .pi)), 0.55), wiggle = sin(pose.time * 3 + u * 9) * ry * 0.05
+            path.addLine(to: P(cx + rx - 2 * rx * u + wiggle * 0.6, hem + ry * 0.42 * lobe + wiggle))
+        }
+        path.closeSubpath()
+        parts.append(path)
+    case "sprout":
+        let leaf = rgb(LEAF), sway = sin(pose.time * 1.4) * 0.18
+        let tx = cx + sin(sway) * ry * 0.42, ty = cy - ry * 0.9 - cos(sway) * ry * 0.42
+        var stem = Path(); stem.move(to: P(cx, cy - ry * 0.6)); stem.addLine(to: P(tx, ty))
+        behind.append(.stroke(stem, leaf, 2.6))
+        for side in [-1.0, 1.0] {
+            let ex2 = tx + side * rx * 0.42, ey = ty - ry * 0.12 + side * sway * 4
+            var l = Path()
+            l.move(to: P(tx, ty))
+            l.addQuadCurve(to: P(ex2, ey), control: P((tx + ex2) / 2, ty - ry * 0.3))
+            l.addQuadCurve(to: P(tx, ty), control: P((tx + ex2) / 2, ty + ry * 0.12))
+            l.closeSubpath()
+            behind.append(.fill(l, leaf))
+        }
+        parts.append(superellipse(2))
+    case "crown":
+        let gold = rgb(GOLD), base = cy - ry * 0.72, w = rx * 0.62, h = ry * 0.55
+        let xs = [-1.0, -0.5, 0, 0.5, 1].map { cx + $0 * w }
+        var c = Path()
+        c.move(to: P(xs[0], base)); c.addLine(to: P(xs[0], base - h)); c.addLine(to: P(xs[1], base - h * 0.45))
+        c.addLine(to: P(xs[2], base - h * 1.15)); c.addLine(to: P(xs[3], base - h * 0.45)); c.addLine(to: P(xs[4], base - h))
+        c.addLine(to: P(xs[4], base)); c.addQuadCurve(to: P(xs[0], base), control: P(cx, base + ry * 0.12)); c.closeSubpath()
+        front.append(.fill(c, gold))
+        front.append(.fill(dot(xs[0], base - h, 2.4), gold)); front.append(.fill(dot(xs[2], base - h * 1.15, 2.6), gold)); front.append(.fill(dot(xs[4], base - h, 2.4), gold))
+        parts.append(superellipse(2))
+    case "flame":
+        let sway = sin(pose.time * 2.3) * 0.5 + sin(pose.time * 5.1) * 0.15
+        var path = Path()
+        for i in 0..<72 {
+            let a = Double(i) / 72 * .pi * 2, up = max(0, -sin(a))
+            let p = P(cx + rx * cos(a) * (1 - 0.3 * up) + sway * rx * 0.28 * pow(up, 3), cy + ry * sin(a) * (1 + 0.6 * up * up))
+            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        }
+        path.closeSubpath()
+        parts.append(path)
     case "cloud":
         for (x, y, r) in [(0.0, 0.18, 0.78), (-0.52, 0.28, 0.5), (0.52, 0.28, 0.5), (-0.3, -0.3, 0.52), (0.28, -0.36, 0.56), (0, 0.5, 0.5)] {
             parts.append(ellipse(cx + x * rx, cy + y * ry, r * rx, r * ry))
@@ -247,7 +360,17 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
     default:
         parts.append(superellipse(ch.shape == "cube" ? 5 : ch.shape == "capsule" ? 3 : 2))
     }
+    func draw(_ piece: Piece, into g: inout GraphicsContext) {
+        switch piece {
+        case let .fill(path, c): g.fill(path, with: .color(color(c)))
+        case let .stroke(path, c, w): g.stroke(path, with: .color(color(c)), style: StrokeStyle(lineWidth: w * scale, lineCap: .round, lineJoin: .round))
+        }
+    }
     var bodyPath = Path()
+    for piece in behind {
+        draw(piece, into: &g)
+        if case let .fill(path, _) = piece { bodyPath.addPath(path) }
+    }
     for part in parts {
         g.fill(part, with: .color(color(body)))
         bodyPath.addPath(part)
@@ -265,6 +388,7 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
             .init(color: .black.opacity(0.3), location: 1),
         ]),
         center: P(cx - rx * 0.38, cy - ry * 0.5), startRadius: 0, endRadius: r))
+    for piece in front { draw(piece, into: &g) }
 
     // The head's rotation, and the eyes projected from the sphere.
     let yaw = min(1, max(-1, ex.lookX + pose.lookX)) * 0.62

@@ -15,6 +15,8 @@ private let SHAPES: [(String, String)] = [
     ("round", "Kulička"), ("capsule", "Kapsle"), ("lemon", "Citron"), ("cube", "Kostka"),
     ("cloud", "Mráček"), ("ghost", "Duch"), ("dome", "Kopeček"), ("onigiri", "Onigiri"),
     ("blob", "Želé"), ("cat", "Kočka"), ("bear", "Méďa"), ("bunny", "Zajíc"),
+    ("sun", "Sluníčko"), ("flower", "Kytička"), ("planet", "Planetka"), ("star", "Hvězdička"),
+    ("octopus", "Chobotnička"), ("sprout", "Klíček"), ("crown", "Princátko"), ("flame", "Plamínek"),
 ]
 private let BODY_COLORS = [
     "#6d7fe0", "#8b9cff", "#4fb3d9", "#5fcfa8", "#7fc97a", "#e8d25a", "#f2a65a", "#f08a7e",
