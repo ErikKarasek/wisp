@@ -772,7 +772,11 @@ function studio(item?: Item) {
     automatic: auto?.character,
     defaultName: auto?.name,
     wornBy,
-    save,
+    // The notch draws the bot and Claude Code from the config too.
+    save: async () => {
+      await save();
+      await emit(EV_NOTCH_PREFS);
+    },
   });
 }
 
