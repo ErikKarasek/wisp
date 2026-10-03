@@ -61,6 +61,8 @@ export type Config = {
   githubRepos: string[] | null;
   notifications: boolean;
   sounds: boolean;
+  /** Characters' shapes move on their own (dots turn round a sun, ears twitch); unset is on. */
+  shapeMotion?: boolean;
   /** Claude's and ChatGPT's limits as text next to the menu-bar icon. */
   trayLimits: boolean;
   /** Claude Code's hooks report to the notch; undefined until first set up. */
