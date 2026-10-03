@@ -927,6 +927,58 @@ export async function startNotch() {
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && snipOn) closeSnip();
   });
+  // ----- back at the Mac after a break: where Erik stopped (resume.rs) -----
+  type Resume = {
+    project: string | null;
+    title: string | null;
+    summary: string;
+    next: string;
+    branch: string | null;
+    dirty: number;
+    lastCommit: string | null;
+    agoMin: number;
+    night: { project: string; task: string; pr: string | null; ok: boolean }[];
+  };
+  void listen<Resume>("resume", (e) => {
+    if (snipOn || quickAsk || fileAsk) return;
+    const r = e.payload;
+    const meta = r.branch
+      ? `větev ${r.branch}${r.dirty ? ` · necommitnuto ${r.dirty}` : ""}${r.lastCommit ? ` · poslední commit „${r.lastCommit}“` : ""}`
+      : "";
+    const night = r.night
+      .map((n) => `<div class="step past wrap"><small>🌙 ${escHtml(n.project)} – ${escHtml(n.task)}${n.pr ? ` · <a href="${escHtml(n.pr)}" class="pr">PR</a>` : n.ok ? "" : " (nedopadlo)"}</small></div>`)
+      .join("");
+    snipCard(
+      `Vítej zpátky${r.project ? ` · ${r.project}` : ""}`,
+      `${r.summary ? `<div class="step past wrap">${escHtml(clean(r.summary))}</div>` : ""}
+      ${r.next ? `<div class="step past wrap"><small>Dál: ${escHtml(clean(r.next))}</small></div>` : ""}
+      ${meta ? `<div class="step past wrap"><small>${escHtml(meta)}</small></div>` : ""}
+      ${night}
+      <div class="perm">
+        ${r.project ? `<button data-a="code">Otevřít projekt</button>` : ""}
+        <button data-a="claude">Claude</button>
+        <button data-a="ok" class="go">Jasně</button>
+      </div>`,
+    );
+    wink();
+    const open = (how: string) => void invoke("resume_open", { project: r.project, how }).catch(() => {});
+    steps.querySelector('[data-a="code"]')?.addEventListener("click", () => {
+      open("code");
+      closeSnip();
+    });
+    steps.querySelector('[data-a="claude"]')!.addEventListener("click", () => {
+      open("claude");
+      closeSnip();
+    });
+    steps.querySelector('[data-a="ok"]')!.addEventListener("click", closeSnip);
+    steps.querySelectorAll<HTMLAnchorElement>("a.pr").forEach((a) =>
+      a.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        void invoke("plugin:opener|open_url", { url: a.href }).catch(() => {});
+      }),
+    );
+  });
+
 
   // ----- tabs: the overview, a chat with the agents, a new task -----
   let tab: "home" | "chat" | "new" = "home";
