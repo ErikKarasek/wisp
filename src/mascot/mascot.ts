@@ -432,26 +432,27 @@ function polar(cx: number, cy: number, rx: number, ry: number, r: (a: number) =>
   return `M${pts.join(" L")} Z`;
 }
 
-function bodyPath(shape: MascotShape, cx: number, cy: number, rx: number, ry: number): string {
+function bodyPath(shape: MascotShape, cx: number, cy: number, rx: number, ry: number, t = 0): string {
   "worklet";
   if (shape === "dome") {
-    // A mochi: a soft superellipse with its bottom pressed flat.
+    // A mochi: a soft superellipse with its bottom pressed flat, gently squishing.
     return polar(cx, cy - ry * 0.08, rx, ry * 1.06, (a) => {
       const c = Math.abs(Math.cos(a));
       const s = Math.abs(Math.sin(a));
-      return 1 / Math.pow(Math.pow(c, 2.6) + Math.pow(s, 2.6), 1 / 2.6);
+      return (1 / Math.pow(Math.pow(c, 2.6) + Math.pow(s, 2.6), 1 / 2.6)) * (1 + 0.025 * Math.sin(2 * a + t * 1.6));
     }, cy + ry * 0.86);
   }
   if (shape === "blob") {
-    // Jelly: a wobbly, uneven outline.
-    return polar(cx, cy, rx, ry, (a) => 1 + 0.07 * Math.sin(3 * a + 0.6) + 0.045 * Math.cos(5 * a));
+    // Jelly: a wobbly, uneven outline whose bumps keep flowing round.
+    return polar(cx, cy, rx, ry, (a) => 1 + 0.07 * Math.sin(3 * a + 0.6 + t * 0.9) + 0.045 * Math.cos(5 * a - t * 1.3));
   }
   if (shape === "onigiri") {
-    // A rounded triangle, point up.
+    // A rounded triangle, point up, its corners jiggling a little.
+    const j = (i: number) => Math.sin(t * 1.5 + i * 2.1) * 0.035;
     const v = [
-      [cx, cy - ry * 1.05],
-      [cx + rx * 1.08, cy + ry * 0.92],
-      [cx - rx * 1.08, cy + ry * 0.92],
+      [cx + j(0) * rx, cy - ry * (1.05 + j(1))],
+      [cx + rx * (1.08 + j(2)), cy + ry * 0.92],
+      [cx - rx * (1.08 + j(3)), cy + ry * 0.92],
     ];
     const lerp = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
     let d = "";
@@ -466,7 +467,7 @@ function bodyPath(shape: MascotShape, cx: number, cy: number, rx: number, ry: nu
     return `${d}Z`;
   }
   if (shape === "ghost") {
-    // A dome on top, straight sides, three soft scallops along the bottom.
+    // A dome on top, straight sides, three soft scallops along the bottom that ripple.
     const pts: string[] = [];
     const top = cy - ry * 0.05;
     for (let i = 0; i <= 32; i += 1) {
@@ -477,15 +478,16 @@ function bodyPath(shape: MascotShape, cx: number, cy: number, rx: number, ry: nu
     pts.push(`${r2(cx + rx)} ${r2(hem)}`);
     for (let k = 0; k < 3; k += 1) {
       for (let j = 1; j <= 8; j += 1) {
-        const t = j / 8;
-        const x = cx + rx - (2 * rx * (k + t)) / 3;
-        pts.push(`${r2(x)} ${r2(hem + Math.sin(t * Math.PI) * ry * 0.2)}`);
+        const u = j / 8;
+        const x = cx + rx - (2 * rx * (k + u)) / 3;
+        pts.push(`${r2(x)} ${r2(hem + Math.sin(u * Math.PI) * ry * 0.2 * (0.7 + 0.3 * Math.sin(t * 2.4 + k * 2.1)))}`);
       }
     }
     return `M${pts.join(" L")} Z`;
   }
-  // Superellipse exponent: higher is boxier.
+  // Superellipse exponent: higher is boxier. The outline wobbles like jelly, a cube less.
   const n = shape === "cube" ? 5 : shape === "capsule" ? 3 : 2;
+  const wobble = shape === "cube" ? 0.012 : 0.02;
   const steps = 64;
   const pts: string[] = [];
   for (let i = 0; i < steps; i += 1) {
@@ -494,13 +496,14 @@ function bodyPath(shape: MascotShape, cx: number, cy: number, rx: number, ry: nu
     const s = Math.sin(a);
     const ex = Math.sign(c) * Math.pow(Math.abs(c), 2 / n);
     const ey = Math.sign(s) * Math.pow(Math.abs(s), 2 / n);
-    pts.push(`${r2(cx + rx * ex * widthAt(shape, ey))} ${r2(cy + ry * ey)}`);
+    const w = 1 + wobble * Math.sin(3 * a + t * 1.7) * Math.sin(t * 0.9);
+    pts.push(`${r2(cx + rx * ex * widthAt(shape, ey) * w)} ${r2(cy + ry * ey * w)}`);
   }
   return `M${pts.join(" L")} Z`;
 }
 
-/** A cloud: overlapping puffs of the body colour around a solid middle. */
-function cloudPuffs(cx: number, cy: number, rx: number, ry: number, fill: string) {
+/** A cloud: overlapping puffs of the body colour around a solid middle, drifting a little. */
+function cloudPuffs(cx: number, cy: number, rx: number, ry: number, fill: string, t = 0) {
   "worklet";
   const puffs: Array<[number, number, number]> = [
     [0, 0.18, 0.78],
@@ -511,15 +514,38 @@ function cloudPuffs(cx: number, cy: number, rx: number, ry: number, fill: string
     [0, 0.5, 0.5],
   ];
   return puffs.map(
-    ([x, y, r]): MascotPrimitive => ({
+    ([x, y, r], i): MascotPrimitive => ({
       kind: "ellipse",
-      cx: r2(cx + x * rx),
-      cy: r2(cy + y * ry),
+      cx: r2(cx + x * rx + Math.sin(t * 0.7 + i * 1.3) * rx * 0.04),
+      cy: r2(cy + y * ry + Math.cos(t * 0.9 + i) * ry * 0.03),
       rx: r2(r * rx),
       ry: r2(r * ry),
       fill,
     }),
   );
+}
+
+/**
+ * Whether the shapes move on their own (a sun's dots turn, ears twitch, jelly wobbles). Off, they
+ * stand still in their resting form; breathing, blinking and the expressions stay either way.
+ * Per page, so each window that draws mascots sets it from the config.
+ */
+let shapeMotion = true;
+export function setShapeMotion(on: boolean) {
+  shapeMotion = on;
+}
+
+/** An oval as a path, turned by `angle` radians about its centre: a bunny's ear that sways. */
+function oval(cx: number, cy: number, rx: number, ry: number, angle: number): string {
+  "worklet";
+  const pts: string[] = [];
+  for (let i = 0; i < 36; i += 1) {
+    const a = (i / 36) * Math.PI * 2;
+    const x = Math.cos(a) * rx;
+    const y = Math.sin(a) * ry;
+    pts.push(`${r2(cx + x * Math.cos(angle) - y * Math.sin(angle))} ${r2(cy + x * Math.sin(angle) + y * Math.cos(angle))}`);
+  }
+  return `M${pts.join(" L")} Z`;
 }
 
 /** How big the body is drawn: smaller where ears, petals, rays or a ring need the room. */
@@ -601,8 +627,8 @@ function moons(time: number): number[] {
 /** The body as one or more shapes of its colour: puffs for a cloud, ears for the animals. */
 function bodyPrimitives(shape: MascotShape, cx: number, cy: number, rx: number, ry: number, fill: string, time = 0): MascotPrimitive[] {
   "worklet";
-  if (shape === "cloud") return cloudPuffs(cx, cy, rx, ry, fill);
-  const round: MascotPrimitive = { kind: "path", d: bodyPath("round", cx, cy, rx, ry), fill };
+  if (shape === "cloud") return cloudPuffs(cx, cy, rx, ry, fill, time);
+  const round: MascotPrimitive = { kind: "path", d: bodyPath("round", cx, cy, rx, ry, time), fill };
   if (shape === "sun") {
     // Eight dots around it, turning slowly.
     const turn = time * 0.25;
@@ -683,20 +709,47 @@ function bodyPrimitives(shape: MascotShape, cx: number, cy: number, rx: number, 
     return [{ kind: "path", d: `M${pts.join(" L")} Z`, fill }];
   }
   if (shape === "cat") {
-    const ear = (side: number) =>
-      `M${r2(cx + side * rx * 0.86)} ${r2(cy - ry * 0.32)} L${r2(cx + side * rx * 0.7)} ${r2(cy - ry * 1.28)} ` +
-      `Q${r2(cx + side * rx * 0.62)} ${r2(cy - ry * 1.36)} ${r2(cx + side * rx * 0.52)} ${r2(cy - ry * 1.26)} L${r2(cx + side * rx * 0.1)} ${r2(cy - ry * 0.8)} Z`;
+    // Now and then one ear twitches outwards, the other a moment later.
+    const twitch = (side: number) => Math.pow(Math.max(0, Math.sin(time * 0.9 + (side > 0 ? 0.5 : 0))), 14) * rx * 0.14;
+    const ear = (side: number) => {
+      const k = twitch(side);
+      return (
+        `M${r2(cx + side * rx * 0.86)} ${r2(cy - ry * 0.32)} L${r2(cx + side * (rx * 0.7 + k))} ${r2(cy - ry * 1.28 + k * 0.4)} ` +
+        `Q${r2(cx + side * (rx * 0.62 + k))} ${r2(cy - ry * 1.36 + k * 0.4)} ${r2(cx + side * (rx * 0.52 + k))} ${r2(cy - ry * 1.26 + k * 0.4)} L${r2(cx + side * rx * 0.1)} ${r2(cy - ry * 0.8)} Z`
+      );
+    };
     return [{ kind: "path", d: ear(-1), fill }, { kind: "path", d: ear(1), fill }, round];
   }
   if (shape === "bear") {
-    const ear = (side: number): MascotPrimitive => ({ kind: "ellipse", cx: r2(cx + side * rx * 0.66), cy: r2(cy - ry * 0.78), rx: r2(rx * 0.3), ry: r2(ry * 0.3), fill });
+    // Round ears that bob, each in its own time.
+    const ear = (side: number): MascotPrimitive => ({ kind: "ellipse", cx: r2(cx + side * rx * 0.66), cy: r2(cy - ry * 0.78 + Math.sin(time * 1.6 + side) * ry * 0.035), rx: r2(rx * 0.3), ry: r2(ry * 0.3), fill });
     return [ear(-1), ear(1), round];
   }
   if (shape === "bunny") {
-    const ear = (side: number): MascotPrimitive => ({ kind: "ellipse", cx: r2(cx + side * rx * 0.34), cy: r2(cy - ry * 1.12), rx: r2(rx * 0.17), ry: r2(ry * 0.52), fill });
+    // Long ears that sway, leaning out a little from their roots.
+    const ear = (side: number): MascotPrimitive => {
+      const angle = side * 0.1 + Math.sin(time * 1.3 + side * 0.8) * 0.12;
+      const root = [cx + side * rx * 0.34, cy - ry * 0.62];
+      const len = ry * 0.5;
+      return { kind: "path", d: oval(root[0] + Math.sin(angle) * len, root[1] - Math.cos(angle) * len, rx * 0.17, ry * 0.52, angle), fill };
+    };
     return [ear(-1), ear(1), round];
   }
-  return [{ kind: "path", d: bodyPath(shape, cx, cy, rx, ry), fill }];
+  if (shape === "lemon") {
+    // A leaf on top, swaying.
+    const sway = Math.sin(time * 1.2) * 0.16;
+    const tx = cx + rx * 0.06;
+    const ty = cy - ry * 0.98;
+    const ex = tx + Math.cos(-0.5 + sway) * rx * 0.5;
+    const ey = ty + Math.sin(-0.5 + sway) * rx * 0.5;
+    const leaf: MascotPrimitive = {
+      kind: "path",
+      d: `M${r2(tx)} ${r2(ty)} Q${r2((tx + ex) / 2 - 2)} ${r2((ty + ey) / 2 - 6)} ${r2(ex)} ${r2(ey)} Q${r2((tx + ex) / 2 + 2)} ${r2((ty + ey) / 2 + 3)} ${r2(tx)} ${r2(ty)} Z`,
+      fill: LEAF,
+    };
+    return [leaf, { kind: "path", d: bodyPath(shape, cx, cy, rx, ry, time), fill }];
+  }
+  return [{ kind: "path", d: bodyPath(shape, cx, cy, rx, ry, time), fill }];
 }
 
 export type MascotGeometry = {
@@ -742,9 +795,10 @@ export function mascotFrame(character: Partial<MascotCharacter>, pose: MascotPos
     ? mixHex(baseEye, mixHex(ex.tint, "#000000", 0.6), ex.tintAmount)
     : baseEye;
 
-  const primitives: MascotPrimitive[] = bodyPrimitives(ch.shape, cx, cy, rx, ry, color, pose.time);
+  const shapeTime = shapeMotion ? pose.time : 0;
+  const primitives: MascotPrimitive[] = bodyPrimitives(ch.shape, cx, cy, rx, ry, color, shapeTime);
   const bodyCount = primitives.length;
-  primitives.push(...frontPrimitives(ch.shape, cx, cy, rx, ry, color, pose.time));
+  primitives.push(...frontPrimitives(ch.shape, cx, cy, rx, ry, color, shapeTime));
 
   // ── The head's rotation ─────────────────────────────────────────────────
   const yaw = clamp(ex.lookX + pose.lookX, -1, 1) * 0.62;

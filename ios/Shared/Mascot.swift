@@ -150,6 +150,13 @@ private func bodyScale(_ shape: String) -> Double {
 private func floats(_ shape: String) -> Bool { ["sun", "flower", "planet"].contains(shape) }
 private let GOLD = "#f5c84c", LEAF = "#6cc070"
 
+/// Whether the shapes move on their own (dots turn round a sun, ears twitch, jelly wobbles); the
+/// phone's own switch, kept in UserDefaults. Breathing, blinking and expressions stay either way.
+enum MascotMotion {
+    static let key = "shapeMotion"
+    static var on: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+}
+
 func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: MascotCharacter, expression ex: MascotExpression, pose: MascotPose) {
     let scale = min(size.width, size.height) / 100
     let ox = (size.width - 100 * scale) / 2, oy = (size.height - 100 * scale) / 2
@@ -160,6 +167,8 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
     let rx = baseR * sqrt(ch.aspect) * (1 + pose.squash * 0.5) * (cloud ? 0.92 : 1)
     let ry = (baseR / sqrt(ch.aspect)) * (1 - pose.squash) * (cloud ? 0.72 : 1)
     let cx = 50.0, cy = floats(ch.shape) ? 51 - pose.lift * 0.6 : groundY - ry - pose.lift - (cloud ? 8 : 0)
+    // The shapes' own motion; breathing and the Zs keep pose.time.
+    let st = MascotMotion.on ? pose.time : 0
 
     let tinted = !ex.tint.isEmpty && ex.tintAmount > 0
     let body = tinted ? mixHex(ch.color, ex.tint, ex.tintAmount) : rgb(ch.color)
@@ -189,12 +198,15 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
         return path
     }
     func superellipse(_ n: Double) -> Path {
+        // The outline wobbles like jelly, a cube less (mascot.ts bodyPath).
+        let wobble = n >= 5 ? 0.012 : 0.02
         var path = Path()
         for i in 0..<64 {
             let a = Double(i) / 64 * .pi * 2
             let c = cos(a), s = sin(a)
             let ex2 = (c < 0 ? -1 : 1) * pow(abs(c), 2 / n), ey = (s < 0 ? -1 : 1) * pow(abs(s), 2 / n)
-            let p = P(cx + rx * ex2 * widthAt(ch.shape, ey), cy + ry * ey)
+            let w = 1 + wobble * sin(3 * a + st * 1.7) * sin(st * 0.9)
+            let p = P(cx + rx * ex2 * widthAt(ch.shape, ey) * w, cy + ry * ey * w)
             if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
         }
         path.closeSubpath()
@@ -218,7 +230,7 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
         }
         return path
     }
-    let moons = [pose.time * 0.55, pose.time * 0.55 + .pi * 0.9]
+    let moons = [st * 0.55, st * 0.55 + .pi * 0.9]
 
     /// Pieces in their own colour: behind the body (petals, a ring's far half, leaves) or over it (a crown).
     enum Piece { case fill(Path, (Double, Double, Double)), stroke(Path, (Double, Double, Double), Double) }
@@ -227,12 +239,12 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
     switch ch.shape {
     case "sun":
         for i in 0..<8 {
-            let a = pose.time * 0.25 + Double(i) * .pi / 4
+            let a = st * 0.25 + Double(i) * .pi / 4
             parts.append(dot(cx + cos(a) * rx * 1.42, cy + sin(a) * ry * 1.42, min(rx, ry) * 0.17))
         }
         parts.append(superellipse(2))
     case "flower":
-        let petal = contrast(0.45), sway = sin(pose.time * 0.8) * 0.12
+        let petal = contrast(0.45), sway = sin(st * 0.8) * 0.12
         for i in 0..<6 {
             let a = sway + Double(i) * .pi / 3 - .pi / 2
             behind.append(.fill(dot(cx + cos(a) * rx * 0.98, cy + sin(a) * ry * 0.98, min(rx, ry) * 0.52), petal))
@@ -260,13 +272,13 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
         let hem = cy + ry * 0.55
         for j in 0...60 {
             let u = Double(j) / 60
-            let lobe = pow(abs(sin(u * 5 * .pi)), 0.55), wiggle = sin(pose.time * 3 + u * 9) * ry * 0.05
+            let lobe = pow(abs(sin(u * 5 * .pi)), 0.55), wiggle = sin(st * 3 + u * 9) * ry * 0.05
             path.addLine(to: P(cx + rx - 2 * rx * u + wiggle * 0.6, hem + ry * 0.42 * lobe + wiggle))
         }
         path.closeSubpath()
         parts.append(path)
     case "sprout":
-        let leaf = rgb(LEAF), sway = sin(pose.time * 1.4) * 0.18
+        let leaf = rgb(LEAF), sway = sin(st * 1.4) * 0.18
         let tx = cx + sin(sway) * ry * 0.42, ty = cy - ry * 0.9 - cos(sway) * ry * 0.42
         var stem = Path(); stem.move(to: P(cx, cy - ry * 0.6)); stem.addLine(to: P(tx, ty))
         behind.append(.stroke(stem, leaf, 2.6))
@@ -291,7 +303,7 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
         front.append(.fill(dot(xs[0], base - h, 2.4), gold)); front.append(.fill(dot(xs[2], base - h * 1.15, 2.6), gold)); front.append(.fill(dot(xs[4], base - h, 2.4), gold))
         parts.append(superellipse(2))
     case "flame":
-        let sway = sin(pose.time * 2.3) * 0.5 + sin(pose.time * 5.1) * 0.15
+        let sway = sin(st * 2.3) * 0.5 + sin(st * 5.1) * 0.15
         var path = Path()
         for i in 0..<72 {
             let a = Double(i) / 72 * .pi * 2, up = max(0, -sin(a))
@@ -301,8 +313,9 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
         path.closeSubpath()
         parts.append(path)
     case "cloud":
-        for (x, y, r) in [(0.0, 0.18, 0.78), (-0.52, 0.28, 0.5), (0.52, 0.28, 0.5), (-0.3, -0.3, 0.52), (0.28, -0.36, 0.56), (0, 0.5, 0.5)] {
-            parts.append(ellipse(cx + x * rx, cy + y * ry, r * rx, r * ry))
+        for (i, (x, y, r)) in [(0.0, 0.18, 0.78), (-0.52, 0.28, 0.5), (0.52, 0.28, 0.5), (-0.3, -0.3, 0.52), (0.28, -0.36, 0.56), (0, 0.5, 0.5)].enumerated() {
+            let d = Double(i)
+            parts.append(ellipse(cx + x * rx + sin(st * 0.7 + d * 1.3) * rx * 0.04, cy + y * ry + cos(st * 0.9 + d) * ry * 0.03, r * rx, r * ry))
         }
     case "ghost":
         var path = Path()
@@ -317,19 +330,20 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
         for k in 0..<3 {
             for j in 1...8 {
                 let t = Double(j) / 8
-                path.addLine(to: P(cx + rx - 2 * rx * (Double(k) + t) / 3, hem + sin(t * .pi) * ry * 0.2))
+                path.addLine(to: P(cx + rx - 2 * rx * (Double(k) + t) / 3, hem + sin(t * .pi) * ry * 0.2 * (0.7 + 0.3 * sin(st * 2.4 + Double(k) * 2.1))))
             }
         }
         path.closeSubpath()
         parts.append(path)
     case "dome":
         parts.append(polar(cx, cy - ry * 0.08, rx, ry * 1.06, clampBottom: cy + ry * 0.86) { a in
-            1 / pow(pow(abs(cos(a)), 2.6) + pow(abs(sin(a)), 2.6), 1 / 2.6)
+            1 / pow(pow(abs(cos(a)), 2.6) + pow(abs(sin(a)), 2.6), 1 / 2.6) * (1 + 0.025 * sin(2 * a + st * 1.6))
         })
     case "blob":
-        parts.append(polar(cx, cy, rx, ry) { a in 1 + 0.07 * sin(3 * a + 0.6) + 0.045 * cos(5 * a) })
+        parts.append(polar(cx, cy, rx, ry) { a in 1 + 0.07 * sin(3 * a + 0.6 + st * 0.9) + 0.045 * cos(5 * a - st * 1.3) })
     case "onigiri":
-        let v = [(cx, cy - ry * 1.05), (cx + rx * 1.08, cy + ry * 0.92), (cx - rx * 1.08, cy + ry * 0.92)]
+        let j = { (i: Double) in sin(st * 1.5 + i * 2.1) * 0.035 }
+        let v = [(cx + j(0) * rx, cy - ry * (1.05 + j(1))), (cx + rx * (1.08 + j(2)), cy + ry * 0.92), (cx - rx * (1.08 + j(3)), cy + ry * 0.92)]
         func lerp(_ a: (Double, Double), _ b: (Double, Double), _ t: Double) -> (Double, Double) { (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t) }
         var path = Path()
         for i in 0..<3 {
@@ -342,20 +356,45 @@ func drawMascot(_ ctx: inout GraphicsContext, size: CGSize, character ch: Mascot
         parts.append(path)
     case "cat":
         for side in [-1.0, 1.0] {
+            // Now and then one ear twitches outwards, the other a moment later.
+            let k = pow(max(0, sin(st * 0.9 + (side > 0 ? 0.5 : 0))), 14) * rx * 0.14
             var ear = Path()
             ear.move(to: P(cx + side * rx * 0.86, cy - ry * 0.32))
-            ear.addLine(to: P(cx + side * rx * 0.7, cy - ry * 1.28))
-            ear.addQuadCurve(to: P(cx + side * rx * 0.52, cy - ry * 1.26), control: P(cx + side * rx * 0.62, cy - ry * 1.36))
+            ear.addLine(to: P(cx + side * (rx * 0.7 + k), cy - ry * 1.28 + k * 0.4))
+            ear.addQuadCurve(to: P(cx + side * (rx * 0.52 + k), cy - ry * 1.26 + k * 0.4), control: P(cx + side * (rx * 0.62 + k), cy - ry * 1.36 + k * 0.4))
             ear.addLine(to: P(cx + side * rx * 0.1, cy - ry * 0.8))
             ear.closeSubpath()
             parts.append(ear)
         }
         parts.append(superellipse(2))
     case "bear":
-        for side in [-1.0, 1.0] { parts.append(ellipse(cx + side * rx * 0.66, cy - ry * 0.78, rx * 0.3, ry * 0.3)) }
+        for side in [-1.0, 1.0] { parts.append(ellipse(cx + side * rx * 0.66, cy - ry * 0.78 + sin(st * 1.6 + side) * ry * 0.035, rx * 0.3, ry * 0.3)) }
         parts.append(superellipse(2))
     case "bunny":
-        for side in [-1.0, 1.0] { parts.append(ellipse(cx + side * rx * 0.34, cy - ry * 1.12, rx * 0.17, ry * 0.52)) }
+        for side in [-1.0, 1.0] {
+            // Long ears that sway, leaning out a little from their roots.
+            let angle = side * 0.1 + sin(st * 1.3 + side * 0.8) * 0.12, len = ry * 0.5
+            let ox2 = cx + side * rx * 0.34 + sin(angle) * len, oy2 = cy - ry * 0.62 - cos(angle) * len
+            var ear = Path()
+            for i in 0..<36 {
+                let a = Double(i) / 36 * .pi * 2, x = cos(a) * rx * 0.17, y = sin(a) * ry * 0.52
+                let p = P(ox2 + x * cos(angle) - y * sin(angle), oy2 + x * sin(angle) + y * cos(angle))
+                if i == 0 { ear.move(to: p) } else { ear.addLine(to: p) }
+            }
+            ear.closeSubpath()
+            parts.append(ear)
+        }
+        parts.append(superellipse(2))
+    case "lemon":
+        // A leaf on top, swaying.
+        let sway = sin(st * 1.2) * 0.16, tx = cx + rx * 0.06, ty = cy - ry * 0.98
+        let ex2 = tx + cos(-0.5 + sway) * rx * 0.5, ey = ty + sin(-0.5 + sway) * rx * 0.5
+        var l = Path()
+        l.move(to: P(tx, ty))
+        l.addQuadCurve(to: P(ex2, ey), control: P((tx + ex2) / 2 - 2, (ty + ey) / 2 - 6))
+        l.addQuadCurve(to: P(tx, ty), control: P((tx + ex2) / 2 + 2, (ty + ey) / 2 + 3))
+        l.closeSubpath()
+        behind.append(.fill(l, rgb(LEAF)))
         parts.append(superellipse(2))
     default:
         parts.append(superellipse(ch.shape == "cube" ? 5 : ch.shape == "capsule" ? 3 : 2))

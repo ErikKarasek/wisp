@@ -166,6 +166,8 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
         Upozornit, když něco selže nebo na mě čeká</label>
       <label class="toggle"><input type="checkbox" data-f="sounds" ${ctx.cfg.sounds ? "checked" : ""}>
         Zvuky, když něco doběhne, selže nebo šťouchnu do postavičky</label>
+      <label class="toggle"><input type="checkbox" data-f="shapeMotion" ${ctx.cfg.shapeMotion !== false ? "checked" : ""}>
+        Postavičky se hýbou (sluníčku se točí kolečka, kočka cuká ušima, chobotnička vlní chapadly)</label>
       <label class="toggle"><input type="checkbox" data-f="trayLimits" ${ctx.cfg.trayLimits ? "checked" : ""}>
         Limity Claude (C), ChatGPT (G) a Gemini (Ge) vedle ikonky v liště</label>
       <label class="toggle"><input type="checkbox" data-f="autostart" ${autostart ? "checked" : ""}>
@@ -380,6 +382,12 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
   el.querySelector<HTMLInputElement>('[data-f="sounds"]')!.addEventListener("change", async (e) => {
     ctx.cfg.sounds = (e.target as HTMLInputElement).checked;
     await ctx.save();
+  });
+
+  el.querySelector<HTMLInputElement>('[data-f="shapeMotion"]')!.addEventListener("change", async (e) => {
+    ctx.cfg.shapeMotion = (e.target as HTMLInputElement).checked;
+    // Saved and announced like the notch prefs, so every window (notch, panel, buddy) follows.
+    await ctx.notchChanged();
   });
 
   el.querySelector<HTMLInputElement>('[data-f="notify"]')!.addEventListener("change", async (e) => {
