@@ -380,7 +380,7 @@ fn processes() -> (u8, Vec<String>) {
 /// Claude Code sessions that wrote to their transcript in the last 90 s. Hooks don't reach
 /// every session (the desktop app's own), and a thinking Claude uses no CPU, but every
 /// session appends to ~/.claude/projects/<folder>/<session>.jsonl as it works.
-/// Paperclip's agents are left out: their runs already count.
+/// Paperclip's agents are left out: paperclip_runs() counts them.
 fn claude_sessions() -> Vec<String> {
     let home = std::env::var("HOME").unwrap_or_default();
     let Ok(dirs) = std::fs::read_dir(PathBuf::from(&home).join(".claude/projects")) else { return vec![] };
@@ -401,6 +401,37 @@ fn claude_sessions() -> Vec<String> {
             let label = label.strip_prefix("Developer-").unwrap_or(label);
             let label = if label.is_empty() || label == "-" { "domov" } else { label };
             out.push(format!("{label} · Claude Code"));
+        }
+    }
+    out
+}
+
+/// Paperclip agents with a run queued or in progress, asked here rather than left to the page.
+/// With the display off macOS throttles the hidden page's timers, and on 2026-10-03 the page
+/// saw Fixer's runs, queued by the nightly review's last step, only after Wisp had slept the
+/// Mac: every run died with the sleep and Paperclip retried each into the next one.
+fn paperclip_runs() -> Vec<String> {
+    let get = |path: &str| -> Option<Value> {
+        let out = run("/usr/bin/curl", &["-sf", "-m", "2", &format!("http://127.0.0.1:3100/api{path}")])?;
+        serde_json::from_str(&out).ok()
+    };
+    let items = |v: Value| match v {
+        Value::Array(a) => a,
+        Value::Object(mut o) => match o.remove("items") {
+            Some(Value::Array(a)) => a,
+            _ => vec![],
+        },
+        _ => vec![],
+    };
+    let Some(companies) = get("/companies") else { return vec![] };
+    let mut out = vec![];
+    for c in items(companies) {
+        let Some(id) = c.get("id").and_then(|v| v.as_str()) else { continue };
+        for r in get(&format!("/companies/{id}/live-runs")).map(items).unwrap_or_default() {
+            let name = format!("{} · Paperclip", r.get("agentName").and_then(|v| v.as_str()).unwrap_or("Agent"));
+            if !out.contains(&name) {
+                out.push(name);
+            }
         }
     }
     out
@@ -584,6 +615,7 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
     let temp = cpu_temp().map(|t| t.round() as u8);
     let (cpu, mut tools) = processes();
     tools.extend(claude_sessions());
+    tools.extend(paperclip_runs());
     let idle = idle_secs();
     inner.tool_work = tools;
     let mut error: Option<String> = None;
