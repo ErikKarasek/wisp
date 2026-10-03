@@ -418,20 +418,28 @@ export async function startNotch() {
     redraw();
   });
 
+  /** Replay a one-off body animation (a yawn, a caffeine jitter) on both bots. */
+  const play = (cls: string) => {
+    for (const el of [$(".m.tiny"), $(".m.big")]) {
+      el.classList.remove(cls);
+      void el.offsetWidth;
+      el.classList.add(cls);
+    }
+  };
+  const yawn = () => {
+    reacting = Date.now() + 1500;
+    tiny.setExpression("tired");
+    big.setExpression("tired");
+    play("yawn");
+    sound("yawn");
+  };
+
   // ----- nothing happening for a while: a yawn, then sleep -----
   let lastBusy = Date.now();
   const SLEEP_AFTER = 10 * 60_000;
   setInterval(() => {
     if (sleeping || root.classList.contains("is-open") || Date.now() - lastBusy < SLEEP_AFTER || base !== "happy") return;
-    reacting = Date.now() + 1500;
-    tiny.setExpression("tired");
-    big.setExpression("tired");
-    for (const el of [$(".m.tiny"), $(".m.big")]) {
-      el.classList.remove("yawn");
-      void el.offsetWidth;
-      el.classList.add("yawn");
-    }
-    sound("yawn");
+    yawn();
     setTimeout(() => {
       sleeping = true;
       reacting = 0;
@@ -443,6 +451,35 @@ export async function startNotch() {
     sleeping = false;
     react("surprised", 700);
   };
+
+  // ----- late at night: yawns, and coffee if you keep working -----
+  // From 23:00 to 5:00 the bot yawns every six to twelve minutes. If you are working with Claude
+  // then, it has a coffee instead and perks up: a caffeine boost, at most every twenty minutes.
+  const night = () => {
+    const h = new Date().getHours();
+    return h >= 23 || h < 5;
+  };
+  let nextYawn = 0;
+  let lastCoffee = 0;
+  setInterval(() => {
+    if (!night() || sleeping || Date.now() < reacting) return;
+    const now = Date.now();
+    if (ccWorking() && now - lastCoffee > 20 * 60_000) {
+      lastCoffee = now;
+      burst("☕", "coffee", 1);
+      setTimeout(() => {
+        play("jitter");
+        react("thriving", 1600);
+        burst("⚡", "spark", 3);
+      }, 900);
+      return;
+    }
+    if (now > nextYawn) {
+      nextYawn = now + (6 + Math.random() * 6) * 60_000;
+      yawn();
+      setTimeout(face, 1550);
+    }
+  }, 20_000);
 
   // ----- Claude's limit used up: the bot is out of breath -----
   setInterval(() => {
@@ -922,11 +959,19 @@ export async function startNotch() {
   }
 
   let lastSnap: Snapshot | null = null;
+  /** Each item's state at the last draw, to notice an agent finishing. */
+  const lastState = new Map<string, State>();
   const redraw = () => {
     if (lastSnap) draw(lastSnap);
   };
   const draw = (s: Snapshot) => {
     lastSnap = s;
+    // An agent that was working and has finished (not failed) gets a roll and sparkles.
+    for (const i of s.items) {
+      const was = lastState.get(i.id);
+      if (i.id.startsWith("agent:") && was === "run" && i.state !== "run" && i.state !== "bad" && i.state !== "off") celebrate();
+      lastState.set(i.id, i.state);
+    }
     root.classList.toggle("focus", !!s.focus);
 
     root.classList.toggle("err", s.items.some((i) => i.state === "bad"));

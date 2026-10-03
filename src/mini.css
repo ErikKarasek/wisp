@@ -254,7 +254,7 @@ body.mini button { font: inherit; color: inherit; }
 .nt .mirror video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); border-radius: 21px; }
 .nt .mirror .muted { position: absolute; padding: 12px; text-align: center; }
 
-@media (prefers-reduced-motion: reduce) { .nt, .nt .panes, .nt .side .open-only, .nt .side .closed-only { transition: none; } .nt .hop, .nt .dizzy, .nt.dancing .m.tiny, .nt.dancing .m.big { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .nt, .nt .panes, .nt .side .open-only, .nt .side .closed-only { transition: none; } .nt .hop, .nt .dizzy, .nt .jitter, .nt.dancing .m.tiny, .nt.dancing .m.big { animation: none; } }
 .nt .card.mirror[hidden] { display: none; }
 
 /* Claude's limit as a small ring beside the icons */
@@ -414,6 +414,11 @@ body.mini button { font: inherit; color: inherit; }
 /* A yawn: a long vertical stretch before falling asleep. */
 .nt .yawn { animation: yawn 1.4s ease-in-out; }
 @keyframes yawn { 35% { transform: scale(.9, 1.16); } 70% { transform: scale(1.04, .94); } }
+/* Late-night coffee: the cup rises, then the bot shivers awake. */
+.nt .fx.coffee { animation: fxCoffee 1.6s ease-out forwards; }
+@keyframes fxCoffee { 0% { opacity: 0; transform: translateY(4px) scale(.7); } 25% { opacity: 1; transform: translateY(-6px) scale(1.1); } 70% { opacity: 1; } 100% { opacity: 0; transform: translateY(-16px) scale(.9); } }
+.nt .jitter { animation: jitter 1.1s linear; }
+@keyframes jitter { 0%, 100% { transform: none; } 10%, 30%, 50%, 70%, 90% { transform: translateX(-1.5px) rotate(-2deg); } 20%, 40%, 60%, 80% { transform: translateX(1.5px) rotate(2deg); } }
 
 /* Carried out of the notch: the floating copy is the bot now. */
 .nt.carried .m.tiny, .nt.carried .m.big { opacity: 0; transition: opacity .12s; }
