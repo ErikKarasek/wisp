@@ -14,6 +14,8 @@ export type RelayContext = {
   overview: () => Obj;
   /** How an item looks (its character, as the Mac draws it). */
   character: (itemId: string) => Obj;
+  /** The phone's character editor; see setLook in main.ts. */
+  setLook: (target: string, charId: string | null, name: string | null, look: Obj | null) => Promise<void>;
   toast: (text: string) => void;
 };
 
@@ -114,6 +116,12 @@ export function startRelay(ctx: RelayContext): { push: () => Promise<void> } {
         await invoke("github_pr_action", { repo: cmd.repo, number: Number(cmd.number), action: cmd.action });
         ctx.toast(`Z telefonu: PR #${cmd.number} ${cmd.action === "merge" ? "mergnut" : "zavřen"}.`);
         void push();
+      } else if (cmd.kind === "look" && typeof cmd.target === "string") {
+        // The phone sends everything as strings, the look as JSON.
+        let look: Obj | null = null;
+        if (cmd.character) look = JSON.parse(String(cmd.character));
+        await ctx.setLook(cmd.target, cmd.charId ? String(cmd.charId) : null, cmd.name ? String(cmd.name).slice(0, 40) : null, look);
+        ctx.toast("Z telefonu: postavička změněná.");
       } else if (cmd.kind === "comment") {
         const text = String(cmd.text ?? "").trim();
         if (!text || typeof cmd.issueId !== "string") return;

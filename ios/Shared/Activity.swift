@@ -67,8 +67,8 @@ extension PhoneState {
 
     /// Whose look the bot wears: Claude asking, the agent at work, the one that failed or waits.
     var focusLook: MascotCharacter? {
-        if perms?.isEmpty == false { return .claude }
-        if let l = live?.first { return l.id == "cc" ? .claude : l.character }
+        if perms?.isEmpty == false { return claude ?? .claude }
+        if let l = live?.first { return l.id == "cc" ? claude ?? .claude : l.character }
         if let i = items.first(where: { $0.state == "bad" }) ?? waiting.first { return i.character }
         return nil
     }
