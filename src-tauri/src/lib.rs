@@ -12,6 +12,7 @@ mod night;
 mod notch;
 mod paperclip;
 mod relay;
+mod resume;
 mod snip;
 mod store;
 mod telegram;
@@ -403,6 +404,21 @@ fn night_command(app: AppHandle, arg: String) -> String {
     night::command(&app, &arg)
 }
 
+/// /kde on Telegram: where Erik stopped, as text (the night shift of the last 12 hours too).
+#[tauri::command]
+async fn resume_text(app: AppHandle) -> Result<String, String> {
+    blocking(move || {
+        let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).saturating_sub(12 * 3600);
+        resume::as_text(&resume::card(&app, since))
+    })
+    .await
+}
+
+#[tauri::command]
+fn resume_open(project: Option<String>, how: String) -> Result<(), String> {
+    resume::open(project.as_deref(), &how)
+}
+
 /// The Mac cleanup, only on Erik's button: ~/Developer/hlidaci/uklid.py --apply,
 /// which reports back through /notify when it's done.
 #[tauri::command]
@@ -634,6 +650,7 @@ pub fn run() {
             awake::start(handle);
             botwatch::start(handle);
             night::start(handle.clone());
+            resume::start(handle.clone());
             Ok(())
         })
         // Closing the window only hides it; the tray keeps watching.
@@ -687,6 +704,8 @@ pub fn run() {
             snip_undo,
             snip_keep,
             night_command,
+            resume_text,
+            resume_open,
             run_cleanup,
             relay_push,
             glow_set,
