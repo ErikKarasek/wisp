@@ -580,6 +580,8 @@ pub fn run() {
                 }
             }
             claudecode::start(handle);
+            // The state the page sends the notch is kept for Wisp Buddy too (claudecode::buddy_summary).
+            tauri::Listener::listen_any(app, "dispecink-state", |e| claudecode::remember_state(e.payload()));
             telegram::start_listening(handle);
             relay::start(handle);
             awake::start(handle);
