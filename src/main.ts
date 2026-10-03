@@ -208,6 +208,19 @@ const guardPaused = (): string[] => {
     return [];
   }
 };
+// When each agent was paused, so waking it only touches what its own pause stranded: one paused
+// later than the first wave must not reclaim tasks it had blocked for other reasons in between.
+// Older builds kept one timestamp for all; it still applies, under "*".
+const guardSince = (): Record<string, string> => {
+  const raw = localStorage.getItem(GUARD_SINCE);
+  if (!raw) return {};
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return { "*": raw };
+  }
+};
 let guarding = false;
 async function guardClaude(u: ClaudeUsage | null) {
   if (!u || !paperclip?.online || guarding) return;
@@ -222,7 +235,12 @@ async function guardClaude(u: ClaudeUsage | null) {
       // finishes its run and is paused once idle; only right at the limit (97 %, week 98 %) is it cut off.
       const hard = session >= 97 || week >= 98;
       const now = agents.filter((a) => a.status !== "paused" && !paused.includes(a.id) && (hard || a.status !== "running"));
-      if (now.length && !paused.length) localStorage.setItem(GUARD_SINCE, new Date().toISOString());
+      if (now.length) {
+        const since = guardSince();
+        const at = new Date().toISOString();
+        for (const a of now) since[a.id] ??= at;
+        localStorage.setItem(GUARD_SINCE, JSON.stringify(since));
+      }
       for (const a of now) {
         await invoke("paperclip_action", { kind: "agentPause", id: a.id }).catch(() => {});
         paused.push(a.id);
@@ -231,10 +249,11 @@ async function guardClaude(u: ClaudeUsage | null) {
     } else if (session < 60 && week < 90 && paused.length) {
       // One un-paused by hand in the meantime is already running: only wake the ones still asleep.
       const back = agents.filter((a) => paused.includes(a.id) && a.status === "paused");
-      const since = localStorage.getItem(GUARD_SINCE);
+      const since = guardSince();
       for (const a of back) {
         await invoke("paperclip_action", { kind: "agentResume", id: a.id }).catch(() => {});
-        if (since) await unstrand(a.id, since);
+        const at = since[a.id] ?? since["*"];
+        if (at) await unstrand(a.id, at);
         // Woken right away, so the tasks it left half done get finished.
         await invoke("paperclip_action", { kind: "agentInvoke", id: a.id }).catch(() => {});
       }
