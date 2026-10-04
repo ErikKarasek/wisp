@@ -1352,6 +1352,7 @@ async function showSettings() {
     notchChanged: async () => {
       await saveConfig(cfg);
       await invoke("notch_set_width", { width: NOTCH_WIDTH[cfg.notchPrefs.width] });
+      await invoke("notch_set_glass", { on: !!cfg.notchPrefs.glass });
       await invoke("notch_set_close_delay", { millis: Math.round(cfg.notchPrefs.closeDelay * 1000) });
       await emit(EV_NOTCH_PREFS);
     },
@@ -1483,7 +1484,9 @@ async function start() {
   cfg = await loadConfig();
   history = await invoke<HistoryEntry[]>("history_load").catch(() => []);
   void invoke("notch_set_close_delay", { millis: Math.round(cfg.notchPrefs.closeDelay * 1000) });
-  void invoke("notch_set_width", { width: NOTCH_WIDTH[cfg.notchPrefs.width] }).then(() => invoke("notch_set_enabled", { enabled: cfg.notch }));
+  void invoke("notch_set_width", { width: NOTCH_WIDTH[cfg.notchPrefs.width] })
+    .then(() => invoke("notch_set_enabled", { enabled: cfg.notch }))
+    .then(() => invoke("notch_set_glass", { on: !!cfg.notchPrefs.glass }));
   // Claude Code in the notch: set its hooks up once; after that the switch in Settings decides.
   if (cfg.ccHooks) {
     // Keep the hooks in step with this version (their timeouts may have changed).

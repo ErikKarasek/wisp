@@ -29,6 +29,8 @@ export type NotchPrefs = {
   width: "s" | "m" | "l";
   /** Seconds it stays open after the mouse leaves. */
   closeDelay: number;
+  /** Liquid Glass under the open notch instead of black (the closed pill stays black). */
+  glass: boolean;
 };
 
 export const NOTCH_WIDTH = { s: 820, m: 960, l: 1100 } as const;
@@ -47,6 +49,7 @@ export const defaultNotchPrefs = (): NotchPrefs => ({
   follow: true,
   width: "l",
   closeDelay: 1.5,
+  glass: false,
 });
 
 export type Config = {

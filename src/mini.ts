@@ -527,6 +527,7 @@ export async function startNotch() {
 
   // ----- settings -----
   const applyPrefs = () => {
+    root.classList.toggle("glass", !!prefs.glass);
     $(".crewcard").hidden = !prefs.showOthers;
     $(".music").hidden = !prefs.showMusic;
     $(".cal").hidden = !prefs.showCalendar;
