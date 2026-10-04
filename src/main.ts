@@ -201,26 +201,39 @@ void listen<{ title?: string; text?: string; urgent?: boolean }>("notify", async
 const GUARD_KEY = "wisp.guard.paused";
 /** When the guard paused them, so a resume only touches tasks Paperclip blocked after that. */
 const GUARD_SINCE = "wisp.guard.since";
-const guardPaused = (): string[] => {
-  try {
-    return JSON.parse(localStorage.getItem(GUARD_KEY) ?? "[]");
-  } catch {
-    return [];
+type GuardState = { paused: string[]; since: Record<string, string> };
+// Kept in guard.json beside config.json. In localStorage it vanished whenever the webview cache was
+// wiped, and the guard then left its agents paused for good, taking them for ones Erik had paused.
+let guardState: GuardState | null = null;
+async function guardLoad(): Promise<GuardState> {
+  if (guardState) return guardState;
+  const saved = await invoke<Partial<GuardState> | null>("guard_load").catch(() => null);
+  if (saved) {
+    guardState = { paused: Array.isArray(saved.paused) ? saved.paused : [], since: saved.since && typeof saved.since === "object" ? saved.since : {} };
+    return guardState;
   }
-};
-// When each agent was paused, so waking it only touches what its own pause stranded: one paused
-// later than the first wave must not reclaim tasks it had blocked for other reasons in between.
-// Older builds kept one timestamp for all; it still applies, under "*".
-const guardSince = (): Record<string, string> => {
+  // No file yet: carry over what an older build kept in localStorage. Its "since" was once a single
+  // timestamp for every agent; that still applies, under "*".
+  let paused: string[] = [];
+  let since: Record<string, string> = {};
+  try {
+    paused = JSON.parse(localStorage.getItem(GUARD_KEY) ?? "[]");
+  } catch {}
   const raw = localStorage.getItem(GUARD_SINCE);
-  if (!raw) return {};
-  try {
-    const v = JSON.parse(raw);
-    return v && typeof v === "object" ? v : {};
-  } catch {
-    return { "*": raw };
-  }
-};
+  if (raw)
+    try {
+      const v = JSON.parse(raw);
+      since = v && typeof v === "object" ? v : { "*": raw };
+    } catch {
+      since = { "*": raw };
+    }
+  guardState = { paused, since };
+  await guardSave();
+  return guardState;
+}
+async function guardSave() {
+  if (guardState) await invoke("guard_save", { value: guardState }).catch(() => {});
+}
 let guarding = false;
 async function guardClaude(u: ClaudeUsage | null) {
   if (!u || !paperclip?.online || guarding) return;
@@ -229,27 +242,28 @@ async function guardClaude(u: ClaudeUsage | null) {
     const session = u.session?.percent ?? 0;
     const week = u.week?.percent ?? 0;
     const agents = paperclip.companies.flatMap((c) => c.agents).filter((a) => a.adapterType === "claude_local" && a.status !== "terminated");
-    let paused = guardPaused();
+    const state = await guardLoad();
+    const paused = state.paused;
     if (session >= 90 || week >= 95) {
       // A pause cancels the run in progress, and the retry pays for that work all over again. So a running agent
       // finishes its run and is paused once idle; only right at the limit (97 %, week 98 %) is it cut off.
       const hard = session >= 97 || week >= 98;
       const now = agents.filter((a) => a.status !== "paused" && !paused.includes(a.id) && (hard || a.status !== "running"));
       if (now.length) {
-        const since = guardSince();
         const at = new Date().toISOString();
-        for (const a of now) since[a.id] ??= at;
-        localStorage.setItem(GUARD_SINCE, JSON.stringify(since));
+        for (const a of now) {
+          state.since[a.id] ??= at;
+          paused.push(a.id);
+        }
+        // Written before pausing, so a crash in between still leaves the guard knowing they are its own.
+        await guardSave();
       }
-      for (const a of now) {
-        await invoke("paperclip_action", { kind: "agentPause", id: a.id }).catch(() => {});
-        paused.push(a.id);
-      }
+      for (const a of now) await invoke("paperclip_action", { kind: "agentPause", id: a.id }).catch(() => {});
       if (now.length) warn(`Limit Claude je na ${Math.max(session, week)} %: pozastavil jsem ${now.map((a) => a.name).join(", ")}, ať ho nedočerpají. Až se limit obnoví, sami se rozjedou.`);
     } else if (session < 60 && week < 90 && paused.length) {
       // One un-paused by hand in the meantime is already running: only wake the ones still asleep.
       const back = agents.filter((a) => paused.includes(a.id) && a.status === "paused");
-      const since = guardSince();
+      const since = state.since;
       for (const a of back) {
         await invoke("paperclip_action", { kind: "agentResume", id: a.id }).catch(() => {});
         const at = since[a.id] ?? since["*"];
@@ -258,10 +272,10 @@ async function guardClaude(u: ClaudeUsage | null) {
         await invoke("paperclip_action", { kind: "agentInvoke", id: a.id }).catch(() => {});
       }
       if (back.length) warn(`Limit Claude se obnovil: ${back.map((a) => a.name).join(", ")} zase pracuje a dodělá rozdělané úkoly.`);
-      paused = [];
-      localStorage.removeItem(GUARD_SINCE);
+      state.paused = [];
+      state.since = {};
+      await guardSave();
     }
-    localStorage.setItem(GUARD_KEY, JSON.stringify(paused));
   } finally {
     guarding = false;
   }

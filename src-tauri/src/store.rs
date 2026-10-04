@@ -62,6 +62,31 @@ pub fn secret_delete(name: &str) -> Result<(), String> {
     }
 }
 
+// ---------- limit guard ----------
+
+/// Which agents the Claude limit guard paused and when. It lives here, not in the
+/// page's localStorage: wiping the webview cache used to erase it, and the guard
+/// then left the agents paused for good, thinking Erik had paused them.
+fn guard_path(dir: PathBuf) -> PathBuf {
+    dir.join("guard.json")
+}
+
+/// `null` when the file is missing, so the page can carry over what an older build kept in localStorage.
+pub fn guard_load(dir: PathBuf) -> Value {
+    fs::read_to_string(guard_path(dir))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(Value::Null)
+}
+
+pub fn guard_save(dir: PathBuf, value: &Value) -> Result<(), String> {
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file = guard_path(dir);
+    let tmp = file.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_string_pretty(value).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &file).map_err(|e| e.to_string())
+}
+
 // ---------- history ----------
 
 fn history_path(dir: PathBuf) -> PathBuf {
