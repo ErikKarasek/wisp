@@ -15,6 +15,7 @@ mod relay;
 mod resume;
 mod snip;
 mod store;
+mod voice;
 mod telegram;
 mod usage;
 
@@ -414,6 +415,50 @@ async fn resume_text(app: AppHandle) -> Result<String, String> {
     .await
 }
 
+/// ⌃⌥V held: listening. Let go: Gemini writes it down and decides what it is (voice.rs).
+fn voice_key(app: &AppHandle, pressed: bool) {
+    let emit = |app: &AppHandle, v: serde_json::Value| {
+        let _ = tauri::Emitter::emit_to(app, "notch", "voice", v);
+    };
+    if pressed {
+        match voice::start() {
+            Ok(()) => {
+                notch::peek(app, 60_000);
+                emit(app, serde_json::json!({ "stage": "listening" }));
+            }
+            Err(e) => {
+                notch::peek(app, 8000);
+                emit(app, serde_json::json!({ "stage": "error", "error": e }));
+            }
+        }
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let Some(path) = voice::stop() else {
+            emit(&app, serde_json::json!({ "stage": "cancel" }));
+            return;
+        };
+        emit(&app, serde_json::json!({ "stage": "thinking" }));
+        let names: Vec<String> = tauri::async_runtime::block_on(voice::agents()).into_iter().map(|a| a.0).collect();
+        match voice::understand(&path.to_string_lossy(), &names) {
+            Ok(h) => emit(&app, serde_json::json!({ "stage": "heard", "heard": h })),
+            Err(e) => emit(&app, serde_json::json!({ "stage": "error", "error": e })),
+        }
+        notch::peek(&app, 60_000);
+    });
+}
+
+#[tauri::command]
+async fn voice_remind(text: String, at: String) -> Result<String, String> {
+    blocking(move || voice::remind(&text, &at)).await?
+}
+
+#[tauri::command]
+async fn voice_agent(agent: String, task: String) -> Result<String, String> {
+    voice::agent_task(&agent, &task).await
+}
+
 #[tauri::command]
 fn resume_open(project: Option<String>, how: String) -> Result<(), String> {
     resume::open(project.as_deref(), &how)
@@ -596,10 +641,14 @@ pub fn run() {
             // ⌃⌥Space anywhere: the notch opens with a question box (Gemini answers).
             // ⌃⌥E: mark an error on the screen, Gemini reads it, Claude fixes it.
             tauri_plugin_global_shortcut::Builder::new()
-                .with_shortcuts(["ctrl+alt+space", "ctrl+alt+e"])
+                .with_shortcuts(["ctrl+alt+space", "ctrl+alt+e", "ctrl+alt+v"])
                 .expect("shortcut")
                 .with_handler(|app, shortcut, event| {
-                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                    let pressed = event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed;
+                    // ⌃⌥V: held while talking.
+                    if shortcut.key == tauri_plugin_global_shortcut::Code::KeyV {
+                        voice_key(app, pressed);
+                    } else if pressed {
                         if shortcut.key == tauri_plugin_global_shortcut::Code::KeyE {
                             snip_start(app);
                         } else {
@@ -706,6 +755,8 @@ pub fn run() {
             night_command,
             resume_text,
             resume_open,
+            voice_remind,
+            voice_agent,
             run_cleanup,
             relay_push,
             glow_set,

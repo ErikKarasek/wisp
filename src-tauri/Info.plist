@@ -8,6 +8,8 @@
   <string>Wisp ukazuje v notchi tvoje dnešní a zítřejší události.</string>
   <key>NSCameraUsageDescription</key>
   <string>Zrcátko v notchi ukazuje obraz z kamery. Nikam se neukládá ani neposílá.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Když držíš ⌃⌥V, Wisp poslouchá, co mu říkáš. Nahrávka jde jen k přepisu do Gemini a pak se smaže.</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>Wisp ukazuje, co hraje ve Spotify nebo v Hudbě, a umí je pozastavit nebo přeskočit.</string>
 </dict>
