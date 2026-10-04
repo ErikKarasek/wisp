@@ -477,3 +477,7 @@ body.mini button { font: inherit; color: inherit; }
 .nt .steps { grid-template-columns: minmax(0, 1fr); }
 .nt .steps > * { min-width: 0; }
 .nt .step.now.big-text.small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ⌃⌥V: the red dot while it listens */
+.nt .rec { display: inline-block; width: 9px; height: 9px; margin-right: 7px; border-radius: 50%; background: #e0605a; vertical-align: 1px; animation: recpulse 1s ease-in-out infinite; }
+@keyframes recpulse { 50% { opacity: .35; transform: scale(.8); } }

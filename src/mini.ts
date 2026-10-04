@@ -927,6 +927,60 @@ export async function startNotch() {
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && snipOn) closeSnip();
   });
+  // ----- ⌃⌥V held: talking to the notch (voice.rs). Gemini writes it down and picks what it is -----
+  type Heard = { heard: string; action: string; answer: string; text: string; at: string; project: string; task: string; now: boolean; agent: string };
+  type Voice = { stage: "listening" | "thinking" | "cancel" | "error" | "heard"; error?: string; heard?: Heard };
+  void listen<Voice>("voice", async (e) => {
+    const v = e.payload;
+    if (v.stage === "listening") return snipCard("Poslouchám", `<div class="step past wrap"><span class="rec"></span>Mluv, a až domluvíš, pusť ⌃⌥V.</div>`);
+    if (v.stage === "thinking") return snipCard("Hlas · Gemini", `<div class="step past wrap"><div class="run-bar"><i></i></div><small>Přepisuju a přemýšlím, co s tím…</small></div>`);
+    if (v.stage === "cancel") return closeSnip();
+    if (v.stage === "error" || !v.heard) return snipCard("Hlas", `<div class="step past wrap">${escHtml(v.error ?? "Něco se nepovedlo.")}</div>`);
+    const h = v.heard;
+    const said = `<div class="step past wrap"><small>„${escHtml(h.heard)}“</small></div>`;
+    wink();
+    const done = (head: string, text: string) => snipCard(head, `${said}<div class="step past wrap">${escHtml(text)}</div>`);
+    if (h.action === "ask") {
+      snipCard("Hlas · Gemini", `${said}<div class="step past wrap reply">${escHtml(clean(h.answer))} <button class="copy">Kopírovat</button></div>`);
+      steps.querySelector(".copy")!.addEventListener("click", async (ev) => {
+        await navigator.clipboard.writeText(clean(h.answer)).catch(() => {});
+        (ev.target as HTMLButtonElement).textContent = "Zkopírováno";
+      });
+      return;
+    }
+    if (h.action === "remind") {
+      try {
+        const when = await invoke<string>("voice_remind", { text: h.text, at: h.at });
+        return done("Připomínka", `Připomenu ti „${h.text}“ ${when}. Je v Připomínkách, zazvoní i na iPhonu.`);
+      } catch (err) {
+        return done("Připomínka", String(err));
+      }
+    }
+    if (h.action === "night" || h.action === "agent") {
+      const night = h.action === "night";
+      const what = night ? `Noční směna · ${h.project}${h.now ? " (hned)" : ""}` : `Úkol pro ${h.agent}`;
+      snipCard(
+        what,
+        `${said}<div class="step past wrap">${escHtml(h.task)}</div>
+        <div class="perm"><button data-a="no">Zrušit</button><button data-a="yes" class="go">${night ? "Zadat" : `Poslat ${escHtml(h.agent)}`}</button></div>`,
+      );
+      steps.querySelector('[data-a="no"]')!.addEventListener("click", closeSnip);
+      steps.querySelector('[data-a="yes"]')!.addEventListener("click", async () => {
+        try {
+          const reply = night
+            ? await invoke<string>("night_command", { arg: `${h.now ? "hned " : ""}${h.project}: ${h.task}` })
+            : await invoke<string>("voice_agent", { agent: h.agent, task: h.task });
+          done(what, reply);
+        } catch (err) {
+          done(what, String(err));
+        }
+        void invoke("notch_peek", { millis: 8000 });
+      });
+      return;
+    }
+    done("Hlas", h.heard ? "Tohle nevím, jak udělat. Zkus otázku, připomínku, noční směnu nebo úkol pro agenta." : "Nic jsem nezachytil. Drž ⌃⌥V, dokud mluvíš.");
+  });
+
   // ----- back at the Mac after a break: where Erik stopped (resume.rs) -----
   type Resume = {
     project: string | null;
