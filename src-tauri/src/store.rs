@@ -62,26 +62,32 @@ pub fn secret_delete(name: &str) -> Result<(), String> {
     }
 }
 
-// ---------- limit guard ----------
+// ---------- the safety nets' own memory ----------
 
-/// Which agents the Claude limit guard paused and when. It lives here, not in the
-/// page's localStorage: wiping the webview cache used to erase it, and the guard
-/// then left the agents paused for good, thinking Erik had paused them.
-fn guard_path(dir: PathBuf) -> PathBuf {
-    dir.join("guard.json")
+/// What the limit guard and the agent watchdog remember between runs: which agents the
+/// guard paused, how often a stuck task was retried, what Erik was already told. It lives
+/// in files here, not in the page's localStorage: wiping the webview cache used to erase
+/// it, and the guard then left the agents paused for good, thinking Erik had paused them.
+const STATES: &[&str] = &["guard", "watchdog"];
+
+fn state_path(dir: PathBuf, name: &str) -> Result<PathBuf, String> {
+    if !STATES.contains(&name) {
+        return Err(format!("Neznámý stav {name}"));
+    }
+    Ok(dir.join(format!("{name}.json")))
 }
 
-/// `null` when the file is missing, so the page can carry over what an older build kept in localStorage.
-pub fn guard_load(dir: PathBuf) -> Value {
-    fs::read_to_string(guard_path(dir))
+/// `null` when the file is missing, so the page can tell a first start from an empty state.
+pub fn state_load(dir: PathBuf, name: &str) -> Result<Value, String> {
+    Ok(fs::read_to_string(state_path(dir, name)?)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or(Value::Null)
+        .unwrap_or(Value::Null))
 }
 
-pub fn guard_save(dir: PathBuf, value: &Value) -> Result<(), String> {
+pub fn state_save(dir: PathBuf, name: &str, value: &Value) -> Result<(), String> {
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let file = guard_path(dir);
+    let file = state_path(dir, name)?;
     let tmp = file.with_extension("json.tmp");
     fs::write(&tmp, serde_json::to_string_pretty(value).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     fs::rename(&tmp, &file).map_err(|e| e.to_string())

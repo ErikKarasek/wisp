@@ -152,13 +152,13 @@ async fn secret_exists(name: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn guard_load(app: AppHandle) -> Result<serde_json::Value, String> {
-    Ok(store::guard_load(config_dir(&app)?))
+fn state_load(app: AppHandle, name: String) -> Result<serde_json::Value, String> {
+    store::state_load(config_dir(&app)?, &name)
 }
 
 #[tauri::command]
-fn guard_save(app: AppHandle, value: serde_json::Value) -> Result<(), String> {
-    store::guard_save(config_dir(&app)?, &value)
+fn state_save(app: AppHandle, name: String, value: serde_json::Value) -> Result<(), String> {
+    store::state_save(config_dir(&app)?, &name, &value)
 }
 
 #[tauri::command]
@@ -182,6 +182,19 @@ async fn telegram_token() -> Result<String, String> {
 #[tauri::command]
 async fn telegram_send(chat: String, text: String) -> Result<(), String> {
     telegram::send(&telegram_token().await?, &chat, &text).await
+}
+
+/// A message with buttons, only when the phone can answer them (remote control on).
+#[tauri::command]
+async fn telegram_buttons(app: AppHandle, text: String, keyboard: serde_json::Value) -> Result<i64, String> {
+    let r = blocking(move || telegram::remote(&app)).await?.ok_or("Telegram nemá zapnuté ovládání z telefonu")?;
+    telegram::send_keyboard(&r, &text, &keyboard).await
+}
+
+#[tauri::command]
+async fn telegram_edit(app: AppHandle, message_id: i64, text: String, keyboard: serde_json::Value) -> Result<(), String> {
+    let r = blocking(move || telegram::remote(&app)).await?.ok_or("Telegram nemá zapnuté ovládání z telefonu")?;
+    telegram::edit_keyboard(&r, message_id, &text, &keyboard).await
 }
 
 #[tauri::command]
@@ -798,8 +811,10 @@ pub fn run() {
             secret_exists,
             history_load,
             history_append,
-            guard_load,
-            guard_save,
+            state_load,
+            state_save,
+            telegram_buttons,
+            telegram_edit,
             telegram_send,
             telegram_chats,
             telegram_bot,
