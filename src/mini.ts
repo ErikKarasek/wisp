@@ -518,6 +518,8 @@ export async function startNotch() {
           m.style.transform = "";
         });
       }
+      // The glass under the cards goes where they settled.
+      window.setTimeout(syncGlass, 520);
     } else {
       root.classList.remove("is-open");
       closeMirror();
@@ -525,9 +527,35 @@ export async function startNotch() {
     }
   });
 
+  // ----- Liquid Glass (a setting): native glass under each card, at the cards' rectangles -----
+  let glassSent = "";
+  function syncGlass() {
+    if (!prefs.glass || !root.classList.contains("is-open")) return;
+    const shapes = [...panes.querySelectorAll<HTMLElement>(".card")]
+      .map((c) => c.getBoundingClientRect())
+      .filter((r) => r.width > 20 && r.height > 20)
+      .map((r) => ({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), r: 22 }));
+    const sig = JSON.stringify(shapes);
+    if (sig === glassSent) return;
+    glassSent = sig;
+    void invoke("notch_glass_shapes", { shapes }).catch(() => {});
+  }
+  let glassFrame = 0;
+  const glassSoon = () => {
+    cancelAnimationFrame(glassFrame);
+    glassFrame = requestAnimationFrame(syncGlass);
+  };
+  const glassWatch = new ResizeObserver(glassSoon);
+  glassWatch.observe(panes);
+  panes.querySelectorAll(".card").forEach((c) => glassWatch.observe(c));
+  window.addEventListener("resize", glassSoon);
+
   // ----- settings -----
   const applyPrefs = () => {
     root.classList.toggle("glass", !!prefs.glass);
+    // Switched on or off: the native glass is laid out again (or cleared) on the next open.
+    glassSent = "";
+    if (prefs.glass) requestAnimationFrame(() => syncGlass());
     $(".crewcard").hidden = !prefs.showOthers;
     $(".music").hidden = !prefs.showMusic;
     $(".cal").hidden = !prefs.showCalendar;
