@@ -40,6 +40,8 @@ import { renderSettings } from "./settings";
 import { sounds } from "./sounds";
 import { openStudio } from "./studio";
 import { ago } from "./time";
+import { announcePrs, loadState, prButton, restoreIssue, saveState, watchAgents } from "./watchdog";
+import type { PR } from "./reviews";
 
 const LOCAL_MS = 10_000; // launchd and Paperclip, both on this Mac
 const CLOUD_MS = 60_000; // Cloudflare and GitHub, rate limits apply
@@ -207,7 +209,7 @@ type GuardState = { paused: string[]; since: Record<string, string> };
 let guardState: GuardState | null = null;
 async function guardLoad(): Promise<GuardState> {
   if (guardState) return guardState;
-  const saved = await invoke<Partial<GuardState> | null>("guard_load").catch(() => null);
+  const saved = await loadState<Partial<GuardState>>("guard");
   if (saved) {
     guardState = { paused: Array.isArray(saved.paused) ? saved.paused : [], since: saved.since && typeof saved.since === "object" ? saved.since : {} };
     return guardState;
@@ -232,7 +234,7 @@ async function guardLoad(): Promise<GuardState> {
   return guardState;
 }
 async function guardSave() {
-  if (guardState) await invoke("guard_save", { value: guardState }).catch(() => {});
+  if (guardState) await saveState("guard", guardState);
 }
 let guarding = false;
 async function guardClaude(u: ClaudeUsage | null) {
@@ -290,33 +292,11 @@ async function unstrand(agentId: string, since: string) {
   if (!paperclip?.online) return;
   type Obj = Record<string, any>;
   const list = (v: Obj[] | { items: Obj[] }) => (Array.isArray(v) ? v : v.items ?? []);
-  const pc = (method: string, path: string, body: Obj | null = null) => invoke<Obj[] | { items: Obj[] }>("paperclip_request", { method, path, body });
   for (const c of paperclip.companies) {
     if (!c.agents.some((a) => a.id === agentId)) continue;
-    const issues = list(await pc("GET", `/companies/${c.company.id}/issues`).catch(() => []));
+    const issues = list(await invoke<Obj[] | { items: Obj[] }>("paperclip_request", { method: "GET", path: `/companies/${c.company.id}/issues`, body: null }).catch(() => []));
     const stranded = issues.filter((x) => x.assigneeAgentId === agentId && x.status === "blocked" && Date.parse(x.blockedTransitionAt) >= Date.parse(since));
-    for (const i of stranded) {
-      const comments = list(await pc("GET", `/issues/${i.id}/comments`).catch(() => []));
-      const pr = comments.some((m) => m.authorAgentId === agentId && /https:\/\/github\.com\/[^\s)]+\/pull\/\d+/.test(String(m.body ?? "")));
-      const status = pr ? "in_review" : "todo";
-      // A run the pause cut off holds the task until someone confirms it stopped; a plain status change gets undone.
-      const full = (await pc("GET", `/issues/${i.id}`).catch(() => null)) as Obj | null;
-      const held: Obj | null = full?.executionBlocker?.cause === "legacy_execution_requires_reconciliation" ? full.executionBlocker : null;
-      if (held)
-        await pc("POST", `/issues/${i.id}/recovery-actions/resolve`, {
-          actionId: held.recoveryActionId,
-          outcome: "restored",
-          sourceIssueStatus: status,
-          executionReconciliation: {
-            runId: held.runId,
-            providerStopped: true,
-            actionOutcome: "mixed",
-            outcomeEvidence: "Wisp paused the agent at the Claude limit and that cancelled this run; part of the work (branch, PR) may exist, so the agent checks before acting.",
-          },
-          resolutionNote: "Wisp: the Claude limit guard paused the agent; it is resumed now.",
-        }).catch(() => {});
-      else await pc("PATCH", `/issues/${i.id}`, { status }).catch(() => {});
-    }
+    for (const i of stranded) await restoreIssue(agentId, i.id, "Wisp: the Claude limit guard paused the agent; it is resumed now.");
   }
 }
 
@@ -393,6 +373,10 @@ async function watchPaperclip(online: boolean) {
   warn(ok ? "Paperclip neodpovídal, restartoval jsem ho." : "Paperclip neodpovídá a restart se nepovedl. Mrkni na něj.");
 }
 
+// Tasks Paperclip parked after a hiccup go back to the queue; an agent whose runs keep failing is reported.
+setInterval(() => void watchAgents(paperclip, warn, (t) => toast(t, true)), 5 * 60_000);
+setTimeout(() => void watchAgents(paperclip, warn, (t) => toast(t, true)), 90_000);
+
 // ChatGPT agents need Codex by its full path, which a Paperclip update moves.
 async function healCodex() {
   const fixed = await invoke<string[]>("heal_codex").catch(() => [] as string[]);
@@ -412,6 +396,7 @@ async function loadCloud() {
   if (cfg.githubRepos?.length) {
     prList = await invoke<Record<string, any>[]>("github_prs", { repos: cfg.githubRepos }).catch(() => []);
     prCount = prList.length;
+    void announcePrs(prList as PR[]);
   }
 }
 
@@ -1210,6 +1195,14 @@ const broadcast = () => void emit(EV_STATE, snapshot());
 void listen(EV_REQUEST, broadcast);
 // The bot's updates are taken by another program (job-mail uses its own bot the same way).
 let tgConflictShown = false;
+// Merge / close buttons under a pull request on the phone.
+void listen<{ data: string; messageId: number }>("tg-pr", (e) =>
+  void prButton(e.payload.data, e.payload.messageId, prList as PR[], (t) => {
+    toast(t, true);
+    void loadCloud().then(render);
+  }),
+);
+
 void listen("tg-conflict", () => {
   if (tgConflictShown) return;
   tgConflictShown = true;
