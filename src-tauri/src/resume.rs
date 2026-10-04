@@ -202,7 +202,11 @@ pub fn card(app: &AppHandle, since: u64) -> Card {
             let dir = home().join("Developer").join(p);
             c.branch = git(&dir, &["rev-parse", "--abbrev-ref", "HEAD"]);
             c.dirty = git(&dir, &["status", "--porcelain"]).map(|s| s.lines().count()).unwrap_or(0);
-            c.last_commit = git(&dir, &["log", "-1", "--format=%s (%cr)"]);
+            // The subject cut short: some are a whole paragraph.
+            c.last_commit = git(&dir, &["log", "-1", "--format=%s"]).map(|s| {
+                let short: String = s.chars().take(48).collect();
+                if short.len() < s.len() { format!("{}…", short.trim_end()) } else { s }
+            });
             git_line = format!(
                 "větev {}, {} necommitnutých souborů, poslední commit: {}",
                 c.branch.as_deref().unwrap_or("?"),
