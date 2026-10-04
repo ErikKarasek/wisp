@@ -195,9 +195,17 @@ pub fn fix(project: &str, text: &str, cause: &str, file: Option<&str>) -> Result
         }
         *running = true;
     }
-    let result = fix_locked(&dir, &claude, project, text, cause, file);
-    *RUNNING.lock().unwrap_or_else(|e| e.into_inner()) = false;
-    result
+    let _guard = RunningGuard;
+    fix_locked(&dir, &claude, project, text, cause, file)
+}
+
+/// Clears `RUNNING` on drop, so a panic in `fix_locked` cannot leave the lock set.
+struct RunningGuard;
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        *RUNNING.lock().unwrap_or_else(|e| e.into_inner()) = false;
+    }
 }
 
 fn fix_locked(dir: &Path, claude: &Path, project: &str, text: &str, cause: &str, file: Option<&str>) -> Result<Fixed, String> {
