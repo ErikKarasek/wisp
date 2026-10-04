@@ -481,3 +481,13 @@ body.mini button { font: inherit; color: inherit; }
 /* ⌃⌥V: the red dot while it listens */
 .nt .rec { display: inline-block; width: 9px; height: 9px; margin-right: 7px; border-radius: 50%; background: #e0605a; vertical-align: 1px; animation: recpulse 1s ease-in-out infinite; }
 @keyframes recpulse { 50% { opacity: .35; transform: scale(.8); } }
+
+/* A card that takes over the hero (a quick question, a snip, back from a break, voice):
+   the player steps aside so the calendar keeps its week, the text scrolls, and the buttons
+   always stay in view at the bottom. */
+.nt.asking .card.music { display: none !important; }
+.nt.asking .card.hero > .steps { max-height: 100%; overflow-y: auto; align-content: start; scrollbar-width: none; }
+.nt.asking .card.hero > .steps::-webkit-scrollbar { display: none; }
+.nt.asking .card.hero > .steps > .perm { position: sticky; bottom: 0; margin-top: 2px; padding-top: 6px; background: linear-gradient(transparent, #000 6px); }
+.nt .step.past.wrap.one { -webkit-line-clamp: 1; }
+.nt .step.past.wrap.two { -webkit-line-clamp: 2; }

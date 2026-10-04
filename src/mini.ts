@@ -1000,13 +1000,13 @@ export async function startNotch() {
       ? `větev ${r.branch}${r.dirty ? ` · necommitnuto ${r.dirty}` : ""}${r.lastCommit ? ` · poslední commit „${r.lastCommit}“` : ""}`
       : "";
     const night = r.night
-      .map((n) => `<div class="step past wrap"><small>🌙 ${escHtml(n.project)} – ${escHtml(n.task)}${n.pr ? ` · <a href="${escHtml(n.pr)}" class="pr">PR</a>` : n.ok ? "" : " (nedopadlo)"}</small></div>`)
+      .map((n) => `<div class="step past wrap one"><small>🌙 ${escHtml(n.project)} – ${escHtml(n.task)}${n.pr ? ` · <a href="${escHtml(n.pr)}" class="pr">PR</a>` : n.ok ? "" : " (nedopadlo)"}</small></div>`)
       .join("");
     snipCard(
       `Vítej zpátky${r.project ? ` · ${r.project}` : ""}`,
       `${r.summary ? `<div class="step past wrap">${escHtml(clean(r.summary))}</div>` : ""}
-      ${r.next ? `<div class="step past wrap"><small>Dál: ${escHtml(clean(r.next))}</small></div>` : ""}
-      ${meta ? `<div class="step past wrap"><small>${escHtml(meta)}</small></div>` : ""}
+      ${r.next ? `<div class="step past wrap two"><small>Dál: ${escHtml(clean(r.next))}</small></div>` : ""}
+      ${meta ? `<div class="step past wrap one"><small>${escHtml(meta)}</small></div>` : ""}
       ${night}
       <div class="perm">
         ${r.project ? `<button data-a="code">Otevřít projekt</button>` : ""}
