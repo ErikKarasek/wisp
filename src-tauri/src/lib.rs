@@ -445,13 +445,13 @@ fn voice_key(app: &AppHandle, pressed: bool) {
     }
     let app = app.clone();
     std::thread::spawn(move || {
-        let Some(path) = voice::stop() else {
+        let Some(rec) = voice::stop() else {
             emit(&app, serde_json::json!({ "stage": "cancel" }));
             return;
         };
         emit(&app, serde_json::json!({ "stage": "thinking" }));
         let names: Vec<String> = tauri::async_runtime::block_on(voice::agents()).into_iter().map(|a| a.0).collect();
-        match voice::understand(&path.to_string_lossy(), &names) {
+        match voice::understand(rec, &names) {
             Ok(h) => emit(&app, serde_json::json!({ "stage": "heard", "heard": h })),
             Err(e) => emit(&app, serde_json::json!({ "stage": "error", "error": e })),
         }
