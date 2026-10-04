@@ -410,88 +410,88 @@ pub fn set_wing(width: f64) {
     WING.store(width.clamp(0.0, 320.0) as u32, std::sync::atomic::Ordering::Relaxed);
 }
 
-// ---------- Liquid Glass under the open notch (a setting) ----------
+// ---------- Liquid Glass under the open notch's cards (a setting) ----------
 //
-// The page can't blur what is behind its window, so the glass is a native view under the
-// web view: NSGlassEffectView on macOS 26, a dark NSVisualEffectView before that. It shows
-// only while the notch is open; closed, the page's black pill stays black so it melts into
-// the camera cut-out. Its frame reaches above the window, so only the bottom corners round.
+// The page can't blur or bend what is behind its window, so the glass is native: one
+// NSGlassEffectView (macOS 26) under each card, at the rectangles the page reports
+// (glass_shapes), like the separate glass pieces on an iPhone. They show only while the
+// notch is open; the closed pill and the top bar stay black, to melt into the camera cut-out.
 
 static GLASS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// The glass view, as a pointer (main thread only).
-static GLASS_VIEW: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-const GLASS_RADIUS: f64 = 26.0;
+/// The glass views, as pointers (main thread only).
+static GLASS_VIEWS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+#[derive(serde::Deserialize, Clone, Copy)]
+pub struct Shape {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub r: f64,
+}
+
+unsafe fn clear_glass() {
+    for v in GLASS_VIEWS.lock().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default() {
+        let v = v as *mut AnyObject;
+        let _: () = msg_send![v, removeFromSuperview];
+        let _: () = msg_send![v, release];
+    }
+}
 
 pub fn set_glass(app: &AppHandle, on: bool) {
     GLASS_ON.store(on, std::sync::atomic::Ordering::Relaxed);
+    if !on {
+        let _ = app.run_on_main_thread(|| unsafe { clear_glass() });
+    }
+}
+
+/// The cards' rectangles in the page's points (top-left origin), from the page.
+pub fn glass_shapes(app: &AppHandle, shapes: Vec<Shape>) {
+    if !GLASS_ON.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     let app2 = app.clone();
-    let _ = app.run_on_main_thread(move || {
+    let _ = app.run_on_main_thread(move || unsafe {
+        clear_glass();
         let Some(w) = app2.get_webview_window(LABEL) else { return };
         let Ok(ns) = w.ns_window() else { return };
         let ns = ns as *mut AnyObject;
-        unsafe {
-            let old = GLASS_VIEW.swap(0, std::sync::atomic::Ordering::Relaxed) as *mut AnyObject;
-            if !old.is_null() {
-                let _: () = msg_send![old, removeFromSuperview];
-                let _: () = msg_send![old, release];
-            }
-            if !on {
-                return;
-            }
-            let mut content: *mut AnyObject = msg_send![ns, contentView];
-            if content.is_null() {
-                return;
-            }
-            // When the web view is the content view itself, the glass goes beside it, below.
-            let mut below: *mut AnyObject = std::ptr::null_mut();
-            let mut bounds: NSRect = msg_send![content, bounds];
-            if let Some(wk) = AnyClass::get(c"WKWebView") {
-                let is_web: bool = msg_send![content, isKindOfClass: wk];
-                if is_web {
-                    let parent: *mut AnyObject = msg_send![content, superview];
-                    if parent.is_null() {
-                        return;
-                    }
-                    bounds = msg_send![content, frame];
-                    below = content;
-                    content = parent;
+        let Some(glass_cls) = AnyClass::get(c"NSGlassEffectView") else { return };
+        let mut parent: *mut AnyObject = msg_send![ns, contentView];
+        if parent.is_null() {
+            return;
+        }
+        // Where the page sits in the view the glass goes into: when the web view is the
+        // content view itself, the glass goes beside it, below.
+        let mut web_frame: NSRect = msg_send![parent, bounds];
+        let mut below: *mut AnyObject = std::ptr::null_mut();
+        if let Some(wk) = AnyClass::get(c"WKWebView") {
+            let is_web: bool = msg_send![parent, isKindOfClass: wk];
+            if is_web {
+                let up: *mut AnyObject = msg_send![parent, superview];
+                if up.is_null() {
+                    return;
                 }
+                web_frame = msg_send![parent, frame];
+                below = parent;
+                parent = up;
             }
-            // Taller than the window by a corner, upwards (AppKit's y grows up): the top corners fall outside.
-            let mut frame = bounds;
-            frame.size.height += GLASS_RADIUS + 4.0;
-            let view: *mut AnyObject = if let Some(cls) = AnyClass::get(c"NSGlassEffectView") {
-                let v: *mut AnyObject = msg_send![cls, alloc];
-                let v: *mut AnyObject = msg_send![v, initWithFrame: frame];
-                let _: () = msg_send![v, setCornerRadius: GLASS_RADIUS];
-                // A dark tint keeps white text readable over a bright wallpaper.
-                if let Some(color) = AnyClass::get(c"NSColor") {
-                    let tint: *mut AnyObject = msg_send![color, colorWithWhite: 0.0f64, alpha: 0.38f64];
-                    let _: () = msg_send![v, setTintColor: tint];
-                }
-                v
-            } else {
-                let Some(cls) = AnyClass::get(c"NSVisualEffectView") else { return };
-                let v: *mut AnyObject = msg_send![cls, alloc];
-                let v: *mut AnyObject = msg_send![v, initWithFrame: frame];
-                // HUD window material, blending with what's behind the window, always active.
-                let _: () = msg_send![v, setMaterial: 13isize];
-                let _: () = msg_send![v, setBlendingMode: 0isize];
-                let _: () = msg_send![v, setState: 1isize];
-                let _: () = msg_send![v, setWantsLayer: true];
-                let layer: *mut AnyObject = msg_send![v, layer];
-                if !layer.is_null() {
-                    let _: () = msg_send![layer, setCornerRadius: GLASS_RADIUS];
-                    let _: () = msg_send![layer, setMasksToBounds: true];
-                }
-                v
-            };
-            // Width and height follow the window (the width is a setting too).
-            let _: () = msg_send![view, setAutoresizingMask: 2usize | 16usize];
-            let _: () = msg_send![view, setAlphaValue: if STATE.lock().map(|s| s.open).unwrap_or(false) { 1.0f64 } else { 0.0f64 }];
-            // Below everything else in the window, the web view included.
-            let _: () = msg_send![content, addSubview: view, positioned: -1isize, relativeTo: below];
-            GLASS_VIEW.store(view as usize, std::sync::atomic::Ordering::Relaxed);
+        }
+        let flipped: bool = msg_send![parent, isFlipped];
+        let open = STATE.lock().map(|s| s.open).unwrap_or(false);
+        let mut views = Vec::new();
+        for sh in shapes {
+            let y = if flipped { web_frame.origin.y + sh.y } else { web_frame.origin.y + web_frame.size.height - sh.y - sh.h };
+            let frame = NSRect::new(objc2_foundation::NSPoint::new(web_frame.origin.x + sh.x, y), objc2_foundation::NSSize::new(sh.w, sh.h));
+            let v: *mut AnyObject = msg_send![glass_cls, alloc];
+            let v: *mut AnyObject = msg_send![v, initWithFrame: frame];
+            let _: () = msg_send![v, setCornerRadius: sh.r];
+            let _: () = msg_send![v, setAlphaValue: if open { 1.0f64 } else { 0.0f64 }];
+            let _: () = msg_send![parent, addSubview: v, positioned: -1isize, relativeTo: below];
+            views.push(v as usize);
+        }
+        if let Ok(mut g) = GLASS_VIEWS.lock() {
+            *g = views;
         }
     });
 }
@@ -502,16 +502,14 @@ fn glass_follow(app: &AppHandle, open: bool) {
         return;
     }
     let _ = app.run_on_main_thread(move || unsafe {
-        let view = GLASS_VIEW.load(std::sync::atomic::Ordering::Relaxed) as *mut AnyObject;
-        if view.is_null() {
-            return;
-        }
         let Some(ctx) = AnyClass::get(c"NSAnimationContext") else { return };
         let _: () = msg_send![ctx, beginGrouping];
         let current: *mut AnyObject = msg_send![ctx, currentContext];
-        let _: () = msg_send![current, setDuration: if open { 0.32f64 } else { 0.22f64 }];
-        let animator: *mut AnyObject = msg_send![view, animator];
-        let _: () = msg_send![animator, setAlphaValue: if open { 1.0f64 } else { 0.0f64 }];
+        let _: () = msg_send![current, setDuration: if open { 0.32f64 } else { 0.18f64 }];
+        for v in GLASS_VIEWS.lock().map(|g| g.clone()).unwrap_or_default() {
+            let animator: *mut AnyObject = msg_send![v as *mut AnyObject, animator];
+            let _: () = msg_send![animator, setAlphaValue: if open { 1.0f64 } else { 0.0f64 }];
+        }
         let _: () = msg_send![ctx, endGrouping];
     });
 }

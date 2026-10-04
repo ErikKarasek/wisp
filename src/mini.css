@@ -492,13 +492,16 @@ body.mini button { font: inherit; color: inherit; }
 .nt .step.past.wrap.one { -webkit-line-clamp: 1; }
 .nt .step.past.wrap.two { -webkit-line-clamp: 2; }
 
-/* Liquid Glass (a setting): the open notch lets the native glass under the page show
-   through. The closed pill stays black, to melt into the camera cut-out. */
-.nt.glass.is-open, .nt.glass.is-open .bar { background: transparent; }
-.nt.glass.is-open .card, .nt.glass.is-open .card:hover { background: rgba(0, 0, 0, .22); border-color: rgba(255, 255, 255, .14); }
+/* Liquid Glass (a setting): each card has a piece of native glass under it (notch.rs), so
+   the cards themselves go clear and the shelf between them is see-through. The top bar and
+   the closed pill stay black, to melt into the camera cut-out. */
+.nt.glass.is-open { background: transparent; }
+.nt.glass.is-open .bar { border-radius: 0 0 18px 18px; }
+.nt.glass.is-open .card, .nt.glass.is-open .card:hover { background: transparent; border-color: transparent; }
 .nt.glass.is-open .card.hero > .steps > .perm { background: none; }
-.nt.glass.is-open .step.past { color: #a9afba; }
-.nt.glass.is-open .steps .who, .nt.glass.is-open .week small, .nt.glass.is-open .times { color: #b3b8c2; }
+.nt.glass.is-open .panes { text-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+.nt.glass.is-open .step.past { color: #c3c8d1; }
+.nt.glass.is-open .steps .who, .nt.glass.is-open .week small, .nt.glass.is-open .times { color: #c8ccd4; }
 
 /* A narrow notch (the width setting) can't fit all four cards at their smallest: the crew
    steps aside so the player and the calendar keep their whole layout instead of being cut. */
