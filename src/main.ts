@@ -373,6 +373,10 @@ async function watchPaperclip(online: boolean) {
   warn(ok ? "Paperclip neodpovídal, restartoval jsem ho." : "Paperclip neodpovídá a restart se nepovedl. Mrkni na něj.");
 }
 
+// Wisp reloads this page when it stops answering (src-tauri/src/lifeline.rs): the safety nets live here.
+void invoke("page_alive").catch(() => {});
+setInterval(() => void invoke("page_alive").catch(() => {}), 60_000);
+
 // Tasks Paperclip parked after a hiccup go back to the queue; an agent whose runs keep failing is reported.
 setInterval(() => void watchAgents(paperclip, warn, (t) => toast(t, true)), 5 * 60_000);
 setTimeout(() => void watchAgents(paperclip, warn, (t) => toast(t, true)), 90_000);

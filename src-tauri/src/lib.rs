@@ -7,6 +7,7 @@ mod claudecode;
 mod cloudflare;
 mod github;
 mod launchd;
+mod lifeline;
 mod media;
 mod night;
 mod notch;
@@ -611,6 +612,11 @@ fn panel_fit(app: AppHandle, height: f64) {
 }
 
 #[tauri::command]
+fn page_alive() {
+    lifeline::ping();
+}
+
+#[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
 }
@@ -714,6 +720,8 @@ pub fn run() {
                     let _ = handle.autolaunch().enable();
                 }
             }
+            lifeline::ensure_keep_alive();
+            lifeline::start(handle);
             claudecode::start(handle);
             // The state the page sends the notch is kept for Wisp Buddy too (claudecode::buddy_summary).
             tauri::Listener::listen_any(app, "dispecink-state", |e| claudecode::remember_state(e.payload()));
@@ -813,6 +821,7 @@ pub fn run() {
             history_append,
             state_load,
             state_save,
+            page_alive,
             telegram_buttons,
             telegram_edit,
             telegram_send,
