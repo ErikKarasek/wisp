@@ -215,7 +215,6 @@ fn place(app: &AppHandle, rect: (f64, f64, f64, f64)) {
 /// shape inside it, so opening never resizes a window (which is what stutters).
 fn set_open(app: &AppHandle, open: bool, _geometry: Geometry) {
     let _ = app.emit_to(LABEL, "notch-open", open);
-    glass_follow(app, open);
 }
 
 /// Let clicks through everywhere except where the notch is actually drawn.
@@ -408,108 +407,4 @@ pub fn set_close_delay(millis: u64) {
 pub fn set_wing(width: f64) {
     // 0 hides the wings entirely (away from the Mac): only the notch itself is left.
     WING.store(width.clamp(0.0, 320.0) as u32, std::sync::atomic::Ordering::Relaxed);
-}
-
-// ---------- Liquid Glass under the open notch's cards (a setting) ----------
-//
-// The page can't blur or bend what is behind its window, so the glass is native: one
-// NSGlassEffectView (macOS 26) under each card, at the rectangles the page reports
-// (glass_shapes), like the separate glass pieces on an iPhone. They show only while the
-// notch is open; the closed pill and the top bar stay black, to melt into the camera cut-out.
-
-static GLASS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// The glass views, as pointers (main thread only).
-static GLASS_VIEWS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
-
-#[derive(serde::Deserialize, Clone, Copy)]
-pub struct Shape {
-    pub x: f64,
-    pub y: f64,
-    pub w: f64,
-    pub h: f64,
-    pub r: f64,
-}
-
-unsafe fn clear_glass() {
-    for v in GLASS_VIEWS.lock().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default() {
-        let v = v as *mut AnyObject;
-        let _: () = msg_send![v, removeFromSuperview];
-        let _: () = msg_send![v, release];
-    }
-}
-
-pub fn set_glass(app: &AppHandle, on: bool) {
-    GLASS_ON.store(on, std::sync::atomic::Ordering::Relaxed);
-    if !on {
-        let _ = app.run_on_main_thread(|| unsafe { clear_glass() });
-    }
-}
-
-/// The cards' rectangles in the page's points (top-left origin), from the page.
-pub fn glass_shapes(app: &AppHandle, shapes: Vec<Shape>) {
-    if !GLASS_ON.load(std::sync::atomic::Ordering::Relaxed) {
-        return;
-    }
-    let app2 = app.clone();
-    let _ = app.run_on_main_thread(move || unsafe {
-        clear_glass();
-        let Some(w) = app2.get_webview_window(LABEL) else { return };
-        let Ok(ns) = w.ns_window() else { return };
-        let ns = ns as *mut AnyObject;
-        let Some(glass_cls) = AnyClass::get(c"NSGlassEffectView") else { return };
-        let mut parent: *mut AnyObject = msg_send![ns, contentView];
-        if parent.is_null() {
-            return;
-        }
-        // Where the page sits in the view the glass goes into: when the web view is the
-        // content view itself, the glass goes beside it, below.
-        let mut web_frame: NSRect = msg_send![parent, bounds];
-        let mut below: *mut AnyObject = std::ptr::null_mut();
-        if let Some(wk) = AnyClass::get(c"WKWebView") {
-            let is_web: bool = msg_send![parent, isKindOfClass: wk];
-            if is_web {
-                let up: *mut AnyObject = msg_send![parent, superview];
-                if up.is_null() {
-                    return;
-                }
-                web_frame = msg_send![parent, frame];
-                below = parent;
-                parent = up;
-            }
-        }
-        let flipped: bool = msg_send![parent, isFlipped];
-        let open = STATE.lock().map(|s| s.open).unwrap_or(false);
-        let mut views = Vec::new();
-        for sh in shapes {
-            let y = if flipped { web_frame.origin.y + sh.y } else { web_frame.origin.y + web_frame.size.height - sh.y - sh.h };
-            let frame = NSRect::new(objc2_foundation::NSPoint::new(web_frame.origin.x + sh.x, y), objc2_foundation::NSSize::new(sh.w, sh.h));
-            let v: *mut AnyObject = msg_send![glass_cls, alloc];
-            let v: *mut AnyObject = msg_send![v, initWithFrame: frame];
-            let _: () = msg_send![v, setCornerRadius: sh.r];
-            let _: () = msg_send![v, setAlphaValue: if open { 1.0f64 } else { 0.0f64 }];
-            let _: () = msg_send![parent, addSubview: v, positioned: -1isize, relativeTo: below];
-            views.push(v as usize);
-        }
-        if let Ok(mut g) = GLASS_VIEWS.lock() {
-            *g = views;
-        }
-    });
-}
-
-/// Fade the glass with the notch opening and closing.
-fn glass_follow(app: &AppHandle, open: bool) {
-    if !GLASS_ON.load(std::sync::atomic::Ordering::Relaxed) {
-        return;
-    }
-    let _ = app.run_on_main_thread(move || unsafe {
-        let Some(ctx) = AnyClass::get(c"NSAnimationContext") else { return };
-        let _: () = msg_send![ctx, beginGrouping];
-        let current: *mut AnyObject = msg_send![ctx, currentContext];
-        let _: () = msg_send![current, setDuration: if open { 0.32f64 } else { 0.18f64 }];
-        for v in GLASS_VIEWS.lock().map(|g| g.clone()).unwrap_or_default() {
-            let animator: *mut AnyObject = msg_send![v as *mut AnyObject, animator];
-            let _: () = msg_send![animator, setAlphaValue: if open { 1.0f64 } else { 0.0f64 }];
-        }
-        let _: () = msg_send![ctx, endGrouping];
-    });
 }

@@ -614,16 +614,6 @@ fn notch_set_width(app: AppHandle, width: f64) {
 }
 
 #[tauri::command]
-fn notch_set_glass(app: AppHandle, on: bool) {
-    notch::set_glass(&app, on);
-}
-
-#[tauri::command]
-fn notch_glass_shapes(app: AppHandle, shapes: Vec<notch::Shape>) {
-    notch::glass_shapes(&app, shapes);
-}
-
-#[tauri::command]
 fn notch_geometry() -> notch::Geometry {
     notch::current_geometry()
 }
@@ -784,8 +774,6 @@ pub fn run() {
             notch_peek,
             notch_geometry,
             notch_set_width,
-            notch_set_glass,
-            notch_glass_shapes,
             notch_set_close_delay,
             notch_set_wing,
             buddy_drag,
