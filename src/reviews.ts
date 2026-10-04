@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-type PR = {
+export type PR = {
   repo: string;
   number: number;
   title: string;
@@ -23,7 +23,7 @@ type PR = {
 
 const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
-function checks(pr: PR): { cls: string; text: string } {
+export function checks(pr: PR): { cls: string; text: string } {
   const all = pr.statusCheckRollup ?? [];
   if (!all.length) return { cls: "s-sleep", text: "bez kontrol" };
   const bad = all.filter((c) => ["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"].includes(c.conclusion ?? c.state ?? ""));

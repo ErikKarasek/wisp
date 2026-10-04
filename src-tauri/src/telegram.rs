@@ -161,6 +161,36 @@ pub async fn send_buttons(r: &Remote, text: &str, buttons: &[(&str, String)]) ->
     v["result"]["message_id"].as_i64().ok_or("Telegram nevrátil id zprávy".into())
 }
 
+/// A message with rows of buttons the page lays out itself: `callback_data` ones come back
+/// as "tg-pr" events, `url` ones open a page. Returns the message id, so it can be edited later.
+pub async fn send_keyboard(r: &Remote, text: &str, keyboard: &Value) -> Result<i64, String> {
+    let v: Value = client()?
+        .post(format!("https://api.telegram.org/bot{}/sendMessage", r.token))
+        .json(&json!({ "chat_id": r.chat, "text": text, "disable_web_page_preview": true, "reply_markup": { "inline_keyboard": keyboard } }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    check(&v)?;
+    v["result"]["message_id"].as_i64().ok_or("Telegram nevrátil id zprávy".into())
+}
+
+/// Replace a message's text and its buttons (none when `keyboard` is empty).
+pub async fn edit_keyboard(r: &Remote, message_id: i64, text: &str, keyboard: &Value) -> Result<(), String> {
+    let v: Value = client()?
+        .post(format!("https://api.telegram.org/bot{}/editMessageText", r.token))
+        .json(&json!({ "chat_id": r.chat, "message_id": message_id, "text": text, "disable_web_page_preview": true, "reply_markup": { "inline_keyboard": keyboard } }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    check(&v)
+}
+
 /// Replace a message's text and drop its buttons.
 pub async fn edit(r: &Remote, message_id: i64, text: &str) {
     if let Ok(c) = client() {
@@ -256,6 +286,10 @@ pub fn start_listening(app: &AppHandle) {
                         let (answer, id) = rest.split_once(':').unwrap_or(("", ""));
                         let ok = crate::claudecode::decide(id, answer);
                         answer_callback(&r, qid, if ok { "Hotovo" } else { "Už je vyřízené" }).await;
+                    } else if data.starts_with("pr:") {
+                        // Merge or close a pull request: the main window asks "really?" and does it.
+                        answer_callback(&r, qid, "").await;
+                        let _ = app.emit_to("main", "tg-pr", json!({ "data": data, "messageId": q["message"]["message_id"] }));
                     }
                 } else if let Some(m) = u.get("message") {
                     if m["chat"]["id"].as_i64().map(|i| i.to_string()) != Some(r.chat.clone()) {
