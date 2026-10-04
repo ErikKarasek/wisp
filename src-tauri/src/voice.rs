@@ -58,8 +58,23 @@ pub fn start() -> Result<(), String> {
     Ok(())
 }
 
+/// A recording on disk; the file is deleted when this is dropped, whatever path the caller takes.
+pub struct Recording(PathBuf);
+
+impl Recording {
+    pub fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for Recording {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Stop and hand back the recording; None when there was none or it was too short to mean anything.
-pub fn stop() -> Option<PathBuf> {
+pub fn stop() -> Option<Recording> {
     let (mut child, path, began) = RECORDING.lock().unwrap_or_else(|e| e.into_inner()).take()?;
     // "q" lets ffmpeg finish the file properly.
     if let Some(mut stdin) = child.stdin.take() {
@@ -80,7 +95,7 @@ pub fn stop() -> Option<PathBuf> {
         let _ = std::fs::remove_file(&path);
         return None;
     }
-    Some(path)
+    Some(Recording(path))
 }
 
 #[derive(Serialize, Deserialize, Default, Debug)]
@@ -102,12 +117,13 @@ pub struct Heard {
     pub agent: String,
 }
 
-pub fn understand(path: &str, agents: &[String]) -> Result<Heard, String> {
+pub fn understand(rec: Recording, agents: &[String]) -> Result<Heard, String> {
+    let path = rec.path().to_string_lossy().into_owned();
     let agy = home().join(".local/bin/agy");
     if !agy.exists() {
         return Err("Chybí Antigravity CLI (agy).".into());
     }
-    let dir = std::path::Path::new(path).parent().ok_or("Nahrávka není.")?.to_path_buf();
+    let dir = rec.path().parent().ok_or("Nahrávka není.")?.to_path_buf();
     let now = {
         let secs = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as libc::time_t;
         let mut tm: libc::tm = unsafe { std::mem::zeroed() };
@@ -144,12 +160,10 @@ pub fn understand(path: &str, agents: &[String]) -> Result<Heard, String> {
         let answer = v["response"].as_str().unwrap_or_default();
         if let (Some(a), Some(b)) = (answer.find('{'), answer.rfind('}')) {
             if let Ok(h) = serde_json::from_str::<Heard>(&answer[a..=b]) {
-                let _ = std::fs::remove_file(path);
                 return Ok(h);
             }
         }
     }
-    let _ = std::fs::remove_file(path);
     Err("Gemini tomu nerozuměl. Zkus to znovu.".into())
 }
 
@@ -226,6 +240,6 @@ mod live {
         std::fs::copy(&wav, &copy).unwrap();
         let t = std::time::Instant::now();
         let names = vec!["Watcher".to_string(), "Fixer".to_string()];
-        println!("{:?} {:#?}", t.elapsed(), super::understand(&copy.to_string_lossy(), &names));
+        println!("{:?} {:#?}", t.elapsed(), super::understand(super::Recording(copy), &names));
     }
 }
