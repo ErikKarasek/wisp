@@ -152,6 +152,16 @@ async fn secret_exists(name: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+fn guard_load(app: AppHandle) -> Result<serde_json::Value, String> {
+    Ok(store::guard_load(config_dir(&app)?))
+}
+
+#[tauri::command]
+fn guard_save(app: AppHandle, value: serde_json::Value) -> Result<(), String> {
+    store::guard_save(config_dir(&app)?, &value)
+}
+
+#[tauri::command]
 fn history_load(app: AppHandle) -> Result<serde_json::Value, String> {
     Ok(store::history_load(config_dir(&app)?))
 }
@@ -788,6 +798,8 @@ pub fn run() {
             secret_exists,
             history_load,
             history_append,
+            guard_load,
+            guard_save,
             telegram_send,
             telegram_chats,
             telegram_bot,
