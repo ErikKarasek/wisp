@@ -22,6 +22,8 @@ export async function saveState(name: "guard" | "watchdog", value: object) {
 type WatchState = {
   /** How often each parked task was put back: after MAX_TRIES it is Erik's. */
   tries: Record<string, number>;
+  /** When each task in `tries` was last put back (ms): a block long after that is a new hiccup, not another failed retry. */
+  restoredAt: Record<string, number>;
   /** Parked tasks Erik was already told about, as "issueId@blockedAt". */
   told: string[];
   /** Per agent, the oldest failed run of the streak Erik was told about. */
@@ -33,7 +35,7 @@ let state: WatchState | null = null;
 async function watchState(): Promise<WatchState> {
   if (state) return state;
   const saved = await loadState<Partial<WatchState>>("watchdog");
-  state = { tries: saved?.tries ?? {}, told: saved?.told ?? [], failing: saved?.failing ?? {}, prSeen: saved?.prSeen };
+  state = { tries: saved?.tries ?? {}, restoredAt: saved?.restoredAt ?? {}, told: saved?.told ?? [], failing: saved?.failing ?? {}, prSeen: saved?.prSeen };
   return state;
 }
 const save = () => (state ? saveState("watchdog", state) : Promise.resolve());
@@ -85,6 +87,8 @@ const RETRYABLE = new Set([
 const MAX_TRIES = 3;
 /** Paperclip may still be sorting a fresh block out itself. */
 const SETTLE_MS = 5 * 60_000;
+/** A task that stayed unblocked this long after being put back has healed; its next block starts the count over. */
+const HEAL_MS = 60 * 60_000;
 const WORKING = new Set(["idle", "running", "error"]);
 
 async function unpark(snap: Extract<PaperclipSnapshot, { online: true }>, s: WatchState, warn: (t: string) => void, note: (t: string) => void) {
@@ -104,10 +108,16 @@ async function unpark(snap: Extract<PaperclipSnapshot, { online: true }>, s: Wat
       const cause: string | undefined = full.activeRecoveryAction?.cause ?? full.executionBlocker?.cause;
       // No recovery behind it: the agent blocked it on purpose and says why; the morning digest lists those.
       if (!cause) continue;
+      const restored = s.restoredAt[i.id];
+      if (restored && Date.parse(full.blockedTransitionAt ?? i.updatedAt) - restored > HEAL_MS) {
+        delete s.tries[i.id];
+        delete s.restoredAt[i.id];
+      }
       const tries = s.tries[i.id] ?? 0;
       if (RETRYABLE.has(cause) && tries < MAX_TRIES) {
         await restoreIssue(agent.id, i.id, `Wisp: put back after "${cause}" (try ${tries + 1} of ${MAX_TRIES}).`);
         s.tries[i.id] = tries + 1;
+        s.restoredAt[i.id] = Date.now();
         wake.add(agent.id);
         note(`${agent.name}: úkol ${i.identifier} se zasekl (${cause}), vrátil jsem ho do fronty.`);
         continue;
@@ -123,6 +133,7 @@ async function unpark(snap: Extract<PaperclipSnapshot, { online: true }>, s: Wat
   }
   // Forget finished tasks, so the files don't grow forever.
   for (const id of Object.keys(s.tries)) if (!open.has(id)) delete s.tries[id];
+  for (const id of Object.keys(s.restoredAt)) if (!open.has(id)) delete s.restoredAt[id];
   s.told = s.told.filter((k) => open.has(k.split("@")[0]));
 }
 
