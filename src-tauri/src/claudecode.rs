@@ -108,14 +108,90 @@ fn file_name(p: &str) -> String {
     p.rsplit('/').next().unwrap_or(p).to_string()
 }
 
+/// A file this big is not worth reading just to count its lines.
+const MAX_DIFF: u64 = 200 * 1024;
+
+/// How many lines a change adds and removes, counted the way a diff would:
+/// lines that stay the same on both sides are not counted twice.
+fn counts(old: &str, new: &str) -> (usize, usize) {
+    let a: Vec<&str> = old.lines().collect();
+    let b: Vec<&str> = new.lines().collect();
+    // Cut the matching start and end off first. Claude usually replaces a whole
+    // block to change a line or two in it, and this leaves only the real change,
+    // small enough for the quadratic part below.
+    let head = a.iter().zip(b.iter()).take_while(|(x, y)| x == y).count();
+    let (ra, rb) = (&a[head..], &b[head..]);
+    let tail = ra.iter().rev().zip(rb.iter().rev()).take_while(|(x, y)| x == y).count();
+    let (a, b) = (&ra[..ra.len() - tail], &rb[..rb.len() - tail]);
+    // Past this the longest common subsequence costs more than the answer is
+    // worth; count the blocks whole instead, which is what a diff shows anyway
+    // when nothing in them lines up.
+    if a.len() * b.len() > 250_000 {
+        return (b.len(), a.len());
+    }
+    // Only the length of the longest common subsequence is needed, so one row is enough.
+    let mut row = vec![0usize; b.len() + 1];
+    for x in a {
+        let mut corner = 0;
+        for (j, y) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = if x == y { corner + 1 } else { above.max(row[j]) };
+            corner = above;
+        }
+    }
+    let same = row[b.len()];
+    (b.len() - same, a.len() - same)
+}
+
+/// " +12 -3" behind the file name, or nothing when there is nothing honest to say.
+fn churn(tool: &str, input: &Value) -> String {
+    let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("");
+    let edit = |e: &Value| {
+        let g = |k: &str| e.get(k).and_then(Value::as_str).unwrap_or("");
+        counts(g("old_string"), g("new_string"))
+    };
+    let (add, del) = match tool {
+        "Edit" => edit(input),
+        "MultiEdit" => input.get("edits").and_then(Value::as_array).map_or((0, 0), |es| {
+            es.iter().fold((0, 0), |(a, d), e| {
+                let (x, y) = edit(e);
+                (a + x, d + y)
+            })
+        }),
+        // PreToolUse runs before the write, so the file on disk is still the old one.
+        "Write" => match std::fs::metadata(s("file_path")) {
+            // A file that is there but cannot be read or weighed is better left
+            // uncounted than counted as if it were new.
+            Ok(m) if m.is_file() => {
+                if m.len() > MAX_DIFF {
+                    return String::new();
+                }
+                match std::fs::read_to_string(s("file_path")) {
+                    Ok(was) => counts(&was, s("content")),
+                    Err(_) => return String::new(),
+                }
+            }
+            _ => counts("", s("content")),
+        },
+        _ => return String::new(),
+    };
+    match (add, del) {
+        (0, 0) => String::new(),
+        // A new file or a pure deletion reads better without the zero half.
+        (a, 0) => format!(" +{a}"),
+        (0, d) => format!(" -{d}"),
+        (a, d) => format!(" +{a} -{d}"),
+    }
+}
+
 /// What a tool call is doing, in a few Czech words.
 fn step(tool: &str, input: &Value) -> String {
     let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("");
     match tool {
         "Bash" => format!("Spouští: {}", short(s("command"), 90)),
         "Read" => format!("Čte {}", file_name(s("file_path"))),
-        "Edit" | "MultiEdit" => format!("Upravuje {}", file_name(s("file_path"))),
-        "Write" => format!("Píše {}", file_name(s("file_path"))),
+        "Edit" | "MultiEdit" => format!("Upravuje {}{}", file_name(s("file_path")), churn(tool, input)),
+        "Write" => format!("Píše {}{}", file_name(s("file_path")), churn(tool, input)),
         "NotebookEdit" => format!("Upravuje {}", file_name(s("notebook_path"))),
         "Grep" => format!("Hledá „{}“", short(s("pattern"), 60)),
         "Glob" => format!("Hledá soubory {}", short(s("pattern"), 60)),
@@ -133,7 +209,11 @@ fn detail(tool: &str, input: &Value) -> String {
     let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("");
     match tool {
         "Bash" => short(s("command"), 160),
-        "Read" | "Edit" | "MultiEdit" | "Write" => s("file_path").replace(&std::env::var("HOME").unwrap_or_default(), "~"),
+        // The size of the change belongs on the permission card too: it is the
+        // difference between waving through a typo and a rewrite.
+        "Read" | "Edit" | "MultiEdit" | "Write" => {
+            format!("{}{}", s("file_path").replace(&std::env::var("HOME").unwrap_or_default(), "~"), churn(tool, input))
+        }
         "WebFetch" => s("url").to_string(),
         _ => step(tool, input),
     }
@@ -657,5 +737,89 @@ mod ask_tests {
         for answer in ["terminal", "", "{}", "\"Rychle\"", "null"] {
             assert_eq!(ask_output(None, answer), "", "should fall back: {answer:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod churn_tests {
+    use super::*;
+
+    #[test]
+    fn nothing_changed_is_nothing_shown() {
+        assert_eq!(counts("a\nb\nc", "a\nb\nc"), (0, 0));
+        assert_eq!(churn("Edit", &json!({ "old_string": "a\nb", "new_string": "a\nb" })), "");
+    }
+
+    #[test]
+    fn only_the_changed_lines_count() {
+        // A whole block replaced to change the middle line: a diff shows +1 -1,
+        // not +3 -3, and so should the ticker.
+        let old = "fn a() {\n    let x = 1;\n}";
+        let new = "fn a() {\n    let x = 2;\n}";
+        assert_eq!(counts(old, new), (1, 1));
+    }
+
+    #[test]
+    fn added_and_removed_lines() {
+        assert_eq!(counts("a\nb", "a\nb\nc\nd"), (2, 0));
+        assert_eq!(counts("a\nb\nc", "a"), (0, 2));
+        assert_eq!(counts("", "a\nb\nc"), (3, 0));
+        assert_eq!(counts("a\nb\nc", ""), (0, 3));
+    }
+
+    #[test]
+    fn a_moved_line_reads_as_one_added_and_one_removed() {
+        assert_eq!(counts("a\nb\nc", "b\nc\na"), (1, 1));
+    }
+
+    #[test]
+    fn an_edit_is_labelled() {
+        let v = json!({ "file_path": "/x/mini.ts", "old_string": "a\nb\nc", "new_string": "a\nZ\nc" });
+        assert_eq!(churn("Edit", &v), " +1 -1");
+        assert_eq!(step("Edit", &v), "Upravuje mini.ts +1 -1");
+    }
+
+    #[test]
+    fn multiedit_adds_its_edits_up() {
+        let v = json!({ "file_path": "/x/a.rs", "edits": [
+            { "old_string": "a", "new_string": "b" },
+            { "old_string": "c\nd", "new_string": "c\nd\ne\nf" },
+        ]});
+        assert_eq!(churn("MultiEdit", &v), " +3 -1");
+    }
+
+    #[test]
+    fn a_write_to_a_file_that_is_not_there_is_all_new() {
+        let v = json!({ "file_path": "/nekde/takovy/soubor/nenitu.txt", "content": "a\nb\nc" });
+        assert_eq!(churn("Write", &v), " +3");
+    }
+
+    #[test]
+    fn a_write_over_a_file_counts_against_what_is_in_it() {
+        let dir = std::env::temp_dir().join("wisp-churn-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.txt");
+        std::fs::write(&f, "a\nb\nc\n").unwrap();
+        let v = json!({ "file_path": f.to_string_lossy(), "content": "a\nZ\nc\n" });
+        assert_eq!(churn("Write", &v), " +1 -1");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn tools_that_change_nothing_say_nothing() {
+        for tool in ["Read", "Bash", "Grep"] {
+            assert_eq!(churn(tool, &json!({ "file_path": "/x/a", "command": "ls" })), "");
+        }
+        assert_eq!(step("Read", &json!({ "file_path": "/x/mini.ts" })), "Čte mini.ts");
+    }
+
+    #[test]
+    fn a_huge_rewrite_still_answers_quickly() {
+        let old: String = (0..3000).map(|i| format!("řádek {i}\n")).collect();
+        let new: String = (0..3000).map(|i| format!("jiný řádek {i}\n")).collect();
+        let t = std::time::Instant::now();
+        let (add, del) = counts(&old, &new);
+        assert!(t.elapsed() < std::time::Duration::from_millis(500), "trvalo {:?}", t.elapsed());
+        assert_eq!((add, del), (3000, 3000));
     }
 }
