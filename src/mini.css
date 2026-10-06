@@ -486,9 +486,16 @@ body.mini button { font: inherit; color: inherit; }
    the player steps aside so the calendar keeps its week, the text scrolls, and the buttons
    always stay in view at the bottom. */
 .nt.asking .card.music { display: none !important; }
-.nt.asking .card.hero > .steps { max-height: 100%; overflow-y: auto; align-content: start; scrollbar-width: none; }
-.nt.asking .card.hero > .steps::-webkit-scrollbar { display: none; }
-.nt.asking .card.hero > .steps > .perm { position: sticky; bottom: 0; margin-top: 2px; padding-top: 6px; background: linear-gradient(transparent, #000 6px); }
+/* Buttons in the card mean the card is waiting on an answer, whether or not the
+   notch made it into asking mode: the bot steps aside so the text gets the whole
+   width, the text scrolls, and the buttons stay in view at the bottom. Without
+   this the card overflows the narrow hero and `overflow: hidden` cuts the
+   buttons off, so they cannot be clicked. */
+.nt .card.hero:has(> .steps > .perm) { grid-template-columns: minmax(0, 1fr); }
+.nt .card.hero:has(> .steps > .perm) .big-wrap { display: none; }
+.nt .card.hero > .steps:has(> .perm) { max-height: 100%; overflow-y: auto; align-content: start; scrollbar-width: none; }
+.nt .card.hero > .steps:has(> .perm)::-webkit-scrollbar { display: none; }
+.nt .card.hero > .steps > .perm { position: sticky; bottom: 0; margin-top: 2px; padding-top: 6px; background: linear-gradient(transparent, #000 6px); }
 .nt .step.past.wrap.one { -webkit-line-clamp: 1; }
 .nt .step.past.wrap.two { -webkit-line-clamp: 2; }
 

@@ -256,10 +256,16 @@ export function jobItem(j: Job, now = Date.now()): Item {
   // Jobs that run an AI themselves: Antigravity (Gemini) or Claude Code.
   const cmd = j.command ?? j.program.join(" ");
   const engine = /gemini-jobs\/|\bagy\b/.test(cmd) ? ("Gemini" as const) : /\bclaude\b/.test(cmd) ? ("Claude" as const) : undefined;
-  // run.sh's third argument is the model; Claude there is AI Pro's own Claude, not Erik's subscription.
-  const model = engine === "Gemini" ? (/run\.sh\s+\S+\s+\S+\s+(\S+)/.exec(cmd)?.[1] ?? "gemini-3.1-pro-high") : null;
+  // run.sh's third argument is the model, or several separated by commas: it falls through
+  // to the next one when a bucket runs out. Claude there is AI Pro's own Claude, not Erik's
+  // subscription, and AI Pro meters Claude separately from Gemini, so one chain survives both.
+  const chain = (/run\.sh\s+\S+\s+\S+\s+(\S+)/.exec(cmd)?.[1] ?? "gemini-3.1-pro-high").split(",");
+  const model = engine === "Gemini" ? chain[0] : null;
   const viaClaude = !!model?.startsWith("claude");
-  if (engine === "Gemini") facts.push(["Motor", viaClaude ? `Claude v Antigravity (Google AI Pro), ${model}` : `Gemini v Antigravity (Google AI Pro), ${model}`]);
+  if (engine === "Gemini") {
+    const backup = chain.length > 1 ? `, záloha ${chain.slice(1).join(", ")}` : "";
+    facts.push(["Motor", `${viaClaude ? "Claude" : "Gemini"} v Antigravity (Google AI Pro), ${model}${backup}`]);
+  }
 
   return {
     id: `job:${j.label}`,
