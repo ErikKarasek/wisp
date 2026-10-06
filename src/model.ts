@@ -260,11 +260,14 @@ export function jobItem(j: Job, now = Date.now()): Item {
   // to the next one when a bucket runs out. Claude there is AI Pro's own Claude, not Erik's
   // subscription, and AI Pro meters Claude separately from Gemini, so one chain survives both.
   const chain = (/run\.sh\s+\S+\s+\S+\s+(\S+)/.exec(cmd)?.[1] ?? "gemini-3.1-pro-high").split(",");
+  // "claude-cli" is not an Antigravity model: it is Erik's own Claude subscription.
+  const modelName = (m: string) => (m === "claude-cli" ? "claude CLI (tvoje předplatné)" : m);
   const model = engine === "Gemini" ? chain[0] : null;
   const viaClaude = !!model?.startsWith("claude");
   if (engine === "Gemini") {
-    const backup = chain.length > 1 ? `, záloha ${chain.slice(1).join(", ")}` : "";
-    facts.push(["Motor", `${viaClaude ? "Claude" : "Gemini"} v Antigravity (Google AI Pro), ${model}${backup}`]);
+    const where = model === "claude-cli" ? "Claude (tvoje předplatné)" : `${viaClaude ? "Claude" : "Gemini"} v Antigravity (Google AI Pro), ${model}`;
+    const backup = chain.length > 1 ? `, záloha ${chain.slice(1).map(modelName).join(", ")}` : "";
+    facts.push(["Motor", `${where}${backup}`]);
   }
 
   return {
