@@ -719,6 +719,91 @@ export async function startNotch() {
     );
   }
 
+  // ----- AskUserQuestion: Claude's own question, answered on buttons in the notch -----
+  type CcQuestion = {
+    id: string;
+    project: string;
+    items: { question: string; header: string; options: { label: string; description: string }[]; multi: boolean }[];
+  };
+  let ccQ: CcQuestion | null = null;
+  /** Which of the questions is on screen, and what is picked for it so far. */
+  let qAt = 0;
+  let qPicked: string[] = [];
+  /** question text -> the label picked, or the labels where several are allowed. */
+  let qAnswers: Record<string, string | string[]> = {};
+  const closeQ = () => {
+    ccQ = null;
+    qAt = 0;
+    qPicked = [];
+    qAnswers = {};
+    redraw();
+  };
+  void listen<CcQuestion>("cc-question", (e) => {
+    ccQ = e.payload;
+    qAt = 0;
+    qPicked = [];
+    qAnswers = {};
+    if (cfg.sounds !== false) sounds.you();
+    redraw();
+  });
+  void listen<string>("cc-question-done", (e) => {
+    // Nobody answered in time and Claude Code went back to the terminal.
+    if (ccQ?.id === e.payload) closeQ();
+  });
+  function renderQuestion() {
+    const q = ccQ!;
+    const item = q.items[qAt];
+    // The mode carries what is picked, so a toggle in a multi-select redraws the card.
+    setMode(`ask:${q.id}:${qAt}:${qPicked.join("\u0000")}`);
+    const of = q.items.length > 1 ? ` (${qAt + 1}/${q.items.length})` : "";
+    const head = `${q.project} · ${item.header || "Claude se ptá"}${of}`;
+    const notes = item.options
+      .filter((o) => o.description)
+      .map((o) => `<div class="step past wrap one"><small><b>${escHtml(o.label)}</b> ${escHtml(o.description)}</small></div>`)
+      .join("");
+    const last = qAt + 1 >= q.items.length;
+    steps.innerHTML = `<small class="who warn">${escHtml(head)}</small>
+      <div class="step past wrap">${escHtml(item.question)}</div>
+      ${notes}
+      <div class="perm">
+        ${item.options
+          .map((o, i) => `<button data-o="${i}"${qPicked.includes(o.label) ? ' class="go"' : ""}>${escHtml(o.label)}</button>`)
+          .join("")}
+        <button data-a="terminal" title="Nech to na terminálu">Terminál</button>
+        ${item.multi ? `<button data-a="next" class="go">${last ? "Hotovo" : "Dál"}</button>` : ""}
+      </div>`;
+    const done = () => {
+      void invoke("cc_decide", { id: q.id, answer: JSON.stringify(qAnswers) });
+      wink();
+      closeQ();
+    };
+    const step = () => {
+      if (!qPicked.length) return;
+      qAnswers[item.question] = item.multi ? [...qPicked] : qPicked[0];
+      if (last) return done();
+      qAt += 1;
+      qPicked = [];
+      redraw();
+    };
+    steps.querySelectorAll<HTMLButtonElement>("[data-o]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const label = item.options[Number(b.dataset.o)].label;
+        // One answer: picking it moves on. Several: the button toggles and Hotovo sends.
+        if (!item.multi) {
+          qPicked = [label];
+          return step();
+        }
+        qPicked = qPicked.includes(label) ? qPicked.filter((l) => l !== label) : [...qPicked, label];
+        redraw();
+      }),
+    );
+    steps.querySelector('[data-a="next"]')?.addEventListener("click", step);
+    steps.querySelector('[data-a="terminal"]')!.addEventListener("click", () => {
+      void invoke("cc_decide", { id: q.id, answer: "terminal" });
+      closeQ();
+    });
+  }
+
   // ----- a file dropped on the notch, and a question about it (Gemini answers) -----
   let fileAsk: { path: string; name: string } | null = null;
   // Outside Tauri (a browser copy) there is no webview; the rest of the notch must still work.
@@ -1272,12 +1357,16 @@ export async function startNotch() {
     // Claude Code asking for permission comes first, then a dropped file.
     // An agent's question gets the whole card too, like a quick question.
     const agentAsks = !working && s.items.some((i) => i.ask);
-    root.classList.toggle("asking", perms.length > 0 || !!fileAsk || quickAsk || snipOn || agentAsks);
+    root.classList.toggle("asking", perms.length > 0 || !!ccQ || !!fileAsk || quickAsk || snipOn || agentAsks);
     if (perms.length) {
       renderPerm();
       return renderCrew(s, working);
     }
     permShown = null;
+    if (ccQ) {
+      renderQuestion();
+      return renderCrew(s, working);
+    }
     if (fileAsk || quickAsk || snipOn) return renderCrew(s, working);
     if (Date.now() < beatenUntil) return renderCrew(s, working);
     const failed = !working ? s.items.find((i) => i.state === "bad") : undefined;
