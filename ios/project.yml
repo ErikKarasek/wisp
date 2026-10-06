@@ -36,6 +36,7 @@ targets:
           - CFBundleURLName: cz.erikkarasek.dispecink.phone
             CFBundleURLSchemes: [dispecink]
         BGTaskSchedulerPermittedIdentifiers: [cz.erikkarasek.dispecink.refresh]
+        NSFocusStatusUsageDescription: Aby Wisp při soustředění mlčel o všem kromě povolení, která po tobě Claude chce.
         UILaunchScreen: {}
         UIUserInterfaceStyle: Dark
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
