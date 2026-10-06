@@ -553,6 +553,10 @@ export async function startNotch() {
     if (steps.dataset.mode === mode) return;
     steps.dataset.mode = mode;
     if (mode !== "work") tickerSig = "";
+    // Anything else written into the card wipes the failure card. Forget which
+    // failure was shown, or renderFailure would refuse to draw it again and the
+    // card would be stuck on whatever painted over it.
+    if (!mode.startsWith("fail:")) steps.dataset.fail = "";
     steps.classList.remove("enter");
     void steps.offsetWidth;
     steps.classList.add("enter");
