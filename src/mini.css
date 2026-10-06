@@ -396,6 +396,13 @@ body.mini button { font: inherit; color: inherit; }
 .nt .ticker .step { height: 24px; line-height: 24px; display: flex; align-items: center; gap: 6px; }
 .nt .ticker .step .ic { flex: none; width: 14px; height: 14px; }
 .nt .ticker .step .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* How much the edit adds and removes. Never shrinks: the file name is the part
+   that can be cut, the numbers are the reason the line is worth reading. */
+.nt .ticker .step .churn { flex: none; display: flex; gap: 4px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.nt .ticker .step .churn i { font-style: normal; }
+.nt .ticker .step .churn .add { color: #4fbf7d; }
+.nt .ticker .step .churn .del { color: #e0605a; }
+.nt .ticker .step.past .churn { opacity: .55; }
 .nt .ticker .step.now .tx { background: linear-gradient(90deg, #8a909b 0%, #fff 45%, #fff 55%, #8a909b 100%) 0 0 / 220% 100%;
   -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.2s linear infinite; }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -120% 0; } }
