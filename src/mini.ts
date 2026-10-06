@@ -582,7 +582,17 @@ export async function startNotch() {
     roll.innerHTML = shown
       .map((l, i) => {
         const now = i === shown.length - 1;
-        return `<div class="step ${now ? "now" : "past"}">${now ? TERM : COPY}<span class="tx">${escHtml(l)}</span></div>`;
+        // "+12 -3" sits at the end of the line, which is exactly what the
+        // ellipsis eats first. Give it its own element that never shrinks, so
+        // the file name is what gets cut instead of the numbers.
+        const m = / ((?:\+\d+)(?: -\d+)?|-\d+)$/.exec(l);
+        const churn = m
+          ? `<b class="churn">${m[1]
+              .split(" ")
+              .map((n) => `<i class="${n.startsWith("+") ? "add" : "del"}">${n}</i>`)
+              .join("")}</b>`
+          : "";
+        return `<div class="step ${now ? "now" : "past"}">${now ? TERM : COPY}<span class="tx">${escHtml(m ? l.slice(0, m.index) : l)}</span>${churn}</div>`;
       })
       .join("");
     if (moved) {

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <title>Wisp notch harness</title>
+  </head>
+  <body>
+    <script>
+      // Stands in for Tauri so the notch page runs in a plain browser: listen()
+      // keeps its handler here and __fire() plays an event into it.
+      const handlers = new Map();
+      window.__calls = [];
+      window.__TAURI_INTERNALS__ = {
+        transformCallback: (cb) => cb,
+        invoke: (cmd, args) => {
+          if (cmd === "plugin:event|listen") {
+            const list = handlers.get(args.event) ?? [];
+            list.push(args.handler);
+            handlers.set(args.event, list);
+            return Promise.resolve(list.length);
+          }
+          window.__calls.push({ cmd, args });
+          if (cmd === "notch_geometry") return Promise.resolve({ notchWidth: 180, barHeight: 38, hasNotch: true });
+          if (cmd === "config_load") return Promise.resolve({ sounds: false });
+          if (cmd === "calendar_status") return Promise.resolve({ ok: false });
+          if (cmd === "calendar_events") return Promise.resolve([]);
+          if (cmd === "media_now") return Promise.resolve(null);
+          return Promise.resolve(null);
+        },
+      };
+      window.__fire = (event, payload) => {
+        const list = handlers.get(event) ?? [];
+        list.forEach((h) => h({ event, id: 1, payload }));
+        return list.length;
+      };
+      window.__listening = () => [...handlers.keys()].sort();
+    </script>
+    <script type="module" src="/src/entry.ts"></script>
+  </body>
+</html>
