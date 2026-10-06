@@ -20,6 +20,8 @@ pub const PORT: u16 = 47811;
 const HOLD: Duration = Duration::from_secs(60);
 /// Away from the Mac, it waits this long for an answer from the phone.
 const HOLD_AWAY: Duration = Duration::from_secs(600);
+/// Claude's own question (AskUserQuestion) waits longer: it has to be read, not just waved through.
+const HOLD_ASK: Duration = Duration::from_secs(150);
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -286,6 +288,107 @@ fn permission(app: &AppHandle, v: &Value) -> String {
     json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": decision } }).to_string()
 }
 
+// ---------- AskUserQuestion: Claude's own question, answered in the notch ----------
+
+#[derive(Serialize, Clone)]
+pub struct CcOption {
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CcQuestionItem {
+    pub question: String,
+    pub header: String,
+    pub options: Vec<CcOption>,
+    pub multi: bool,
+}
+
+#[derive(Serialize, Clone)]
+pub struct CcQuestion {
+    pub id: String,
+    pub project: String,
+    pub items: Vec<CcQuestionItem>,
+}
+
+/// Claude Code's shape: 1 to 4 questions, each with 2 to 4 options. Anything else is
+/// None, and the question goes back to the terminal rather than into a half-drawn card.
+fn questions(input: Option<&Value>) -> Option<Vec<CcQuestionItem>> {
+    let raw = input?.get("questions")?.as_array()?;
+    if raw.is_empty() || raw.len() > 4 {
+        return None;
+    }
+    let mut items = Vec::new();
+    for q in raw {
+        let question = q.get("question").and_then(Value::as_str).filter(|s| !s.is_empty())?;
+        let opts = q.get("options")?.as_array()?;
+        if opts.len() < 2 || opts.len() > 4 {
+            return None;
+        }
+        let mut options = Vec::new();
+        for o in opts {
+            let label = o.get("label").and_then(Value::as_str).filter(|s| !s.is_empty())?;
+            options.push(CcOption {
+                label: label.to_string(),
+                description: o.get("description").and_then(Value::as_str).unwrap_or("").to_string(),
+            });
+        }
+        items.push(CcQuestionItem {
+            question: question.to_string(),
+            header: q.get("header").and_then(Value::as_str).unwrap_or("").chars().take(12).collect(),
+            options,
+            multi: q.get("multiSelect").and_then(Value::as_bool).unwrap_or(false),
+        });
+    }
+    Some(items)
+}
+
+/// The PreToolUse hook matched on AskUserQuestion: hold the tool while the notch
+/// shows the choices, then hand Claude Code the answers as the tool's input.
+fn question(app: &AppHandle, v: &Value) -> String {
+    if v.get("tool_name").and_then(Value::as_str) != Some("AskUserQuestion") {
+        return String::new();
+    }
+    let Some(items) = questions(v.get("tool_input")) else { return String::new() };
+    let id = format!("q{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+    let q = CcQuestion { id: id.clone(), project: project(v), items };
+    let (tx, rx) = channel();
+    PENDING.lock().unwrap().get_or_insert_with(HashMap::new).insert(id.clone(), tx);
+    let _ = app.emit("cc-question", q);
+    crate::notch::peek(app, HOLD_ASK.as_millis() as u64);
+    let answer = rx.recv_timeout(HOLD_ASK).unwrap_or_default();
+    PENDING.lock().unwrap().get_or_insert_with(HashMap::new).remove(&id);
+    let _ = app.emit("cc-question-done", id);
+    crate::notch::release();
+    // The notch sends {"<question>": "<label>"}, or a list of labels where several
+    // answers are allowed. Nothing usable (Terminál, or no answer at all) and Claude
+    // Code asks in the terminal, exactly as it would without Wisp.
+    ask_output(v.pointer("/tool_input/questions"), &answer)
+}
+
+/// What Claude Code gets back: the questions it asked, plus the answers, as the
+/// tool's new input. An answer that is not a filled-in object (Terminál, or nobody
+/// answered) gives nothing back, and Claude Code asks in the terminal as it would
+/// without Wisp.
+fn ask_output(asked: Option<&Value>, answer: &str) -> String {
+    let Ok(answers) = serde_json::from_str::<Value>(answer) else { return String::new() };
+    if !answers.as_object().is_some_and(|m| !m.is_empty()) {
+        return String::new();
+    }
+    json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": {
+                "questions": asked.cloned().unwrap_or_else(|| json!([])),
+                "answers": answers,
+            },
+        }
+    })
+    .to_string()
+}
+
 /// The answer from the notch's buttons.
 pub fn decide(id: &str, answer: &str) -> bool {
     let tx = PENDING.lock().unwrap().get_or_insert_with(HashMap::new).remove(id);
@@ -362,7 +465,7 @@ fn handle(app: &AppHandle, mut req: tiny_http::Request) {
     if path == "/buddy/state" {
         return respond(req, buddy_summary().to_string());
     }
-    if !matches!(path.as_str(), "/cc/event" | "/cc/permission" | "/notify" | "/focus/on" | "/focus/off") {
+    if !matches!(path.as_str(), "/cc/event" | "/cc/permission" | "/cc/ask" | "/notify" | "/focus/on" | "/focus/off") {
         let _ = req.respond(tiny_http::Response::from_string("").with_status_code(404));
         return;
     }
@@ -378,6 +481,10 @@ fn handle(app: &AppHandle, mut req: tiny_http::Request) {
         }
         "/cc/permission" => {
             let out = permission(app, &v);
+            respond(req, out);
+        }
+        "/cc/ask" => {
+            let out = question(app, &v);
             respond(req, out);
         }
         // Local scripts (the watchers in ~/Developer/hlidaci): a message for Erik.
@@ -458,9 +565,97 @@ pub fn set_hooks(on: bool) -> Result<(), String> {
             add(hooks, event, hook(key, "event", 5, true));
         }
         add(hooks, "PermissionRequest", hook(key, "permission", HOLD_AWAY.as_secs() + 15, false));
+        // AskUserQuestion needs its own PreToolUse entry: the one above is async and
+        // fire-and-forget, this one holds the tool until the notch has the answer.
+        if let Some(list) = hooks.entry("PreToolUse").or_insert_with(|| json!([])).as_array_mut() {
+            list.push(json!({ "matcher": "AskUserQuestion", "hooks": [hook(key, "ask", HOLD_ASK.as_secs() + 15, false)] }));
+        }
     }
     let out = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.dispecink-tmp");
     std::fs::write(&tmp, out + "\n").map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod ask_tests {
+    use super::*;
+
+    fn input(questions: Value) -> Value {
+        json!({ "questions": questions })
+    }
+
+    #[test]
+    fn reads_claude_codes_shape() {
+        let v = input(json!([{
+            "question": "Kterou cestou?", "header": "Přístup", "multiSelect": true,
+            "options": [{"label": "Rychle", "description": "Dneska"}, {"label": "Pořádně"}],
+        }]));
+        let items = questions(Some(&v)).expect("a well-formed question");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].header, "Přístup");
+        assert!(items[0].multi);
+        assert_eq!(items[0].options.len(), 2);
+        // A missing description is empty, not a reason to drop the question.
+        assert_eq!(items[0].options[1].description, "");
+    }
+
+    #[test]
+    fn a_header_longer_than_twelve_is_cut() {
+        let v = input(json!([{
+            "question": "q", "header": "Dlouhatánský nadpis",
+            "options": [{"label": "a"}, {"label": "b"}],
+        }]));
+        let items = questions(Some(&v)).unwrap();
+        assert_eq!(items[0].header.chars().count(), 12);
+    }
+
+    #[test]
+    fn anything_outside_the_shape_goes_to_the_terminal() {
+        // One option, five options, no options, no questions, an empty label, nothing at all.
+        for bad in [
+            input(json!([{ "question": "q", "options": [{"label": "a"}] }])),
+            input(json!([{ "question": "q", "options": (0..5).map(|i| json!({"label": i.to_string()})).collect::<Vec<_>>() }])),
+            input(json!([{ "question": "q" }])),
+            input(json!([])),
+            input(json!([{ "question": "q", "options": [{"label": ""}, {"label": "b"}] }])),
+            json!({}),
+        ] {
+            assert!(questions(Some(&bad)).is_none(), "should be refused: {bad}");
+        }
+        assert!(questions(None).is_none());
+    }
+
+    #[test]
+    fn five_questions_are_too_many() {
+        let v = input((0..5).map(|_| json!({ "question": "q", "options": [{"label": "a"}, {"label": "b"}] })).collect::<Vec<_>>().into());
+        assert!(questions(Some(&v)).is_none());
+    }
+
+    #[test]
+    fn the_answer_carries_the_questions_back() {
+        let asked = json!([{ "question": "Kterou cestou?", "options": [{"label": "Rychle"}, {"label": "Pořádně"}] }]);
+        let out = ask_output(Some(&asked), r#"{"Kterou cestou?":"Rychle"}"#);
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let o = &v["hookSpecificOutput"];
+        assert_eq!(o["hookEventName"], "PreToolUse");
+        assert_eq!(o["permissionDecision"], "allow");
+        assert_eq!(o["updatedInput"]["questions"], asked);
+        assert_eq!(o["updatedInput"]["answers"]["Kterou cestou?"], "Rychle");
+    }
+
+    #[test]
+    fn several_answers_stay_a_list() {
+        let out = ask_output(None, r#"{"Co zapnout?":["A","B"]}"#);
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["hookSpecificOutput"]["updatedInput"]["answers"]["Co zapnout?"], json!(["A", "B"]));
+    }
+
+    #[test]
+    fn no_usable_answer_means_the_terminal() {
+        // Terminál, a timeout (empty), an empty object, and something that is not an object.
+        for answer in ["terminal", "", "{}", "\"Rychle\"", "null"] {
+            assert_eq!(ask_output(None, answer), "", "should fall back: {answer:?}");
+        }
+    }
 }
