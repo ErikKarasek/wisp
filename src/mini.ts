@@ -1081,6 +1081,56 @@ export async function startNotch() {
     done("Hlas", h.heard ? "Tohle nevím, jak udělat. Zkus otázku, připomínku, noční směnu nebo úkol pro agenta." : "Nic jsem nezachytil. Drž ⌃⌥V, dokud mluvíš.");
   });
 
+  // ----- what the week was like: once a week, out of the history the Mac keeps -----
+  type Hist = { at: number; id: string; name: string; state: string; text: string };
+  /** Rok a číslo týdne, aby karta přišla jednou za týden a ne každé otevření. */
+  const weekStamp = (d = new Date()) => {
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+    const first = Date.UTC(t.getUTCFullYear(), 0, 1);
+    return `${t.getUTCFullYear()}-${Math.ceil(((t.getTime() - first) / 86_400_000 + 1) / 7)}`;
+  };
+  const tally = (hs: Hist[]) => {
+    const m = new Map<string, number>();
+    for (const h of hs) m.set(h.name, (m.get(h.name) ?? 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1]);
+  };
+  const times = (n: number) => (n === 1 ? "jednou" : `${n}×`);
+  /** Karta s týdnem, nebo null, když se za týden nestalo nic, co by stálo za řeč. */
+  function recapBody(all: Hist[]): string | null {
+    const week = all.filter((h) => h.at >= Date.now() - 7 * 86_400_000);
+    const done = week.filter((h) => h.state === "done");
+    const bad = week.filter((h) => h.state === "bad");
+    const you = week.filter((h) => h.state === "you" || h.state === "new").length;
+    if (done.length + bad.length < 5) return null;
+    const top = tally(done)[0];
+    const worstOnes = tally(bad).slice(0, 3);
+    const lines = [
+      `<div class="step past wrap">${done.length ? `Doběhlo ${times(done.length)}` : "Nic nedoběhlo"}${bad.length ? `, selhalo ${times(bad.length)}` : ", nic nespadlo"}.</div>`,
+      top ? `<div class="step past wrap one"><small>Nejvíc maká ${escHtml(top[0])} (${times(top[1])}).</small></div>` : "",
+      worstOnes.length
+        ? `<div class="step past wrap one"><small>Padalo: ${worstOnes.map(([n, c]) => `${escHtml(n)} ${times(c)}`).join(", ")}.</small></div>`
+        : "",
+      you ? `<div class="step past wrap one"><small>Tvoje slovo si vyžádali ${times(you)}.</small></div>` : "",
+    ];
+    return `${lines.filter(Boolean).join("")}<div class="perm"><button data-a="ok" class="go">Jasně</button></div>`;
+  }
+  async function maybeRecap() {
+    // Jen jednou za týden. Značka patří k téhle stránce, ne ke stavu agentů,
+    // takže si ji drží webview a nemusí kvůli ní na disk nikdo jiný sahat.
+    if (localStorage.getItem("wisp-recap-week") === weekStamp()) return;
+    if (snipOn || quickAsk || fileAsk || perms.length) return;
+    const all = await invoke<Hist[]>("history_load").catch(() => [] as Hist[]);
+    const body = Array.isArray(all) ? recapBody(all) : null;
+    if (!body) return;
+    localStorage.setItem("wisp-recap-week", weekStamp());
+    snipCard("Minulý týden", body);
+    steps.querySelector('[data-a="ok"]')!.addEventListener("click", closeSnip);
+    void invoke("notch_peek", { millis: 20_000 });
+  }
+  // Až se notch rozkouká po startu, ne uprostřed toho, jak naskakuje.
+  setTimeout(() => void maybeRecap(), 5000);
+
   // ----- back at the Mac after a break: where Erik stopped (resume.rs) -----
   type Resume = {
     project: string | null;

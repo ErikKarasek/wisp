@@ -39,6 +39,8 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSFocusStatusUsageDescription</key>
+	<string>Aby Wisp při soustředění mlčel o všem kromě povolení, která po tobě Claude chce.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIBackgroundModes</key>

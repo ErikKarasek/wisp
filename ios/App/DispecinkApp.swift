@@ -1,5 +1,6 @@
 import ActivityKit
 import BackgroundTasks
+import Intents
 import SwiftUI
 import UserNotifications
 
@@ -18,6 +19,11 @@ struct DispecinkApp: App {
                 .task {
                     await store.refresh()
                     _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+                    // Jen kvůli filtru soustředění: bez svolení se filtr prostě neuplatní.
+                    INFocusStatusCenter.default.requestAuthorization { _ in }
+                    // Ohlásí zkratky za běhu. Bez toho je iOS má jen ze statických
+                    // metadat a při spuštění hlásí „couldn't find the AppShortcutsProvider“.
+                    WispShortcuts.updateAppShortcutParameters()
                 }
                 .onChange(of: phase) { _, p in
                     if p == .active { Task { await store.refresh() } }
@@ -89,7 +95,10 @@ final class Store: ObservableObject {
         for p in s.perms ?? [] where !seen.contains("perm:\(p.id)") {
             fresh.append(("perm:\(p.id)", "\(p.project) · Claude chce povolit", p.detail))
         }
-        for i in s.waiting where !seen.contains("item:\(i.id):\(i.state)") {
+        // Při soustředění s filtrem Wispu zůstanou jen povolení: ta po tobě Claude
+        // vysloveně chce, zbytek počká, až se podíváš sám.
+        let quiet = focusQuiet()
+        for i in s.waiting where !quiet && !seen.contains("item:\(i.id):\(i.state)") {
             fresh.append(("item:\(i.id):\(i.state)", i.state == "bad" ? "\(i.name) selhal" : "\(i.name) na tebe čeká", i.doing))
         }
         guard !fresh.isEmpty else { return }

@@ -432,5 +432,6 @@ struct DispecinkWidgets: WidgetBundle {
         CrewWidget()
         DispecinkWidget()
         DispecinkLiveActivity()
+        if #available(iOS 18.0, *) { WaitingControl() }
     }
 }
