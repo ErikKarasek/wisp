@@ -25,6 +25,9 @@
           if (cmd === "calendar_status") return Promise.resolve({ ok: false });
           if (cmd === "calendar_events") return Promise.resolve([]);
           if (cmd === "media_now") return Promise.resolve(null);
+          // Karta „Minulý týden“ si bere opravdovou historii, když si ji sem zkopíruješ:
+          // cp ~/Library/Application\ Support/cz.erikkarasek.dispecink/history.json public/
+          if (cmd === "history_load") return fetch("/history.json").then((r) => r.json()).catch(() => []);
           return Promise.resolve(null);
         },
       };
