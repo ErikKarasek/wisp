@@ -24,10 +24,11 @@ struct WaitingControl: ControlWidget {
 struct WaitingProvider: ControlValueProvider {
     var previewValue: Int? { 2 }
 
-    /// nil znamená „nevím“, ne „je klid“. Kdyby se výpadek relay počítal jako nula,
-    /// tvářilo by se spadlé spojení jako dobrá zpráva, což je ta horší ze dvou lží.
+    /// nil znamená „nevím“, ne „je klid“. Kdyby se výpadek relay nebo starý snímek (Mac
+    /// mlčí přes 300 s, stejně jako ve `statusLine`) počítal jako nula, tvářilo by se
+    /// spadlé spojení jako dobrá zpráva, což je ta horší ze dvou lží.
     func currentValue() async throws -> Int? {
-        guard let (s, _) = try? await Relay.state() else { return nil }
+        guard let (s, at) = try? await Relay.state(), Date().timeIntervalSince(at) <= 300 else { return nil }
         return s.waiting.count + (s.perms?.count ?? 0)
     }
 }
