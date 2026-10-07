@@ -9,7 +9,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "icon": "node scripts/make-icon.mjs && tauri icon src-tauri/icons/source.png"
+    "icon": "node scripts/make-icon.mjs && tauri icon src-tauri/icons/source.png",
+    "test:notch": "node scripts/zkus-notch.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "playwright-core": "^1.63.0",
     "typescript": "~5.9.3",
     "vite": "^7"
   }
