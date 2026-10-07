@@ -33,6 +33,7 @@ struct AgentsStatusIntent: AppIntent {
     static var title: LocalizedStringResource = "Co dělají agenti"
     static var description = IntentDescription("Zeptá se Macu, kdo pracuje, co čeká na tebe a co selhalo.")
     static var openAppWhenRun = false
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<String> {
         guard let (s, at) = try? await Relay.state() else {
@@ -72,6 +73,7 @@ struct SendTaskIntent: AppIntent {
     static var title: LocalizedStringResource = "Zadat agentovi úkol"
     static var description = IntentDescription("Pošle agentovi nový úkol. Mac ho převezme do deseti vteřin.")
     static var openAppWhenRun = false
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     // Oba nepovinné schválně: zkratka pro Siri nesmí mít povinný parametr, jinak
     // ji nejde spustit z dlaždice. Co chybí, na to se zeptá až perform().
