@@ -13,6 +13,16 @@ import { sounds } from "./sounds";
 import { awakeHeadline, mountAwake } from "./awake";
 import "./mini.css";
 
+/** Adresa, jen když je to http(s) s hostitelem. Jinak nic. */
+const webUrl = (raw: string): string | null => {
+  try {
+    const u = new URL(raw.trim());
+    return (u.protocol === "https:" || u.protocol === "http:") && u.hostname ? u.href : null;
+  } catch {
+    return null;
+  }
+};
+
 const escHtml = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 const byUrgency = (a: MiniItem, b: MiniItem) => SEVERITY.indexOf(a.state) - SEVERITY.indexOf(b.state);
 
@@ -1178,7 +1188,11 @@ export async function startNotch() {
     steps.querySelectorAll<HTMLAnchorElement>("a.pr").forEach((a) =>
       a.addEventListener("click", (ev) => {
         ev.preventDefault();
-        void invoke("plugin:opener|open_url", { url: a.href }).catch(() => {});
+        // Jen obyčejný webový odkaz. Adresa sice přichází z `gh pr create`, ale
+        // vede přes model a noční směnu, a file:// nebo vlastní schéma by tu
+        // otevřelo aplikaci na Macu místo stránky.
+        const url = webUrl(a.href);
+        if (url) void invoke("plugin:opener|open_url", { url }).catch(() => {});
       }),
     );
   });

@@ -15,9 +15,14 @@ struct RefreshIntent: AppIntent {
 }
 
 /// Wake an agent from the widget: the same as "Probudit" in the app.
+///
+/// Like a permission answer, this starts real work on the Mac, so it waits for
+/// the phone to be unlocked. On an unlocked phone that costs nothing; on a
+/// locked one it is the difference between a tap and a stranger's tap.
 struct WakeAgentIntent: AppIntent {
     static var title: LocalizedStringResource = "Probudit agenta"
     static var openAppWhenRun = false
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     @Parameter(title: "Agent") var agentId: String
 
