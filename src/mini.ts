@@ -657,9 +657,14 @@ export async function startNotch() {
   // ----- Claude Code in a terminal: its hooks post to Wisp, which passes them here -----
   type CcEvent = { session: string; project: string; kind: string; text: string };
   type Perm = { id: string; session: string; project: string; tool: string; detail: string; rule: string };
+  /** Jak dlouho Rust strana nejdéle čeká na odpověď (HOLD_AWAY v claudecode.rs), plus rezerva. */
+  const PERM_LIFE = 11 * 60_000;
   const ccSessions = new Map<string, { project: string; lines: string[]; at: number; since: number; busy: boolean }>();
   let ccDone: { project: string; text: string; at: number } | null = null;
-  let perms: Perm[] = [];
+  // `at` je kdy karta přišla: když se úklidová událost ztratí, karta se nesmí
+  // zaseknout na obrazovce navždy. Žádost, na kterou už nikdo nečeká, nejde
+  // zodpovědět a klikání na ni mlčí, což vypadá jako rozbitá appka.
+  let perms: (Perm & { at: number })[] = [];
   let permShown: string | null = null;
   const ccWorking = () => {
     const now = Date.now();
@@ -705,7 +710,7 @@ export async function startNotch() {
     redraw();
   });
   void listen<Perm>("cc-permission", (e) => {
-    perms = [...perms.filter((p) => p.id !== e.payload.id), e.payload];
+    perms = [...perms.filter((p) => p.id !== e.payload.id), { ...e.payload, at: Date.now() }];
     if (cfg.sounds !== false) sounds.you();
     redraw();
   });
@@ -730,8 +735,11 @@ export async function startNotch() {
       </div>`;
     steps.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) =>
       b.addEventListener("click", () => {
-        void invoke("cc_decide", { id: p.id, answer: b.dataset.a });
-        if (b.dataset.a === "allow" || b.dataset.a === "always") wink();
+        // false znamená, že na tu žádost už nikdo nečeká; karta se stejně zavírá,
+        // ale radovat se z povolení, které nikam nedošlo, by bylo matoucí.
+        void invoke<boolean>("cc_decide", { id: p.id, answer: b.dataset.a }).then((heard) => {
+          if (heard && (b.dataset.a === "allow" || b.dataset.a === "always")) wink();
+        });
         perms = perms.filter((x) => x.id !== p.id);
         permShown = null;
         redraw();
@@ -1430,6 +1438,8 @@ export async function startNotch() {
 
     // Claude Code asking for permission comes first, then a dropped file.
     // An agent's question gets the whole card too, like a quick question.
+    // Starší, než kolik Rust vydrží čekat: ta žádost je dávno pryč.
+    perms = perms.filter((p) => Date.now() - p.at < PERM_LIFE);
     const agentAsks = !working && s.items.some((i) => i.ask);
     root.classList.toggle("asking", perms.length > 0 || !!ccQ || !!fileAsk || quickAsk || snipOn || agentAsks);
     if (perms.length) {
