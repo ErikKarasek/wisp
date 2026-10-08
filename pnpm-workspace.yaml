@@ -1,2 +1,6 @@
+overrides:
+  # Denial of service přes posunuté offsety v source map; leze sem přes vite a postcss.
+  "source-map-js@<1.2.2": ^1.2.2
+
 allowBuilds:
   esbuild: false
