@@ -199,6 +199,9 @@ fn step(tool: &str, input: &Value) -> String {
         "WebSearch" => format!("Hledá na webu „{}“", short(s("query"), 60)),
         "Task" | "Agent" => format!("Posílá agenta: {}", short(s("description"), 70)),
         "TodoWrite" => "Plánuje kroky".into(),
+        // The question itself goes to the notch from the `/cc/ask` hook; the ticker only says
+        // what is going on, so it does not read out the tool's name.
+        "AskUserQuestion" => "Na něco se ptá".into(),
         t if t.starts_with("mcp__") => format!("Nástroj {}", t.trim_start_matches("mcp__").replace("__", " › ")),
         t => t.to_string(),
     }
@@ -315,6 +318,12 @@ fn permission(app: &AppHandle, v: &Value) -> String {
         return String::new();
     }
     let tool = v.get("tool_name").and_then(Value::as_str).unwrap_or("").to_string();
+    // AskUserQuestion has nothing to permit: the question itself is the prompt, and the
+    // `/cc/ask` hook already put it in the notch (or left it to the terminal). A permission
+    // card for it would only say "Claude chce použít AskUserQuestion" and cover the real one.
+    if tool == "AskUserQuestion" {
+        return json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": { "behavior": "allow" } } }).to_string();
+    }
     let input = v.get("tool_input").cloned().unwrap_or(Value::Null);
     let id = v
         .get("tool_use_id")
@@ -811,6 +820,8 @@ mod churn_tests {
             assert_eq!(churn(tool, &json!({ "file_path": "/x/a", "command": "ls" })), "");
         }
         assert_eq!(step("Read", &json!({ "file_path": "/x/mini.ts" })), "Čte mini.ts");
+        // Not "AskUserQuestion": the question has its own card in the notch.
+        assert_eq!(step("AskUserQuestion", &json!({})), "Na něco se ptá");
     }
 
     #[test]
