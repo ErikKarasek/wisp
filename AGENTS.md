@@ -14,4 +14,4 @@ The five canonical triage roles, each label string equal to its name. All five a
 
 ### Domain docs
 
-Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, neither created yet. Load the `agent-domain-docs` skill; see `docs/agents/domain.md`.
