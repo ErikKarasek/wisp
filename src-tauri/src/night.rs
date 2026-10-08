@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
@@ -69,9 +70,44 @@ pub fn list(app: &AppHandle) -> Vec<Task> {
     std::fs::read(file(app)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
+/// How long to wait for the other process before writing anyway.
+const LOCK_WAIT: Duration = Duration::from_secs(1);
+
+/// A lock the kernel keeps, so the other process sees it too.
+///
+/// Wisp is not the only one writing this queue. Wisp Buddy adds tasks to it from its own
+/// process, and `LOCK` above guards only this one. The flock sits on a file of its own, never
+/// on night.json, because the queue is replaced by a rename and a lock on the inode that was
+/// renamed away guards nothing. Wisp Buddy takes the same lock under the same name in its
+/// work.rs. Dropping the file unlocks it, and so does the process dying, so nothing stays
+/// locked behind.
+///
+/// Readers need none of this: thanks to the rename, a reader sees either the old file or the
+/// new one, always whole.
+fn lock_in(dir: &Path, wait: Duration) -> Option<File> {
+    let _ = std::fs::create_dir_all(dir);
+    let f = OpenOptions::new().create(true).read(true).write(true).open(dir.join("night.lock")).ok()?;
+    // A turn under the lock is a millisecond of reading and writing one small file. A whole
+    // second of waiting means the other side is stuck, and then it is better to write the queue
+    // than to leave the app standing.
+    let until = Instant::now() + wait;
+    loop {
+        match f.try_lock() {
+            Ok(()) => return Some(f),
+            Err(TryLockError::WouldBlock) if Instant::now() < until => std::thread::sleep(Duration::from_millis(5)),
+            _ => return None,
+        }
+    }
+}
+
+fn queue_lock(dir: &Path) -> Option<File> {
+    lock_in(dir, LOCK_WAIT)
+}
+
 /// Change the list as one step, under the lock.
 fn change<R>(app: &AppHandle, f: impl FnOnce(&mut Vec<Task>) -> R) -> R {
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _across = queue_lock(&dir(app));
     let mut all = list(app);
     let out = f(&mut all);
     // Keep the queue and the last 30 finished.
@@ -85,7 +121,6 @@ fn change<R>(app: &AppHandle, f: impl FnOnce(&mut Vec<Task>) -> R) -> R {
             keep
         });
     }
-    let _ = std::fs::create_dir_all(dir(app));
     let tmp = file(app).with_extension("json.tmp");
     if std::fs::write(&tmp, serde_json::to_vec_pretty(&all).unwrap_or_default()).is_ok() {
         let _ = std::fs::rename(&tmp, file(app));
@@ -461,6 +496,23 @@ pub fn command(app: &AppHandle, arg: &str) -> String {
         t.task,
         if ahead > 0 { format!(" Před ním {} ve frontě.", ahead) } else { String::new() }
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_queue_lock_holds_the_other_writer_off_until_it_is_dropped() {
+        let dir = std::env::temp_dir().join(format!("noc-lock-{}", now_ms()));
+        // The real wait is a second; a test has no patience for it.
+        let short = Duration::from_millis(50);
+        let held = lock_in(&dir, short).expect("the first writer takes it");
+        assert!(lock_in(&dir, short).is_none(), "nobody else writes while it is held");
+        drop(held);
+        assert!(lock_in(&dir, short).is_some(), "free again once the first writer is done");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]
