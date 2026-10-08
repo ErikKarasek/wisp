@@ -6,11 +6,11 @@ Instructions for coding agents working in this repo. `CLAUDE.md` points here, so
 
 ### Issue tracker
 
-Issues live as GitHub issues in `ErikKarasek/wisp`, managed with the `gh` CLI. The repo is public, so issues and their bodies are public. See `docs/agents/issue-tracker.md`.
+Issues live as GitHub issues in `ErikKarasek/wisp` (public, so issue bodies are public), managed with the `gh` CLI. The conventions live in the `gh-issue-conventions` skill: **load it before any issue operation.** Repo-specific notes are in `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-The five canonical triage roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+The five canonical triage roles, each label string equal to its name. All five already exist on the repo. See the `gh-issue-conventions` skill, and `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
