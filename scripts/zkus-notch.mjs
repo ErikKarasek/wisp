@@ -187,6 +187,45 @@ async function main() {
   check("přetékající karta: tlačítka zůstanou uvnitř karty", buttons.tlacitka.every((b) => b.vKarte), JSON.stringify(buttons.tlacitka));
   check("přetékající karta: na tlačítka jde kliknout", buttons.tlacitka.every((b) => b.trefim), JSON.stringify(buttons.tlacitka));
 
+  // ---- 5. Karta s povolením nepřežije svou žádost ---------------------------
+  // Rust strana čeká nejvýš deset minut. Když se úklidová událost cestou ztratí,
+  // karta zůstane viset a klikání na ni mlčí, protože tu žádost už nikdo nedrží.
+  // Čas se tu posune falešným Date.now, jinak by test musel čekat čtvrt hodiny.
+  await page.setViewportSize({ width: 1000, height: 220 });
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot());
+  const perm = { id: "perm1", session: "s", project: "W", tool: "Bash", detail: "curl -X POST http://127.0.0.1:9/", rule: "Bash(curl:*)" };
+
+  await fire("cc-permission", perm);
+  await settle();
+  const cerstva = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
+  await fire("dispecink-state", snapshot());
+  await settle();
+  const porad = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
+
+  // Čistá stránka, ať do měření nemluví ta čerstvá karta výš.
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot());
+  // Ta samá karta, ale jako by přišla před dvanácti minutami.
+  await page.evaluate(() => {
+    window.__realNow = Date.now;
+    Date.now = () => window.__realNow() - 12 * 60_000;
+  });
+  await fire("cc-permission", { ...perm, id: "perm2" });
+  await page.evaluate(() => { Date.now = window.__realNow; });
+  await fire("dispecink-state", snapshot());
+  await settle();
+  const stara = await page.evaluate(() => ({
+    text: document.querySelector(".steps").innerText,
+    asking: document.querySelector(".nt").classList.contains("asking"),
+  }));
+
+  check("povolení: karta se ukáže", cerstva.includes("CHCE SPUSTIT"), cerstva);
+  check("povolení: čerstvá karta zůstane", porad.includes("CHCE SPUSTIT"), porad);
+  check("povolení: karta starší než čekání Rustu zmizí sama", !stara.text.includes("CHCE SPUSTIT") && !stara.asking, JSON.stringify(stara));
+
   check("stránka nespadla", errors.length === 0, errors.join("\n"));
 
   await browser.close();
