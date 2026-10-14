@@ -548,6 +548,11 @@ async fn github_prs(repos: Vec<String>) -> Result<Vec<serde_json::Value>, String
 }
 
 #[tauri::command]
+async fn github_merged_prs(repos: Vec<String>) -> Result<Vec<serde_json::Value>, String> {
+    blocking(move || github::merged_prs(&repos)).await
+}
+
+#[tauri::command]
 async fn github_pr_diff(repo: String, number: u64) -> Result<String, String> {
     blocking(move || github::pr_diff(&repo, number)).await?
 }
@@ -794,6 +799,7 @@ pub fn run() {
             heal_codex,
             signing_cert_days,
             github_prs,
+            github_merged_prs,
             github_pr_diff,
             github_pr_action,
             media_now,

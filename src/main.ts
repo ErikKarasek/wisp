@@ -40,7 +40,7 @@ import { renderSettings } from "./settings";
 import { sounds } from "./sounds";
 import { openStudio } from "./studio";
 import { ago } from "./time";
-import { announcePrs, loadState, prButton, restoreIssue, saveState, watchAgents } from "./watchdog";
+import { announcePrs, closeMergedIssues, loadState, prButton, restoreIssue, saveState, watchAgents } from "./watchdog";
 import type { PR } from "./reviews";
 
 const LOCAL_MS = 10_000; // launchd and Paperclip, both on this Mac
@@ -401,6 +401,8 @@ async function loadCloud() {
     prList = await invoke<Record<string, any>[]>("github_prs", { repos: cfg.githubRepos }).catch(() => []);
     prCount = prList.length;
     void announcePrs(prList as PR[]);
+    // Merged work still sitting in review: the agent may not close it itself.
+    void closeMergedIssues(paperclip, cfg.githubRepos, (t) => toast(t, true));
   }
 }
 

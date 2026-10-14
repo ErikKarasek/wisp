@@ -483,7 +483,13 @@ fn ask_output(asked: Option<&Value>, answer: &str) -> String {
 /// Session id → its transcript and how far it has been read. The hooks carry
 /// the path (`transcript_path`); the file is the only place the words Claude
 /// says mid-turn can be read, because no hook sends them.
-static TRANSCRIPTS: Mutex<Option<HashMap<String, (PathBuf, u64)>>> = Mutex::new(None);
+/// Session id → its transcript, how far it has been read, and when it last
+/// said anything. Without the third one a session whose terminal was killed
+/// (no `SessionEnd` hook) would be opened every tick until Wisp quits.
+static TRANSCRIPTS: Mutex<Option<HashMap<String, (PathBuf, u64, std::time::Instant)>>> = Mutex::new(None);
+
+/// A session nothing has been heard from for this long is gone.
+const TRANSCRIPT_IDLE: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -505,11 +511,14 @@ fn watch_transcript(v: &Value) {
     };
     let Ok(mut map) = TRANSCRIPTS.lock() else { return };
     let map = map.get_or_insert_with(HashMap::new);
-    if map.contains_key(session) {
+    let now = std::time::Instant::now();
+    // A hook from a session Wisp already follows only says it is still alive.
+    if let Some(e) = map.get_mut(session) {
+        e.2 = now;
         return;
     }
     let at = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    map.insert(session.to_string(), (PathBuf::from(path), at));
+    map.insert(session.to_string(), (PathBuf::from(path), at, now));
 }
 
 fn forget_transcript(session: &str) {
@@ -593,18 +602,29 @@ fn read_new(path: &PathBuf, from: u64) -> (Vec<(&'static str, String)>, u64) {
 fn follow_transcripts(app: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(1200));
-        let sessions: Vec<(String, PathBuf, u64)> = {
+        let sessions: Vec<(String, PathBuf, u64, std::time::Instant)> = {
             let Ok(map) = TRANSCRIPTS.lock() else { continue };
             map.as_ref()
-                .map(|m| m.iter().map(|(s, (p, at))| (s.clone(), p.clone(), *at)).collect())
+                .map(|m| m.iter().map(|(s, (p, at, seen))| (s.clone(), p.clone(), *at, *seen)).collect())
                 .unwrap_or_default()
         };
-        for (session, path, at) in sessions {
+        for (session, path, at, seen) in sessions {
+            // A terminal killed outright sends no SessionEnd, and a transcript can
+            // be moved or deleted. Either way the session is dropped, not followed
+            // for the rest of the day.
+            if seen.elapsed() > TRANSCRIPT_IDLE || !path.exists() {
+                forget_transcript(&session);
+                continue;
+            }
             let (found, next) = read_new(&path, at);
+            let heard = next > at;
             if let Ok(mut map) = TRANSCRIPTS.lock() {
                 if let Some(m) = map.as_mut() {
                     if let Some(e) = m.get_mut(&session) {
                         e.1 = next;
+                        if heard {
+                            e.2 = std::time::Instant::now();
+                        }
                     }
                 }
             }

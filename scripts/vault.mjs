@@ -79,9 +79,16 @@ const STATUS = {
   queued: "ve frontě",
 };
 
-/** Table rows are only as readable as their widest cell. */
+/**
+ * A cell's own "|" ends the column, and `[[Složka/Název|alias]]` is full of
+ * them, so every cell is escaped. Without this the tables shift a column and
+ * the links stop resolving, which is the whole point of the vault.
+ */
+const cell = (v) => String(v ?? "").replaceAll("|", "\\|");
 const table = (head, rows) =>
-  rows.length ? [`| ${head.join(" | ")} |`, `|${head.map(() => " --- ").join("|")}|`, ...rows.map((r) => `| ${r.join(" | ")} |`)].join("\n") : "";
+  rows.length
+    ? [`| ${head.join(" | ")} |`, `|${head.map(() => " --- ").join("|")}|`, ...rows.map((r) => `| ${r.map(cell).join(" | ")} |`)].join("\n")
+    : "";
 
 async function repos() {
   const out = [];

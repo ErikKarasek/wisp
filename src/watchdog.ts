@@ -30,12 +30,21 @@ type WatchState = {
   failing: Record<string, string>;
   /** Pull requests already sent to the phone, as "repo#number". Missing until the first look. */
   prSeen?: string[];
+  /** Issues closed because their pull request was merged, so each one is closed and told about once. */
+  mergedDone?: string[];
 };
 let state: WatchState | null = null;
 async function watchState(): Promise<WatchState> {
   if (state) return state;
   const saved = await loadState<Partial<WatchState>>("watchdog");
-  state = { tries: saved?.tries ?? {}, restoredAt: saved?.restoredAt ?? {}, told: saved?.told ?? [], failing: saved?.failing ?? {}, prSeen: saved?.prSeen };
+  state = {
+    tries: saved?.tries ?? {},
+    restoredAt: saved?.restoredAt ?? {},
+    told: saved?.told ?? [],
+    failing: saved?.failing ?? {},
+    prSeen: saved?.prSeen,
+    mergedDone: saved?.mergedDone ?? [],
+  };
   return state;
 }
 const save = () => (state ? saveState("watchdog", state) : Promise.resolve());
@@ -270,6 +279,49 @@ export async function announcePrs(prs: PR[]) {
   if (changed) {
     s.prSeen = s.prSeen.slice(-300);
     await save();
+  }
+}
+
+// ---------- work that is done but still sits in review ----------
+
+/** "NEX-38" anywhere in a pull request's title, body or branch. */
+const TASK_IDS = /\b([A-Z]{2,5}-\d+)\b/g;
+
+/**
+ * An agent can't set its own issue to done from an unbound heartbeat (Paperclip
+ * answers 403), so finished work sits in review until Erik moves it by hand.
+ * Eight of them had piled up. A merged pull request naming the task is proof
+ * enough, and only `in_review` is touched: a task still in the queue that
+ * happens to share a name is not finished.
+ */
+export async function closeMergedIssues(snap: PaperclipSnapshot | null, repos: string[], note: (t: string) => void) {
+  if (!snap?.online || !repos.length) return;
+  const prs = await invoke<Obj[]>("github_merged_prs", { repos }).catch(() => [] as Obj[]);
+  if (!prs.length) return;
+  const byTask = new Map<string, Obj>();
+  for (const pr of prs) {
+    const where = `${pr.title ?? ""} ${pr.body ?? ""} ${pr.headRefName ?? ""}`;
+    for (const [, id] of where.matchAll(TASK_IDS)) if (!byTask.has(id)) byTask.set(id, pr);
+  }
+  const s = await watchState();
+  const closed: string[] = [];
+  for (const { issues } of snap.companies) {
+    for (const issue of issues) {
+      const pr = byTask.get(String(issue.identifier ?? ""));
+      if (!pr || issue.status !== "in_review" || s.mergedDone!.includes(issue.id)) continue;
+      const repo = pr.repository?.nameWithOwner ?? pr.repository?.name ?? "";
+      const where = `${repo}#${pr.number}`;
+      const ok = await pc("PATCH", `/issues/${issue.id}`, { status: "done" }).then(() => true).catch(() => false);
+      if (!ok) continue;
+      await pc("POST", `/issues/${issue.id}/comments`, { body: `Hotovo: pull request ${where} je smergnutý. Zavřel to Wisp.` }).catch(() => {});
+      s.mergedDone!.push(issue.id);
+      closed.push(`${issue.identifier} (${where})`);
+    }
+  }
+  if (closed.length) {
+    s.mergedDone = s.mergedDone!.slice(-300);
+    await save();
+    note(closed.length === 1 ? `Zavřel jsem ${closed[0]}, PR je smergnutý.` : `Zavřel jsem ${closed.length} hotových úkolů: ${closed.join(", ")}.`);
   }
 }
 
