@@ -445,3 +445,6 @@ button { font: inherit; color: inherit; }
 .settings .help dt { font-weight: 600; color: var(--muted); }
 .settings .help dd { margin: 0; line-height: 1.45; }
 .settings .help code { font-size: 12px; background: rgba(255, 255, 255, .07); padding: 1px 5px; border-radius: 5px; }
+
+/* Thinking in an agent's live run: set apart from what it says out loud. */
+.live .lsay.think { font-style: italic; color: var(--muted); border-left: 2px solid var(--line); padding-left: 8px; }

@@ -514,3 +514,21 @@ body.mini button { font: inherit; color: inherit; }
 @container (max-width: 900px) {
   .nt .panes > .card.crewcard { display: none; }
 }
+
+/* What the agent said or thought last, as a bubble next to its face. Thinking
+   is in italics and dimmer than speech, so the two never read as the same
+   thing. The bubble takes the room of two step lines; the card can't grow,
+   its height is the notch's. */
+.nt .steps .voice { position: relative; display: grid; gap: 2px; padding: 6px 9px; border-radius: 10px;
+  background: rgba(255, 255, 255, .045); border: 1px solid rgba(255, 255, 255, .07); }
+.nt .steps .voice[hidden] { display: none; }
+.nt .steps .voice .tag { font-style: normal; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: #6d7380; }
+.nt .steps .voice span { font-size: 12.5px; line-height: 1.32; color: #c7ccd8;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.nt .steps .voice.think span { font-style: italic; color: #a7adbd; }
+/* The tail points left, at the face that is saying it. */
+.nt .steps .voice::before { content: ""; position: absolute; left: -5px; top: 14px; width: 0; height: 0;
+  border: 5px solid transparent; border-right-color: rgba(255, 255, 255, .07); border-left: 0; }
+@container (max-width: 330px) {
+  .nt .steps .voice span { -webkit-line-clamp: 1; }
+}

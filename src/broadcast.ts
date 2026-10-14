@@ -50,8 +50,18 @@ export type Snapshot = {
   /** The item that just changed, for the notch to show when it peeks. */
   news: MiniItem | null;
   at: number;
-  /** Agents working right now and their last few steps. */
-  live: { id: string; name: string; character: Partial<MascotCharacter>; lines: string[] }[];
+  /**
+   * Agents working right now and their last few steps. `voice` is the last
+   * thing the agent said or thought; it stays on this Mac and is never sent
+   * to the phone or the relay.
+   */
+  live: {
+    id: string;
+    name: string;
+    character: Partial<MascotCharacter>;
+    lines: string[];
+    voice?: { kind: "say" | "think"; text: string } | null;
+  }[];
   usage: ClaudeUsage | null;
   gpt: QuotaWindow[];
   gemini: AgyWindow[];

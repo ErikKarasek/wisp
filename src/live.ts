@@ -9,7 +9,11 @@ export const pc = <T = any,>(method: string, path: string, body?: unknown) =>
 
 export type Step =
   | { kind: "say"; text: string }
+  | { kind: "think"; text: string }
   | { kind: "tool"; id: string; title: string; detail: string; status: "running" | "done" | "failed"; output: string };
+
+/** What the agent said or thought last, for the bubble in the notch. */
+export type Voice = { kind: "say" | "think"; text: string };
 
 export type Run = { id: string; status: string; startedAt: string | null; finishedAt: string | null; invocationSource: string };
 
@@ -68,10 +72,14 @@ export class LiveRun {
   }
 
   private message(m: any) {
-    if (m.type === "acpx.text_delta" && m.channel === "output") {
+    // The engine streams two kinds of words: what the agent says, and the
+    // chain of thought on the "thought" channel. Both arrive a word at a time,
+    // so each one grows the step it started instead of making a new one.
+    if (m.type === "acpx.text_delta" && (m.channel === "output" || m.channel === "thought")) {
+      const kind = m.channel === "thought" ? "think" : "say";
       const last = this.steps.at(-1);
-      if (last?.kind === "say") last.text += m.text;
-      else this.steps.push({ kind: "say", text: m.text });
+      if (last?.kind === kind) last.text += m.text;
+      else this.steps.push({ kind, text: m.text } as Step);
       return;
     }
     if (m.type !== "acpx.tool_call" || !m.toolCallId) return;
@@ -98,6 +106,30 @@ export class LiveRun {
 
 /** One short line for a step, for the notch and lists. */
 export function stepLine(s: Step): string {
-  if (s.kind === "say") return s.text.replace(/\s+/g, " ").trim();
+  if (s.kind === "say" || s.kind === "think") return s.text.replace(/\s+/g, " ").trim();
   return (s.detail || s.title).replace(/\s+/g, " ").trim();
+}
+
+/** The last two sentences, so a bubble holds a thought and not a paragraph. */
+function tail(text: string, max = 170): string {
+  const one = text.replace(/\s+/g, " ").trim();
+  const parts = one.split(/(?<=[.!?…])\s+/);
+  let out = parts.slice(-2).join(" ");
+  if (out.length > max) out = `…${out.slice(-max)}`;
+  return out;
+}
+
+/**
+ * What to put in the bubble: the newest thing the agent said or thought. Tool
+ * calls don't clear it, so the bubble holds the last words while the steps
+ * below it churn; that is how it reads as one agent and not two feeds.
+ */
+export function voiceOf(steps: Step[]): Voice | null {
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const s = steps[i];
+    if (s.kind !== "say" && s.kind !== "think") continue;
+    const text = tail(s.text);
+    if (text) return { kind: s.kind, text };
+  }
+  return null;
 }
