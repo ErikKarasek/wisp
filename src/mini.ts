@@ -8,6 +8,7 @@ import { DEFAULT_CHARACTER, EXPRESSIONS, type ExpressionName, type MascotCharact
 import { mountMascot, type MountedMascot } from "./mascot/svg";
 import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type MiniItem, type Snapshot, windowName, resetText, claudeResetMs, elapsedPercent } from "./broadcast";
 import { defaultNotchPrefs, type NotchPrefs, type SavedCharacter } from "./config";
+import { type Voice as AgentVoice } from "./live";
 import { SEVERITY, STATES, type State } from "./model";
 import { sounds } from "./sounds";
 import { awakeHeadline, mountAwake } from "./awake";
@@ -575,17 +576,27 @@ export async function startNotch() {
   // the current one shimmers.
   let tickerSig = "";
   const ROW = 24;
-  function renderTicker(name: string, lines: string[]) {
+  function renderTicker(name: string, lines: string[], voice?: AgentVoice | null) {
     let roll = steps.querySelector<HTMLElement>(".ticker .roll");
     if (steps.dataset.mode !== "work" || !roll) {
       setMode("work");
-      steps.innerHTML = `<small class="who"></small><div class="ticker"><div class="roll"></div></div>`;
+      steps.innerHTML = `<small class="who"></small><div class="voice" hidden><i class="tag"></i><span></span></div><div class="ticker"><div class="roll"></div></div>`;
       roll = steps.querySelector<HTMLElement>(".ticker .roll")!;
       tickerSig = "";
     }
     (steps.querySelector(".who") as HTMLElement).textContent = `${name} pracuje`;
-    const shown = lines.filter(Boolean).slice(-4);
-    const sig = shown.join("\n");
+    // The bubble is what the agent said or thought; it takes the room of two
+    // step lines, because the card's height is the notch's and doesn't grow.
+    const bubble = steps.querySelector<HTMLElement>(".voice")!;
+    bubble.hidden = !voice;
+    if (voice) {
+      bubble.classList.toggle("think", voice.kind === "think");
+      bubble.querySelector("i")!.textContent = voice.kind === "think" ? "myslí" : "říká";
+      const span = bubble.querySelector("span")!;
+      if (span.textContent !== voice.text) span.textContent = voice.text;
+    }
+    const shown = lines.filter(Boolean).slice(voice ? -2 : -4);
+    const sig = `${voice?.kind ?? ""}:${voice?.text ?? ""}\n${shown.join("\n")}`;
     if (sig === tickerSig) return;
     const moved = tickerSig !== "" && tickerSig.split("\n").at(-1) !== shown.at(-1);
     tickerSig = sig;
@@ -659,7 +670,7 @@ export async function startNotch() {
   type Perm = { id: string; session: string; project: string; tool: string; detail: string; rule: string };
   /** Jak dlouho Rust strana nejdéle čeká na odpověď (HOLD_AWAY v claudecode.rs), plus rezerva. */
   const PERM_LIFE = 11 * 60_000;
-  const ccSessions = new Map<string, { project: string; lines: string[]; at: number; since: number; busy: boolean }>();
+  const ccSessions = new Map<string, { project: string; lines: string[]; at: number; since: number; busy: boolean; voice: AgentVoice | null }>();
   let ccDone: { project: string; text: string; at: number } | null = null;
   // `at` je kdy karta přišla: když se úklidová událost ztratí, karta se nesmí
   // zaseknout na obrazovce navždy. Žádost, na kterou už nikdo nečeká, nejde
@@ -669,7 +680,7 @@ export async function startNotch() {
   const ccWorking = () => {
     const now = Date.now();
     const [id, v] = [...ccSessions.entries()].filter(([, v]) => v.busy && now - v.at < 120_000).sort((a, b) => b[1].at - a[1].at)[0] ?? [];
-    return v ? { id: `cc:${id}`, name: `${v.project} · Claude`, character: {}, lines: v.lines } : undefined;
+    return v ? { id: `cc:${id}`, name: `${v.project} · Claude`, character: {}, lines: v.lines, voice: v.voice } : undefined;
   };
   /** "agent:<id>" from a Paperclip agent's Claude → that agent's name. */
   const nameOf = (project: string) => (project.startsWith("agent:") ? lastSnap?.items.find((i) => i.id === project)?.name ?? "Agent" : project);
@@ -681,13 +692,15 @@ export async function startNotch() {
       ccSessions.delete(session);
       return redraw();
     }
-    const cur = ccSessions.get(session) ?? { project, lines: [], at: now, since: now, busy: false };
+    const cur = ccSessions.get(session) ?? { project, lines: [], at: now, since: now, busy: false, voice: null };
     cur.project = project;
     cur.at = now;
     if (kind === "prompt") {
       cur.busy = true;
       cur.since = now;
       cur.lines = text ? [`› ${text}`] : [];
+      // A new turn: whatever Claude said in the last one is no longer current.
+      cur.voice = null;
     } else if (kind === "step") {
       if (!cur.busy) cur.since = now;
       cur.busy = true;
@@ -707,6 +720,17 @@ export async function startNotch() {
       cur.busy = false;
     }
     ccSessions.set(session, cur);
+    redraw();
+  });
+  // What Claude says mid-turn, read from its transcript by the Rust side: the
+  // hooks carry steps and the final message, never the words in between.
+  void listen<{ session: string; kind: "say" | "think"; text: string }>("cc-voice", (e) => {
+    const { session, kind, text } = e.payload;
+    const cur = ccSessions.get(session);
+    // A session Wisp knows nothing about is one that never said it started.
+    if (!cur || !text) return;
+    cur.voice = { kind, text };
+    cur.at = Date.now();
     redraw();
   });
   void listen<Perm>("cc-permission", (e) => {
@@ -1492,7 +1516,7 @@ export async function startNotch() {
     }
     askFor = null;
     if (working) {
-      renderTicker(working.name, working.lines);
+      renderTicker(working.name, working.lines, working.voice);
     } else if (doneCc) {
       setMode(`done:${doneCc.at}`);
       steps.innerHTML = `<small class="who">${escHtml(doneCc.project)} · Claude</small><div class="step now big-text">Hotovo</div><div class="step past wrap">${escHtml(doneCc.text)}</div>`;

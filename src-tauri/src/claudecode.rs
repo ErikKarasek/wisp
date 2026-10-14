@@ -478,6 +478,143 @@ fn ask_output(asked: Option<&Value>, answer: &str) -> String {
     .to_string()
 }
 
+// ---------- what Claude says while it works ----------
+
+/// Session id → its transcript and how far it has been read. The hooks carry
+/// the path (`transcript_path`); the file is the only place the words Claude
+/// says mid-turn can be read, because no hook sends them.
+static TRANSCRIPTS: Mutex<Option<HashMap<String, (PathBuf, u64)>>> = Mutex::new(None);
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CcVoice {
+    pub session: String,
+    /// "say" for what Claude writes out, "think" for a thinking block.
+    pub kind: &'static str,
+    pub text: String,
+}
+
+/// Starts reading a session's transcript at its end: what Claude said before
+/// Wisp was looking is history, and replaying it would be a lie about now.
+fn watch_transcript(v: &Value) {
+    let (Some(session), Some(path)) = (
+        v.get("session_id").and_then(Value::as_str),
+        v.get("transcript_path").and_then(Value::as_str),
+    ) else {
+        return;
+    };
+    let Ok(mut map) = TRANSCRIPTS.lock() else { return };
+    let map = map.get_or_insert_with(HashMap::new);
+    if map.contains_key(session) {
+        return;
+    }
+    let at = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    map.insert(session.to_string(), (PathBuf::from(path), at));
+}
+
+fn forget_transcript(session: &str) {
+    if let Ok(mut map) = TRANSCRIPTS.lock() {
+        if let Some(map) = map.as_mut() {
+            map.remove(session);
+        }
+    }
+}
+
+/// The last sentence or two, which is what fits in the notch's bubble.
+fn tail(s: &str, max: usize) -> String {
+    let one = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut cut = 0;
+    // Walk back over the sentence ends and keep the last two of them.
+    let ends: Vec<usize> = one
+        .char_indices()
+        .filter(|(_, c)| matches!(c, '.' | '!' | '?' | '…'))
+        .map(|(i, c)| i + c.len_utf8())
+        .collect();
+    if ends.len() > 2 {
+        cut = ends[ends.len() - 3];
+    }
+    let out = one[cut..].trim();
+    if out.chars().count() > max {
+        let skip = out.chars().count() - max;
+        return format!("…{}", out.chars().skip(skip).collect::<String>());
+    }
+    out.to_string()
+}
+
+/// New text blocks since the last read. Thinking blocks are kept apart: with
+/// the current models their text comes back encrypted and empty, so they are
+/// only shown when there really is something in them.
+fn read_new(path: &PathBuf, from: u64) -> (Vec<(&'static str, String)>, u64) {
+    use std::io::{Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else { return (vec![], from) };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    // A rewritten (shorter) file means a new session wrote over it: start again.
+    if len < from {
+        return (vec![], len);
+    }
+    if len == from || f.seek(SeekFrom::Start(from)).is_err() {
+        return (vec![], from);
+    }
+    let mut buf = String::new();
+    if f.read_to_string(&mut buf).is_err() {
+        return (vec![], len);
+    }
+    // A line cut in half by the read stays unread until it is whole.
+    let whole = buf.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let mut found = Vec::new();
+    for line in buf[..whole].lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if v.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) else { continue };
+        for b in blocks {
+            let kind = match b.get("type").and_then(Value::as_str) {
+                Some("text") => "say",
+                Some("thinking") => "think",
+                _ => continue,
+            };
+            let text = b
+                .get(if kind == "think" { "thinking" } else { "text" })
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let text = tail(text, 170);
+            if !text.is_empty() {
+                found.push((kind, text));
+            }
+        }
+    }
+    (found, from + whole as u64)
+}
+
+/// Follows the transcripts of the sessions that are running and sends the
+/// newest thing Claude said to the notch. Only the last block of a read is
+/// sent: the bubble holds one thought, not a transcript.
+fn follow_transcripts(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(1200));
+        let sessions: Vec<(String, PathBuf, u64)> = {
+            let Ok(map) = TRANSCRIPTS.lock() else { continue };
+            map.as_ref()
+                .map(|m| m.iter().map(|(s, (p, at))| (s.clone(), p.clone(), *at)).collect())
+                .unwrap_or_default()
+        };
+        for (session, path, at) in sessions {
+            let (found, next) = read_new(&path, at);
+            if let Ok(mut map) = TRANSCRIPTS.lock() {
+                if let Some(m) = map.as_mut() {
+                    if let Some(e) = m.get_mut(&session) {
+                        e.1 = next;
+                    }
+                }
+            }
+            if let Some((kind, text)) = found.into_iter().last() {
+                let _ = app.emit("cc-voice", CcVoice { session, kind, text });
+            }
+        }
+    });
+}
+
 /// The answer from the notch's buttons.
 pub fn decide(id: &str, answer: &str) -> bool {
     let tx = PENDING.lock().unwrap().get_or_insert_with(HashMap::new).remove(id);
@@ -502,6 +639,7 @@ pub fn start(app: &AppHandle) {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(dirs_config().join("cc-hook-key"), std::fs::Permissions::from_mode(0o600));
     }
+    follow_transcripts(app.clone());
     let app = app.clone();
     std::thread::spawn(move || {
         for req in server.incoming_requests() {
@@ -563,6 +701,13 @@ fn handle(app: &AppHandle, mut req: tiny_http::Request) {
     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
     match path.as_str() {
         "/cc/event" => {
+            let name = v.get("hook_event_name").and_then(Value::as_str).unwrap_or("");
+            let session = v.get("session_id").and_then(Value::as_str).unwrap_or("");
+            if name == "SessionEnd" {
+                forget_transcript(session);
+            } else {
+                watch_transcript(&v);
+            }
             if let Some(e) = event(&v) {
                 let _ = app.emit("cc-event", e);
             }
@@ -832,5 +977,47 @@ mod churn_tests {
         let (add, del) = counts(&old, &new);
         assert!(t.elapsed() < std::time::Duration::from_millis(500), "trvalo {:?}", t.elapsed());
         assert_eq!((add, del), (3000, 3000));
+    }
+}
+
+#[cfg(test)]
+mod voice_tests {
+    use super::*;
+
+    fn line(blocks: Value) -> String {
+        format!("{}\n", json!({ "type": "assistant", "message": { "content": blocks } }))
+    }
+
+    #[test]
+    fn keeps_the_last_two_sentences() {
+        assert_eq!(tail("První. Druhá. Třetí.", 170), "Druhá. Třetí.");
+        assert_eq!(tail("  jedna   věta\nbez konce ", 170), "jedna věta bez konce");
+        assert!(tail(&"a".repeat(300), 170).starts_with('…'));
+        assert_eq!(tail(&"a".repeat(300), 170).chars().count(), 171);
+    }
+
+    #[test]
+    fn reads_what_claude_said_since_last_time() {
+        let path = std::env::temp_dir().join(format!("wisp-voice-{}.jsonl", std::process::id()));
+        std::fs::write(&path, line(json!([{ "type": "text", "text": "Mrknu na to." }]))).unwrap();
+        let (found, at) = read_new(&path, 0);
+        assert_eq!(found, vec![("say", "Mrknu na to.".to_string())]);
+        // Read again from where it stopped: the same words don't come twice.
+        assert_eq!(read_new(&path, at).0, vec![]);
+
+        // Thinking with nothing in it (the models encrypt it) is not a thought.
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        use std::io::Write;
+        f.write_all(line(json!([{ "type": "thinking", "thinking": "", "signature": "abc" }])).as_bytes()).unwrap();
+        f.write_all(line(json!([{ "type": "thinking", "thinking": "Tohle je vidět." }])).as_bytes()).unwrap();
+        let (found, at) = read_new(&path, at);
+        assert_eq!(found, vec![("think", "Tohle je vidět.".to_string())]);
+
+        // A line still being written is left alone until it has its newline.
+        f.write_all(br#"{"type":"assistant","message":{"content":[{"type":"text","#).unwrap();
+        let (found, half) = read_new(&path, at);
+        assert_eq!(found, vec![]);
+        assert_eq!(half, at);
+        let _ = std::fs::remove_file(&path);
     }
 }

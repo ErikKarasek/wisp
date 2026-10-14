@@ -33,7 +33,7 @@ import {
   type State,
 } from "./model";
 import { openJobForm } from "./jobform";
-import { latestRun, LiveRun, stepLine, type Step } from "./live";
+import { latestRun, LiveRun, stepLine, voiceOf, type Step, type Voice } from "./live";
 import { openRoutineForm } from "./routineform";
 import { renderTasks } from "./tasks";
 import { renderSettings } from "./settings";
@@ -928,13 +928,14 @@ async function renderLive(box: HTMLElement, companyId: string, agentId: string) 
 }
 
 function stepHtml(s: Step) {
+  if (s.kind === "think") return `<div class="lsay think">${esc(s.text.trim())}</div>`;
   if (s.kind === "say") return `<div class="lsay">${esc(s.text.trim())}</div>`;
   return `<div class="ltool ${s.status}"><i>${STEP_ICON[s.status]}</i><div><code>${esc(s.title)}</code>${
     s.detail ? `<small>${esc(s.detail)}</small>` : ""
   }${s.output ? `<pre>${esc(s.output.slice(0, 1200))}</pre>` : ""}</div></div>`;
 }
 
-type LiveLine = { id: string; name: string; character: Item["character"]; lines: string[] };
+type LiveLine = { id: string; name: string; character: Item["character"]; lines: string[]; voice: Voice | null };
 let liveNow: LiveLine[] = [];
 
 /** Every couple of seconds while an agent works: its detail and the notch follow along. */
@@ -945,8 +946,9 @@ async function liveTick() {
     const a = (i.log as { agent: { companyId: string; agentId: string } }).agent;
     const got = await liveFor(a.companyId, a.agentId);
     if (!got) continue;
-    const lines = got.steps.slice(-4).map(stepLine).filter(Boolean).map((l) => l.slice(0, 90));
-    next.push({ id: i.id, name: i.name, character: i.character, lines });
+    const doing = got.steps.filter((s) => s.kind === "tool");
+    const lines = doing.slice(-4).map(stepLine).filter(Boolean).map((l) => l.slice(0, 90));
+    next.push({ id: i.id, name: i.name, character: i.character, lines, voice: voiceOf(got.steps) });
   }
   const changed = JSON.stringify(next) !== JSON.stringify(liveNow);
   liveNow = next;
