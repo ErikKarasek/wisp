@@ -15,3 +15,7 @@ The five canonical triage roles, each label string equal to its name. All five a
 ### Domain docs
 
 Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root, neither created yet. Load the `agent-domain-docs` skill; see `docs/agents/domain.md`.
+
+## Committing
+
+Commit messages and PR descriptions carry **no** `Co-Authored-By: Claude` and no "Generated with Claude Code" line. The repo shows Erik as the only author. A squash merge copies co-author trailers out of the branch commits, so they have to be gone before the PR is merged.
