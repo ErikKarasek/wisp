@@ -284,7 +284,7 @@ export async function announcePrs(prs: PR[]) {
 
 // ---------- work that is done but still sits in review ----------
 
-/** "NEX-38" anywhere in a pull request's title, body or branch. */
+/** "NEX-38" anywhere in a merged pull request's title or body (`gh search prs` can't return the branch). */
 const TASK_IDS = /\b([A-Z]{2,5}-\d+)\b/g;
 
 /**
@@ -300,7 +300,7 @@ export async function closeMergedIssues(snap: PaperclipSnapshot | null, repos: s
   if (!prs.length) return;
   const byTask = new Map<string, Obj>();
   for (const pr of prs) {
-    const where = `${pr.title ?? ""} ${pr.body ?? ""} ${pr.headRefName ?? ""}`;
+    const where = `${pr.title ?? ""} ${pr.body ?? ""}`;
     for (const [, id] of where.matchAll(TASK_IDS)) if (!byTask.has(id)) byTask.set(id, pr);
   }
   const s = await watchState();
