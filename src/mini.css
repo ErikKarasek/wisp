@@ -303,6 +303,8 @@ body.mini button { font: inherit; color: inherit; }
 .nt .perm button:hover { background: rgba(255, 255, 255, .16); }
 .nt .perm button.go { background: #4fbf7d; color: #0e1a13; }
 .nt .perm button[data-a="deny"] { color: #f3a19c; }
+/* Tlačítko, které by beze zvolené možnosti nic neudělalo: ať tak i vypadá. */
+.nt .perm button:disabled, .nt .perm button:disabled:hover { opacity: .4; cursor: default; }
 .nt .who .x { margin-left: 8px; border: 0; background: none; color: #8a909b; cursor: pointer; font-size: 11px; }
 .nt .reply { max-height: 64px; overflow: auto; color: #cfd3da; }
 .nt.dropping .panes { outline: 2px dashed #8b9cff; outline-offset: -6px; border-radius: 18px; }
