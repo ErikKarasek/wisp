@@ -204,10 +204,20 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     run("/usr/bin/git", args, dir)
 }
 
-/// A short branch name from the task: "noc/pridej-zvuky-1a2b".
-fn branch_name(task: &Task) -> String {
-    let ascii: String = task
-        .task
+/// Words that say nothing about the work. A task typed into Telegram is a
+/// sentence to a person ("udělej z wispu jarvise co jsme spolu probírali"), and
+/// without this the branch and the pull request carry that sentence verbatim.
+const FILLER: &[&str] = &[
+    "udelej", "udelas", "udelat", "prosim", "prosimte", "muzes", "zkus", "zkusit", "nejak", "nejake",
+    "jsme", "spolu", "probirali", "probrali", "rikali", "tohle", "toho", "ten", "ta", "to", "co",
+    "ktery", "ktera", "ktere", "uz", "az", "do", "na", "ve", "ze", "se", "si", "pro", "aby", "by",
+    "bys", "mi", "me", "mu", "ho", "je", "jsou", "ma", "mas", "mam", "pak", "taky", "jen", "jenom",
+    "hodne", "trochu", "nejlip", "lepe", "porad", "jeste", "tam", "sem", "ale", "nebo", "and",
+];
+
+/// A short branch name from a title: "noc/zvuky-pri-chybe-1a2b".
+fn branch_name(title: &str, id: &str) -> String {
+    let ascii: String = title
         .to_lowercase()
         .chars()
         .map(|c| match c {
@@ -217,8 +227,39 @@ fn branch_name(task: &Task) -> String {
             _ => '-',
         })
         .collect();
-    let words: Vec<&str> = ascii.split('-').filter(|w| !w.is_empty()).take(5).collect();
-    format!("noc/{}-{}", words.join("-"), &task.id[task.id.len().saturating_sub(4)..])
+    let words: Vec<&str> = ascii
+        .split('-')
+        .filter(|w| w.len() >= 3 && !FILLER.contains(w))
+        .take(4)
+        .collect();
+    let stem = if words.is_empty() { "prace".to_string() } else { words.join("-") };
+    format!("noc/{}-{}", stem, &id[id.len().saturating_sub(4)..])
+}
+
+/// The first sentence of what the run says it did, which beats the task text:
+/// the task is what Erik wanted, this is what came out.
+fn title_from(summary: &str, task: &Task) -> String {
+    let flat = summary.split_whitespace().collect::<Vec<_>>().join(" ");
+    // A sentence ends at ". " before a capital letter; "5. 10." must not split it.
+    let mut end = flat.len();
+    let bytes: Vec<char> = flat.chars().collect();
+    for (i, w) in bytes.windows(3).enumerate() {
+        if matches!(w[0], '.' | '!' | '?') && w[1] == ' ' && w[2].is_uppercase() {
+            end = flat.char_indices().nth(i + 1).map(|(b, _)| b).unwrap_or(flat.len());
+            break;
+        }
+    }
+    let first = flat[..end].trim().trim_end_matches(['.', ' ']).to_string();
+    let pick = if first.chars().count() >= 12 { first } else { task.task.lines().next().unwrap_or("Noční směna").to_string() };
+    if pick.chars().count() <= 70 {
+        return pick;
+    }
+    // Cut at a word, not mid-word.
+    let short: String = pick.chars().take(70).collect();
+    match short.rfind(' ') {
+        Some(i) => format!("{}…", &short[..i]),
+        None => short,
+    }
 }
 
 struct Outcome {
@@ -252,7 +293,7 @@ fn work(state: &Path, task: &Task) -> Outcome {
         Ok(sha) => sha,
         Err(e) => return fail(format!("Nevím, odkud začít: {e}")),
     };
-    let branch = branch_name(task);
+    let branch = branch_name(&task.task, &task.id);
     let tree = state.join("noc").join(format!("{}-{}", task.project, task.id));
     let _ = std::fs::create_dir_all(tree.parent().unwrap_or(Path::new("/tmp")));
     if let Err(e) = git(&repo, &["worktree", "add", "-q", "-b", &branch, &tree.to_string_lossy(), &start]) {
@@ -351,9 +392,14 @@ fn work(state: &Path, task: &Task) -> Outcome {
 
     // Up to GitHub as a draft PR, when the project has a remote.
     let mut pr = None;
+    // Name both after the work, not after the sentence Erik typed at midnight.
+    let title = title_from(&summary, task);
+    let branch = {
+        let wanted = branch_name(&title, &task.id);
+        if wanted != branch && git(&tree, &["branch", "-m", &branch, &wanted]).is_ok() { wanted } else { branch }
+    };
     if has_remote && git(&tree, &["push", "-q", "-u", "origin", &branch]).is_ok() {
-        let title: String = task.task.lines().next().unwrap_or("Noční směna").chars().take(70).collect();
-        let body = format!("Noční směna: úkol z Telegramu.\n\n> {}\n\n{}", task.task.replace('\n', "\n> "), summary);
+        let body = format!("Noční směna Wispu.\n\n{}\n\n<details><summary>Zadání z Telegramu</summary>\n\n> {}\n\n</details>", summary, task.task.replace('\n', "\n> "));
         let gh = home().join(".local/bin/gh");
         let gh = if gh.exists() { gh } else { PathBuf::from("/opt/homebrew/bin/gh") };
         let base_branch = base.strip_prefix("origin/").unwrap_or(&base).to_string();
@@ -537,5 +583,41 @@ mod live {
         let t = std::time::Instant::now();
         let out = super::work(&state, &task);
         println!("in {:?}, ok={}, branch={:?}, pr={:?}\n{}", t.elapsed(), out.ok, out.branch, out.pr, out.summary);
+    }
+}
+
+#[cfg(test)]
+mod naming_tests {
+    use super::*;
+
+    fn task(text: &str) -> Task {
+        serde_json::from_value(json!({
+            "id": "abcdc71e", "project": "wisp-buddy", "task": text,
+            "status": "running", "addedMs": 0u64
+        }))
+        .expect("Task se nedá složit")
+    }
+
+    #[test]
+    fn branch_drops_the_words_that_say_nothing() {
+        // The real one from 2026-10-08, which became noc/udelej-z-wispu-jarvise-co-c71e.
+        assert_eq!(branch_name("udelej z wispu jarvise co jsme spolu probirali", "abcdc71e"), "noc/wispu-jarvise-c71e");
+        assert_eq!(branch_name("Přidej zvuky při chybě", "abcdc71e"), "noc/pridej-zvuky-pri-chybe-c71e");
+        // Nothing but filler still has to be a legal branch.
+        assert_eq!(branch_name("co to je", "abcdc71e"), "noc/prace-c71e");
+    }
+
+    #[test]
+    fn title_says_what_came_out_not_what_was_asked() {
+        let t = task("udelej z wispu jarvise co jsme spolu probirali");
+        let summary = "Z Wisp Buddyho je teď asistent. Pamatuje si, co mu řekneš, a mluví nahlas.";
+        assert_eq!(title_from(summary, &t), "Z Wisp Buddyho je teď asistent");
+        // A date inside the sentence is not the end of it.
+        assert!(title_from("Hotovo podle toho, co jste probírali 5. 10. Nic dalšího.", &t).starts_with("Hotovo podle toho"));
+        // No summary worth the name falls back to the task.
+        assert_eq!(title_from("Hotovo.", &t), "udelej z wispu jarvise co jsme spolu probirali");
+        // Long ones are cut at a word.
+        let long = "A".repeat(40) + " " + &"B".repeat(40) + ". Konec.";
+        assert!(title_from(&long, &t).ends_with('…'));
     }
 }
