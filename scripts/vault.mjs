@@ -57,6 +57,10 @@ const czDay = (d) => {
   const [y, m, dd] = d.split("-").map(Number);
   return `${dd}. ${MONTHS[m - 1]} ${y}`;
 };
+// Agents run on local CLIs logged in with Erik's Claude and ChatGPT
+// subscriptions (billingType: subscription_included on every run that reports
+// one), so this is what the tokens WOULD cost through an API. Nothing is
+// invoiced. It is still worth showing: it is how much of his limit went where.
 const usd = (n) => (n ? `$${Number(n).toFixed(2)}` : "");
 const mins = (r) =>
   r.finishedAt && r.startedAt ? Math.round((new Date(r.finishedAt) - new Date(r.startedAt)) / 60_000) : null;
@@ -223,20 +227,20 @@ async function main() {
       `firma: ${a.company}`,
       models.length ? `model: ${models.join(", ")}` : null,
       `běhů: ${mine.length}`,
-      `útrata: ${cost.toFixed(2)}`,
+      `tokeny_v_usd: ${cost.toFixed(2)}`,
       "---",
       `# ${a.name}`,
       "",
       a.title ? `${a.title}.` : null,
       "",
-      `Za ${cz(DAYS, "den", "dny", "dní")}: **${ok} hotovo**, ${bad} spadlo, ${cut} zrušeno${cost ? `, dohromady za ${usd(cost)}` : ""}.`,
+      `Za ${cz(DAYS, "den", "dny", "dní")}: **${ok} hotovo**, ${bad} spadlo, ${cut} zrušeno${cost ? `, tokeny za ${usd(cost)} z předplatného` : ""}.`,
       bad + cut > ok ? "\n> [!warning] Víc běhů skončilo jinak než úspěchem." : null,
       a.pauseReason ? `\n> [!note] Pauza: ${a.pauseReason}` : null,
       "",
       "## Poslední běhy",
       "",
       table(
-        ["Kdy", "Stav", "Model", "Trvalo", "Cena"],
+        ["Kdy", "Stav", "Model", "Trvalo", "Tokeny"],
         mine.slice(0, 12).map((r) => [
           runLink(r),
           STATUS[r.status] ?? r.status,
@@ -297,7 +301,7 @@ async function main() {
       `agent: ${who ?? ""}`,
       `den: ${d}`,
       r.usageJson?.model ? `model: ${r.usageJson.model}` : null,
-      r.usageJson?.costUsd ? `cena: ${Number(r.usageJson.costUsd).toFixed(3)}` : null,
+      r.usageJson?.costUsd ? `tokeny_v_usd: ${Number(r.usageJson.costUsd).toFixed(3)}` : null,
       mins(r) !== null ? `minut: ${mins(r)}` : null,
       "---",
       `# ${runTitle.get(r.id)}`,
@@ -389,11 +393,11 @@ async function main() {
       `datum: ${d}`,
       `běhů: ${dayRuns.length}`,
       `pádů: ${bad.length}`,
-      cost ? `útrata: ${cost.toFixed(2)}` : null,
+      cost ? `tokeny_v_usd: ${cost.toFixed(2)}` : null,
       "---",
       `# ${d}`,
       "",
-      `${czDay(d)}. ${cz(dayRuns.length, "běh", "běhy", "běhů")}, ${cz(changes.length, "změna stavu", "změny stavu", "změn stavu")}${cost ? `, za ${usd(cost)}` : ""}.`,
+      `${czDay(d)}. ${cz(dayRuns.length, "běh", "běhy", "běhů")}, ${cz(changes.length, "změna stavu", "změny stavu", "změn stavu")}${cost ? `, tokeny za ${usd(cost)}` : ""}.`,
       "",
       bad.length
         ? "## Spadlo\n\n" + bad.map((h) => `- **${new Date(h.at).toTimeString().slice(0, 5)}** ${h.name}: ${h.text ?? ""}`).join("\n")
@@ -433,12 +437,12 @@ async function main() {
       "# Wisp",
       "",
       `Za posledních ${cz(DAYS, "den", "dny", "dní")}: **${recent.length} běhů**, z toho ${week.length} za poslední týden, ` +
-        `${issues.length} issues, ${touchedBy.size} dotčených souborů${spend ? `, dohromady za ${usd(spend)}` : ""}.`,
+        `${issues.length} issues, ${touchedBy.size} dotčených souborů${spend ? `, tokeny za ${usd(spend)}` : ""}.`,
       "",
       "## Agenti",
       "",
       table(
-        ["Agent", "Stav", "Hotovo", "Spadlo", "Zrušeno", "Cena"],
+        ["Agent", "Stav", "Hotovo", "Spadlo", "Zrušeno", "Tokeny"],
         agents.map((a) => {
           const mine = recent.filter((r) => r.agentId === a.id);
           return [
@@ -476,6 +480,8 @@ async function main() {
       ),
       "",
       "---",
+      "",
+      "Částky jsou odhad, co by ty tokeny stály přes API. Agenti jedou na tvém předplatném Claude a ChatGPT (`subscription_included`), nic se nefakturuje. Je to měřítko, kolik ti kdo ujedl z limitu.",
       "",
       "Staví to `scripts/vault.mjs` v `~/Developer/dispecink`, jen fakta z Paperclipu a z historie Wispu, žádné konverzace agentů.",
       "Běhy, které dopadly dobře, nic nezměnily a trvaly krátce, nemají vlastní poznámku a najdeš je v denní.",
