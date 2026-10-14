@@ -421,10 +421,10 @@ async function main() {
 
   // ---------- the home note ----------
   const collisions = [...touchedBy].filter(([, w]) => w.size > 1);
+  const week = recent.filter((r) => new Date(r.startedAt ?? r.createdAt).getTime() > Date.now() - 7 * 86_400_000);
   const hot = [...fileRuns].sort((a, b) => b[1].length - a[1].length).slice(0, 5);
   const broken = issues.filter((i) => i.status === "blocked" || i.blockerAttention);
   const spend = recent.reduce((s, r) => s + (Number(r.usageJson?.costUsd) || 0), 0);
-  const week = recent.filter((r) => new Date(r.startedAt ?? r.createdAt).getTime() > Date.now() - 7 * 86_400_000);
   const days = [...byDay].sort().reverse();
   await writeFile(
     join(VAULT, "Wisp.md"),
@@ -441,16 +441,23 @@ async function main() {
       "",
       "## Agenti",
       "",
+      // A month's total hides whether something is broken now or was broken
+      // three weeks ago and already fixed. The week comes first for that reason.
       table(
-        ["Agent", "Stav", "Hotovo", "Spadlo", "Zrušeno", "Tokeny"],
+        ["Agent", "Stav", "Posledních 7 dní", "Za 30 dní", "Tokeny"],
         agents.map((a) => {
           const mine = recent.filter((r) => r.agentId === a.id);
+          const sum = (rs) => {
+            const ok = rs.filter((r) => r.status === "succeeded").length;
+            const bad = rs.filter((r) => r.status === "failed").length;
+            const cut = rs.filter((r) => r.status === "cancelled").length;
+            return rs.length ? `${ok} ok, ${bad} spadlo, ${cut} zrušeno` : "nic";
+          };
           return [
             link("Agenti", a.name),
             a.status ?? "",
-            String(mine.filter((r) => r.status === "succeeded").length),
-            String(mine.filter((r) => r.status === "failed").length),
-            String(mine.filter((r) => r.status === "cancelled").length),
+            sum(mine.filter((r) => week.includes(r))),
+            sum(mine),
             usd(mine.reduce((s, r) => s + (Number(r.usageJson?.costUsd) || 0), 0)),
           ];
         }),
