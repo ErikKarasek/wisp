@@ -122,6 +122,28 @@ pub fn action(repo: &str, workflow_id: i64, action: &str) -> Result<(), String> 
     gh(&["workflow", verb, &id, "-R", repo]).map(|_| ())
 }
 
+// ---------- merged pull requests ----------
+
+/// Pull requests merged in the last few weeks, across every repo of these
+/// owners. The Fixer can't set its own issue done from an unbound heartbeat
+/// (403), so finished work piles up in review; this is how Wisp finds it.
+pub fn merged_prs(repos: &[String]) -> Vec<Value> {
+    let mut owners: Vec<&str> = repos.iter().filter_map(|r| r.split('/').next()).collect();
+    owners.sort();
+    owners.dedup();
+    let mut out = Vec::new();
+    for owner in owners {
+        let found = gh(&[
+            "search", "prs", "--owner", owner, "--merged", "--limit", "60", "--json",
+            "repository,number,title,body,url",
+        ]);
+        if let Some(list) = found.ok().and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok()) {
+            out.extend(list);
+        }
+    }
+    out
+}
+
 // ---------- pull requests to review ----------
 
 /// Open pull requests in these repos, with their checks, for the review list.
