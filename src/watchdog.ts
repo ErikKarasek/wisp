@@ -287,12 +287,20 @@ export async function announcePrs(prs: PR[]) {
 /** "NEX-38" anywhere in a merged pull request's title or body (`gh search prs` can't return the branch). */
 const TASK_IDS = /\b([A-Z]{2,5}-\d+)\b/g;
 
+/** Where a merged pull request is allowed to finish the task. */
+const CLOSEABLE = new Set(["in_review", "blocked"]);
+
 /**
  * An agent can't set its own issue to done from an unbound heartbeat (Paperclip
  * answers 403), so finished work sits in review until Erik moves it by hand.
  * Eight of them had piled up. A merged pull request naming the task is proof
- * enough, and only `in_review` is touched: a task still in the queue that
- * happens to share a name is not finished.
+ * enough.
+ *
+ * Only `in_review` and `blocked` are touched: a task still in the queue that
+ * happens to share a name is not finished. Blocked belongs here because the
+ * guard pauses agents at the limit, and Paperclip then parks their finished
+ * tasks as "stranded" (it happened to NEX-51 thirteen seconds after this
+ * closed it, which is how it got into this comment).
  */
 export async function closeMergedIssues(snap: PaperclipSnapshot | null, repos: string[], note: (t: string) => void) {
   if (!snap?.online || !repos.length) return;
@@ -308,7 +316,7 @@ export async function closeMergedIssues(snap: PaperclipSnapshot | null, repos: s
   for (const { issues } of snap.companies) {
     for (const issue of issues) {
       const pr = byTask.get(String(issue.identifier ?? ""));
-      if (!pr || issue.status !== "in_review" || s.mergedDone!.includes(issue.id)) continue;
+      if (!pr || !CLOSEABLE.has(String(issue.status)) || s.mergedDone!.includes(issue.id)) continue;
       const repo = pr.repository?.nameWithOwner ?? pr.repository?.name ?? "";
       const where = `${repo}#${pr.number}`;
       const ok = await pc("PATCH", `/issues/${issue.id}`, { status: "done" }).then(() => true).catch(() => false);
