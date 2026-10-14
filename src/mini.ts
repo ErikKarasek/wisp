@@ -754,6 +754,12 @@ export async function startNotch() {
     items: { question: string; header: string; options: { label: string; description: string }[]; multi: boolean }[];
   };
   let ccQ: CcQuestion | null = null;
+  /** Kdy otázka přišla. Jako u povolovacích karet: když se úklidová událost
+   * ztratí, karta se nesmí zaseknout v notchi navždy. Na otázku, na kterou už
+   * Rust nečeká, nejde odpovědět a notch zůstane v režimu "ptá se". */
+  let ccQAt = 0;
+  /** Jak dlouho Rust strana nejdéle čeká na odpověď (HOLD_ASK v claudecode.rs), plus rezerva. */
+  const ASK_LIFE = 3 * 60_000;
   /** Which of the questions is on screen, and what is picked for it so far. */
   let qAt = 0;
   let qPicked: string[] = [];
@@ -761,6 +767,7 @@ export async function startNotch() {
   let qAnswers: Record<string, string | string[]> = {};
   const closeQ = () => {
     ccQ = null;
+    ccQAt = 0;
     qAt = 0;
     qPicked = [];
     qAnswers = {};
@@ -768,6 +775,7 @@ export async function startNotch() {
   };
   void listen<CcQuestion>("cc-question", (e) => {
     ccQ = e.payload;
+    ccQAt = Date.now();
     qAt = 0;
     qPicked = [];
     qAnswers = {};
@@ -790,7 +798,7 @@ export async function startNotch() {
       .map((o) => `<div class="step past wrap one"><small><b>${escHtml(o.label)}</b> ${escHtml(o.description)}</small></div>`)
       .join("");
     const last = qAt + 1 >= q.items.length;
-    steps.innerHTML = `<small class="who warn">${escHtml(head)}</small>
+    steps.innerHTML = `<small class="who warn">${escHtml(head)}<button class="x" data-a="terminal" title="Zavřít, ať se Claude zeptá v terminálu">✕</button></small>
       <div class="step past wrap">${escHtml(item.question)}</div>
       ${notes}
       <div class="perm">
@@ -798,7 +806,7 @@ export async function startNotch() {
           .map((o, i) => `<button data-o="${i}"${qPicked.includes(o.label) ? ' class="go"' : ""}>${escHtml(o.label)}</button>`)
           .join("")}
         <button data-a="terminal" title="Nech to na terminálu">Terminál</button>
-        ${item.multi ? `<button data-a="next" class="go">${last ? "Hotovo" : "Dál"}</button>` : ""}
+        ${item.multi ? `<button data-a="next" class="go"${qPicked.length ? "" : " disabled"}>${last ? "Hotovo" : "Dál"}</button>` : ""}
       </div>`;
     const done = () => {
       void invoke("cc_decide", { id: q.id, answer: JSON.stringify(qAnswers) });
@@ -826,10 +834,12 @@ export async function startNotch() {
       }),
     );
     steps.querySelector('[data-a="next"]')?.addEventListener("click", step);
-    steps.querySelector('[data-a="terminal"]')!.addEventListener("click", () => {
-      void invoke("cc_decide", { id: q.id, answer: "terminal" });
-      closeQ();
-    });
+    steps.querySelectorAll('[data-a="terminal"]').forEach((b) =>
+      b.addEventListener("click", () => {
+        void invoke("cc_decide", { id: q.id, answer: "terminal" });
+        closeQ();
+      }),
+    );
   }
 
   // ----- a file dropped on the notch, and a question about it (Gemini answers) -----
@@ -1043,7 +1053,13 @@ export async function startNotch() {
     });
   }
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && snipOn) closeSnip();
+    if (ev.key !== "Escape") return;
+    if (snipOn) return closeSnip();
+    // Claudova otázka: Escape je totéž co Terminál, ať se karta vždycky dá zavřít.
+    if (ccQ) {
+      void invoke("cc_decide", { id: ccQ.id, answer: "terminal" });
+      closeQ();
+    }
   });
   // ----- ⌃⌥V held: talking to the notch (voice.rs). Gemini writes it down and picks what it is -----
   type Heard = { heard: string; action: string; answer: string; text: string; at: string; project: string; task: string; now: boolean; agent: string };
@@ -1440,6 +1456,14 @@ export async function startNotch() {
     // An agent's question gets the whole card too, like a quick question.
     // Starší, než kolik Rust vydrží čekat: ta žádost je dávno pryč.
     perms = perms.filter((p) => Date.now() - p.at < PERM_LIFE);
+    // Totéž pro Claudovu otázku. Bez redraw: kreslíme právě teď.
+    if (ccQ && Date.now() - ccQAt > ASK_LIFE) {
+      ccQ = null;
+      ccQAt = 0;
+      qAt = 0;
+      qPicked = [];
+      qAnswers = {};
+    }
     const agentAsks = !working && s.items.some((i) => i.ask);
     root.classList.toggle("asking", perms.length > 0 || !!ccQ || !!fileAsk || quickAsk || snipOn || agentAsks);
     if (perms.length) {
