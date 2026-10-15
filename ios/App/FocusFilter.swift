@@ -1,13 +1,12 @@
 import AppIntents
 import Intents
 
-/// Zapnuté soustředění: Wisp pustí jen to, co po tobě Claude vysloveně chce
-/// (povolení k příkazu), a mlčí o tom, že někdo doběhl nebo spadl.
+/// Focus on: Wisp only lets through what Claude explicitly wants from you (permission for a
+/// command) and stays quiet about somebody finishing or failing.
 ///
-/// Nastavení se jen uloží. Jestli se podle něj jede, se rozhoduje až v
-/// okamžiku upozornění podle toho, jestli je soustředění opravdu zapnuté
-/// (viz `focusQuiet`). Kdyby iOS přestal říkat, že filtr skončil, upozornění
-/// se tím vrátí sama, místo aby navždycky zmizela.
+/// The setting is merely stored. Whether it is acted on is decided at the moment of the alert,
+/// from whether Focus really is on (see `focusQuiet`). Were iOS to stop saying that the filter
+/// ended, the alerts come back on their own instead of disappearing forever.
 struct QuietFocusFilter: SetFocusFilterIntent {
     static var title: LocalizedStringResource = "Jen to, co čeká na tebe"
     static var description: IntentDescription? = IntentDescription(
@@ -32,9 +31,9 @@ struct QuietFocusFilter: SetFocusFilterIntent {
 
 let focusQuietKey = "focusOnlyApprovals"
 
-/// Má se teď mlčet o všem kromě povolení? Jen když je soustředění opravdu
-/// zapnuté. Když se iOS na stav zeptat nedá (nedal svolení, starší systém),
-/// odpověď je ne: lepší upozornění navíc než ztracené.
+/// Should everything but permissions stay quiet right now? Only when Focus really is on. When
+/// iOS cannot be asked for the state (no permission given, an older system), the answer is no:
+/// better one alert too many than one lost.
 @MainActor
 func focusQuiet() -> Bool {
     guard UserDefaults.standard.bool(forKey: focusQuietKey) else { return false }

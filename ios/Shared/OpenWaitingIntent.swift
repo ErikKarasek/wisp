@@ -1,8 +1,8 @@
 import AppIntents
 
-/// Co dělá tlačítko v Ovládacím centru: otevře Wisp. Appka startuje na Přehledu,
-/// kde to, co na tebe čeká, stojí nahoře. Je ve Shared, protože ho ohlašuje
-/// rozšíření s widgety, ale spouští ho appka.
+/// What the Control Center button does: it opens Wisp. The app starts on Přehled, where whatever
+/// is waiting for you sits at the top. It lives in Shared because the widget extension announces
+/// it, while the app is what runs it.
 struct OpenWaitingIntent: AppIntent {
     static var title: LocalizedStringResource = "Otevřít, co čeká"
     static var description = IntentDescription("Otevře Wisp u toho, co po tobě Claude a agenti chtějí.")

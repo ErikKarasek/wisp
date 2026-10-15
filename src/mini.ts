@@ -14,7 +14,7 @@ import { sounds } from "./sounds";
 import { awakeHeadline, mountAwake } from "./awake";
 import "./mini.css";
 
-/** Adresa, jen když je to http(s) s hostitelem. Jinak nic. */
+/** The URL, only when it is http(s) with a host. Otherwise nothing. */
 const webUrl = (raw: string): string | null => {
   try {
     const u = new URL(raw.trim());
@@ -668,13 +668,13 @@ export async function startNotch() {
   // ----- Claude Code in a terminal: its hooks post to Wisp, which passes them here -----
   type CcEvent = { session: string; project: string; kind: string; text: string };
   type Perm = { id: string; session: string; project: string; tool: string; detail: string; rule: string };
-  /** Jak dlouho Rust strana nejdéle čeká na odpověď (HOLD_AWAY v claudecode.rs), plus rezerva. */
+  /** How long the Rust side waits for an answer at most (HOLD_AWAY in claudecode.rs), plus headroom. */
   const PERM_LIFE = 11 * 60_000;
   const ccSessions = new Map<string, { project: string; lines: string[]; at: number; since: number; busy: boolean; voice: AgentVoice | null }>();
   let ccDone: { project: string; text: string; at: number } | null = null;
-  // `at` je kdy karta přišla: když se úklidová událost ztratí, karta se nesmí
-  // zaseknout na obrazovce navždy. Žádost, na kterou už nikdo nečeká, nejde
-  // zodpovědět a klikání na ni mlčí, což vypadá jako rozbitá appka.
+  // `at` is when the card arrived: if the cleanup event is lost, the card must not stick on the
+  // screen forever. A request nobody waits for any more cannot be answered, and clicking it stays
+  // silent, which looks like a broken app.
   let perms: (Perm & { at: number })[] = [];
   let permShown: string | null = null;
   const ccWorking = () => {
@@ -759,8 +759,8 @@ export async function startNotch() {
       </div>`;
     steps.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) =>
       b.addEventListener("click", () => {
-        // false znamená, že na tu žádost už nikdo nečeká; karta se stejně zavírá,
-        // ale radovat se z povolení, které nikam nedošlo, by bylo matoucí.
+        // false means nobody is waiting for that request any more; the card closes either way,
+        // but celebrating a permission that never arrived anywhere would be confusing.
         void invoke<boolean>("cc_decide", { id: p.id, answer: b.dataset.a }).then((heard) => {
           if (heard && (b.dataset.a === "allow" || b.dataset.a === "always")) wink();
         });
@@ -778,11 +778,11 @@ export async function startNotch() {
     items: { question: string; header: string; options: { label: string; description: string }[]; multi: boolean }[];
   };
   let ccQ: CcQuestion | null = null;
-  /** Kdy otázka přišla. Jako u povolovacích karet: když se úklidová událost
-   * ztratí, karta se nesmí zaseknout v notchi navždy. Na otázku, na kterou už
-   * Rust nečeká, nejde odpovědět a notch zůstane v režimu "ptá se". */
+  /** When the question arrived. As with permission cards: if the cleanup event is lost, the card
+   * must not stick in the notch forever. A question the Rust side no longer waits for cannot be
+   * answered, and the notch would stay in its "asking" mode. */
   let ccQAt = 0;
-  /** Jak dlouho Rust strana nejdéle čeká na odpověď (HOLD_ASK v claudecode.rs), plus rezerva. */
+  /** How long the Rust side waits for an answer at most (HOLD_ASK in claudecode.rs), plus headroom. */
   const ASK_LIFE = 3 * 60_000;
   /** Which of the questions is on screen, and what is picked for it so far. */
   let qAt = 0;
@@ -1079,7 +1079,7 @@ export async function startNotch() {
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape") return;
     if (snipOn) return closeSnip();
-    // Claudova otázka: Escape je totéž co Terminál, ať se karta vždycky dá zavřít.
+    // Claude's question: Escape is the same as Terminál, so the card can always be closed.
     if (ccQ) {
       void invoke("cc_decide", { id: ccQ.id, answer: "terminal" });
       closeQ();
@@ -1141,7 +1141,7 @@ export async function startNotch() {
 
   // ----- what the week was like: once a week, out of the history the Mac keeps -----
   type Hist = { at: number; id: string; name: string; state: string; text: string };
-  /** Rok a číslo týdne, aby karta přišla jednou za týden a ne každé otevření. */
+  /** The year and week number, so the card comes once a week and not on every open. */
   const weekStamp = (d = new Date()) => {
     const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
     t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
@@ -1154,7 +1154,7 @@ export async function startNotch() {
     return [...m].sort((a, b) => b[1] - a[1]);
   };
   const times = (n: number) => (n === 1 ? "jednou" : `${n}×`);
-  /** Karta s týdnem, nebo null, když se za týden nestalo nic, co by stálo za řeč. */
+  /** The card for the week, or null when nothing worth mentioning happened in it. */
   function recapBody(all: Hist[]): string | null {
     const week = all.filter((h) => h.at >= Date.now() - 7 * 86_400_000);
     const done = week.filter((h) => h.state === "done");
@@ -1174,8 +1174,8 @@ export async function startNotch() {
     return `${lines.filter(Boolean).join("")}<div class="perm"><button data-a="ok" class="go">Jasně</button></div>`;
   }
   async function maybeRecap() {
-    // Jen jednou za týden. Značka patří k téhle stránce, ne ke stavu agentů,
-    // takže si ji drží webview a nemusí kvůli ní na disk nikdo jiný sahat.
+    // Once a week only. The mark belongs to this page, not to the agents' state, so the webview
+    // keeps it and nobody else has to touch the disk for it.
     if (localStorage.getItem("wisp-recap-week") === weekStamp()) return;
     if (snipOn || quickAsk || fileAsk || perms.length) return;
     const all = await invoke<Hist[]>("history_load").catch(() => [] as Hist[]);
@@ -1186,7 +1186,7 @@ export async function startNotch() {
     steps.querySelector('[data-a="ok"]')!.addEventListener("click", closeSnip);
     void invoke("notch_peek", { millis: 20_000 });
   }
-  // Až se notch rozkouká po startu, ne uprostřed toho, jak naskakuje.
+  // Once the notch has settled after startup, not in the middle of it coming up.
   setTimeout(() => void maybeRecap(), 5000);
 
   // ----- back at the Mac after a break: where Erik stopped (resume.rs) -----
@@ -1236,9 +1236,9 @@ export async function startNotch() {
     steps.querySelectorAll<HTMLAnchorElement>("a.pr").forEach((a) =>
       a.addEventListener("click", (ev) => {
         ev.preventDefault();
-        // Jen obyčejný webový odkaz. Adresa sice přichází z `gh pr create`, ale
-        // vede přes model a noční směnu, a file:// nebo vlastní schéma by tu
-        // otevřelo aplikaci na Macu místo stránky.
+        // A plain web link only. The address does come from `gh pr create`, but it passes through
+        // the model and the night shift, and a file:// or custom scheme would open an app on the
+        // Mac here instead of a page.
         const url = webUrl(a.href);
         if (url) void invoke("plugin:opener|open_url", { url }).catch(() => {});
       }),
@@ -1478,9 +1478,9 @@ export async function startNotch() {
 
     // Claude Code asking for permission comes first, then a dropped file.
     // An agent's question gets the whole card too, like a quick question.
-    // Starší, než kolik Rust vydrží čekat: ta žádost je dávno pryč.
+    // Older than the Rust side is willing to wait: that request is long gone.
     perms = perms.filter((p) => Date.now() - p.at < PERM_LIFE);
-    // Totéž pro Claudovu otázku. Bez redraw: kreslíme právě teď.
+    // The same for Claude's question. No redraw: we are drawing right now.
     if (ccQ && Date.now() - ccQAt > ASK_LIFE) {
       ccQ = null;
       ccQAt = 0;

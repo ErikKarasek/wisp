@@ -7,11 +7,11 @@
 // who, when, what, which file, what came out. No agent conversations.
 //
 //   node scripts/vault.mjs            → ~/Developer/wisp-vault
-//   VAULT=/jina/cesta node scripts/vault.mjs
+//   VAULT=/another/path node scripts/vault.mjs
 //
-// Běží sám každou půlhodinu jako launchd job com.erikkarasek.vault
-// ($HOME/Library/LaunchAgents), takže Wisp ho ukazuje jako kteroukoliv jinou
-// automatizaci. Log v $HOME/Library/Logs/wisp-vault.log.
+// It runs on its own every half hour as the launchd job com.erikkarasek.vault
+// ($HOME/Library/LaunchAgents), so Wisp shows it like any other automation.
+// Its log is in $HOME/Library/Logs/wisp-vault.log.
 
 import { mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
