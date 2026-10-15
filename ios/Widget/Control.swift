@@ -2,7 +2,7 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-/// Tlačítko v Ovládacím centru (iOS 18): kolik věcí čeká na tebe, a klepnutím Wisp otevře.
+/// The Control Center button (iOS 18): how many things are waiting for you, and a tap opens Wisp.
 @available(iOS 18.0, *)
 struct WaitingControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
@@ -24,9 +24,9 @@ struct WaitingControl: ControlWidget {
 struct WaitingProvider: ControlValueProvider {
     var previewValue: Int? { 2 }
 
-    /// nil znamená „nevím“, ne „je klid“. Kdyby se výpadek relay nebo starý snímek (Mac
-    /// mlčí přes 300 s, stejně jako ve `statusLine`) počítal jako nula, tvářilo by se
-    /// spadlé spojení jako dobrá zpráva, což je ta horší ze dvou lží.
+    /// nil means "do not know", not "all quiet". If a relay outage or a stale snapshot (the Mac
+    /// silent for over 300 s, same as in `statusLine`) counted as zero, a dead connection would
+    /// pose as good news, which is the worse of the two lies.
     func currentValue() async throws -> Int? {
         guard let (s, at) = try? await Relay.state(), Date().timeIntervalSince(at) <= 300 else { return nil }
         return s.waiting.count + (s.perms?.count ?? 0)

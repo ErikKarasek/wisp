@@ -1,14 +1,14 @@
 import AppIntents
 import Foundation
 
-// Siri a Zkratky: zeptat se, co agenti dělají, a zadat jim úkol, aniž bys appku otevřel.
+// Siri and Shortcuts: ask what the agents are doing and hand them a task without opening the app.
 
-/// 1 agent, 2 agenti, 5 agentů.
+/// Czech plural forms: 1 agent, 2 agenti, 5 agentů.
 func plural(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
     "\(n) " + (n == 1 ? one : (2...4).contains(n) ? few : many)
 }
 
-/// Jedna věta o všem, pro Siri i pro Ovládací centrum.
+/// One sentence covering everything, for Siri and for Control Center.
 func statusLine(_ s: PhoneState, pushed: Date) -> String {
     if Date().timeIntervalSince(pushed) > 300 {
         return "Mac se neozval \(agoText(pushed)), takže nevím, co je nového."
@@ -22,13 +22,13 @@ func statusLine(_ s: PhoneState, pushed: Date) -> String {
     if !waiting.isEmpty { parts.append("\(plural(waiting.count, "agent chce", "agenti chtějí", "agentů chce")) něco vědět") }
     if !bad.isEmpty { parts.append("selhal\(bad.count == 1 ? "" : "o") \(bad.map(\.name).joined(separator: " a "))") }
     if parts.isEmpty { return "Klid, nikdo nic nechce." }
-    // „Pracují dva agenti a Hlídač závislostí selhal.“
+    // Reads as „Pracují dva agenti a Hlídač závislostí selhal.“
     let last = parts.removeLast()
     let text = parts.isEmpty ? last : parts.joined(separator: ", ") + " a " + last
     return text.prefix(1).uppercased() + text.dropFirst() + "."
 }
 
-/// „Co dělají agenti v aplikaci Wisp“: Siri se zeptá Macu a přečte odpověď.
+/// „Co dělají agenti v aplikaci Wisp“: Siri asks the Mac and reads the answer out.
 struct AgentsStatusIntent: AppIntent {
     static var title: LocalizedStringResource = "Co dělají agenti"
     static var description = IntentDescription("Zeptá se Macu, kdo pracuje, co čeká na tebe a co selhalo.")
@@ -45,7 +45,7 @@ struct AgentsStatusIntent: AppIntent {
     }
 }
 
-/// Agent jako věc, kterou jde ve Zkratkách vybrat ze seznamu.
+/// An agent as something you can pick from a list in Shortcuts.
 struct AgentEntity: AppEntity {
     let id: String
     let name: String
@@ -68,15 +68,15 @@ struct AgentQuery: EntityQuery {
     }
 }
 
-/// „Zadat úkol v aplikaci Wisp“: nadiktuješ ho a Mac ho do deseti vteřin převezme.
+/// „Zadat úkol v aplikaci Wisp“: you dictate it and the Mac picks it up within ten seconds.
 struct SendTaskIntent: AppIntent {
     static var title: LocalizedStringResource = "Zadat agentovi úkol"
     static var description = IntentDescription("Pošle agentovi nový úkol. Mac ho převezme do deseti vteřin.")
     static var openAppWhenRun = false
     static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
-    // Oba nepovinné schválně: zkratka pro Siri nesmí mít povinný parametr, jinak
-    // ji nejde spustit z dlaždice. Co chybí, na to se zeptá až perform().
+    // Both optional on purpose: a Siri shortcut must not have a required parameter, or it cannot
+    // be run from a tile. Whatever is missing, perform() asks for.
     @Parameter(title: "Agent") var agent: AgentEntity?
     @Parameter(title: "Úkol") var task: String?
 
@@ -105,8 +105,8 @@ struct SendTaskIntent: AppIntent {
     }
 }
 
-/// Věty, kterými to jde spustit. Jméno appky v nich musí být, proto „v aplikaci Wisp“:
-/// `\(.applicationName)` doplní první pád, a tahle vazba ho unese i česky.
+/// The phrases that can trigger it. The app's name has to appear in them, hence „v aplikaci
+/// Wisp“: `\(.applicationName)` fills in the nominative, and this wording carries it in Czech too.
 struct WispShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(

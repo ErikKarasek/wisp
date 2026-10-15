@@ -8,7 +8,7 @@ settings:
     SWIFT_VERSION: "5.10"
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
-    # Pole OU certifikátu, ne to, co je u něj v závorce (BMFX48RAPC je ID certifikátu).
+    # The certificate's OU field, not what sits in its parentheses (BMFX48RAPC is the certificate id).
     DEVELOPMENT_TEAM: "43DXCJM29X"
 targets:
   Dispecink:

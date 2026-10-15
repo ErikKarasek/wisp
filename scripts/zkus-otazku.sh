@@ -1,6 +1,6 @@
 #!/bin/zsh
-# Vyvolá v notchi zkušební Claudovu otázku (AskUserQuestion), bez Claude Code.
-# Co klikneš, to skript vypíše jako odpověď, kterou by Claude Code dostal.
+# Raises a test Claude question (AskUserQuestion) in the notch, without Claude Code.
+# Whatever you click, the script prints as the answer Claude Code would have received.
 set -euo pipefail
 key=~/Library/Application\ Support/cz.erikkarasek.dispecink/cc-hook-key
 [[ -r $key ]] || { echo "Chybí klíč pro hooky, zapni je v nastavení Wispu."; exit 1; }

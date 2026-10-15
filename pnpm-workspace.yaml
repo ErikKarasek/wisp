@@ -1,5 +1,5 @@
 overrides:
-  # Denial of service přes posunuté offsety v source map; leze sem přes vite a postcss.
+  # Denial of service through shifted source-map offsets; it reaches here via vite and postcss.
   "source-map-js@<1.2.2": ^1.2.2
 
 allowBuilds:

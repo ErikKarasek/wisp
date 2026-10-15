@@ -1,12 +1,12 @@
-// Projde notch v prohlížeči a ověří věci, které se už jednou rozbily.
+// Walks the notch in a browser and checks the things that have broken once already.
 //
-// Stránka notche je obyčejná webová stránka, takže ji jde pustit mimo Tauri:
-// notch-harness.html podstrčí falešné `window.__TAURI_INTERNALS__`, uloží si
-// posluchače událostí a `window.__fire(udalost, data)` do nich pošle, co chce.
-// Tenhle skript z toho dělá test: nastartuje Vite, otevře harness v Chromu,
-// který na Macu už je, a tvrdí o vykreslené stránce konkrétní věci.
+// The notch's page is an ordinary web page, so it can run outside Tauri:
+// notch-harness.html slips in a fake `window.__TAURI_INTERNALS__`, keeps the event listeners it
+// is given, and `window.__fire(event, data)` sends whatever it likes into them.
+// This script turns that into a test: it starts Vite, opens the harness in the Chrome that is
+// already on the Mac, and asserts specific things about the rendered page.
 //
-// Pouští se `pnpm test:notch`. Vrací nenulový kód, když něco neplatí.
+// Run with `pnpm test:notch`. It exits non-zero when something does not hold.
 
 import { spawn } from "node:child_process";
 import { chromium } from "playwright-core";
@@ -15,13 +15,13 @@ const PORT = 1431;
 const ADRESA = `http://127.0.0.1:${PORT}/notch-harness.html?view=notch`;
 
 const results = [];
-/** Jedno tvrzení o stránce. Nepadá na první chybě, ať je vidět celý obraz. */
+/** One assertion about the page. It does not stop at the first failure, so the whole picture shows. */
 function check(name, ok, detail = "") {
   results.push({ name, ok, detail });
   console.log(`  ${ok ? "✓" : "✗"} ${name}${ok || !detail ? "" : `\n      ${detail}`}`);
 }
 
-/** Stav Macu, jaký notch čeká. Prázdný, pokud se nic nepředá. */
+/** The Mac state the notch expects. Empty when nothing is passed. */
 const snapshot = (items = []) => ({
   items,
   counts: { attention: 0, run: 0, sleep: 0, ok: 0, off: 0 },
@@ -58,7 +58,7 @@ async function main() {
     vite.on("error", fail);
   });
 
-  // Chrome, který je na Macu nainstalovaný; prohlížeč se kvůli tomuhle nestahuje.
+  // The Chrome already installed on the Mac; no browser is downloaded for this.
   const browser = await chromium.launch({ channel: "chrome" });
   const page = await browser.newPage({ viewport: { width: 1000, height: 220 } });
   const errors = [];
@@ -72,9 +72,9 @@ async function main() {
   const fire = (event, payload) => page.evaluate(([e, p]) => window.__fire(e, p), [event, payload]);
   const settle = () => page.waitForTimeout(350);
 
-  // ---- 1. Čísla z diffu přežijí useknutí řádku -------------------------------
-  // Řádek v tickeru je nowrap s ellipsis. Když "+12 -3" zůstane na jeho konci
-  // jako obyčejný text, ukousne se jako první a feature je neviditelná.
+  // ---- 1. Diff numbers survive the line being truncated ----------------------
+  // The ticker's line is nowrap with an ellipsis. If "+12 -3" sits at its end as plain text, it
+  // is the first thing cut off and the feature becomes invisible.
   await open();
   await fire("notch-open", true);
   await fire("dispecink-state", snapshot());
@@ -99,9 +99,9 @@ async function main() {
   check("ticker: dlouhý název souboru nesebere čísla", !!long && long.sirka > 0 && long.churn === "+1 -1", JSON.stringify(long));
   check("ticker: samotné přidání se píše bez nuly", ticker.at(-1)?.churn === "+84", JSON.stringify(ticker.at(-1)));
 
-  // ---- 2. Karta „Vítej zpátky“ se nezasekne nad spadlým agentem --------------
-  // renderFailure se odmítá překreslit, dokud si pamatuje, kterou chybu ukázal.
-  // Když tu paměť nikdo nesmaže, zůstane na obrazovce viset cizí karta.
+  // ---- 2. The „Vítej zpátky“ card does not stick over a failed agent ---------
+  // renderFailure refuses to redraw while it remembers which failure it showed.
+  // If nobody clears that memory, somebody else's card hangs on the screen.
   await open();
   await fire("notch-open", true);
   await fire("dispecink-state", snapshot([BAD_AGENT]));
@@ -121,7 +121,7 @@ async function main() {
   check("návrat k Macu: „Vítej zpátky“ převezme kartu", onResume.head.includes("VÍTEJ ZPÁTKY") && onResume.asking, JSON.stringify(onResume));
   check("po zavření se karta vrátí k selhání, nezůstane viset", after.includes("SELHAL"), after);
 
-  // ---- 3. Claudova otázka: odpověď se pošle ve tvaru, co čeká Rust -----------
+  // ---- 3. Claude's question: the answer is sent in the shape Rust expects ----
   await open();
   await fire("notch-open", true);
   await fire("dispecink-state", snapshot());
@@ -149,8 +149,8 @@ async function main() {
     JSON.stringify(sent),
   );
 
-  // ---- 4. Tlačítka zůstanou v kartě a dají se trefit -------------------------
-  // Tohle je ta původní chyba: karta přeteče notch a tlačítka zmizí z dosahu.
+  // ---- 4. The buttons stay inside the card and can be hit --------------------
+  // This is the original bug: the card overflows the notch and the buttons move out of reach.
   await page.setViewportSize({ width: 900, height: 180 });
   await open();
   await fire("notch-open", true);
@@ -169,7 +169,7 @@ async function main() {
     })),
   });
   await settle();
-  // Po dokreslení: dřív naměřeno uprostřed animace vycházely falešné propadáky.
+  // After the draw settles: measured mid-animation, this used to produce false failures.
   await page.waitForTimeout(600);
   const buttons = await page.evaluate(() => {
     const card = document.querySelector(".card.hero").getBoundingClientRect();
@@ -187,10 +187,10 @@ async function main() {
   check("přetékající karta: tlačítka zůstanou uvnitř karty", buttons.tlacitka.every((b) => b.vKarte), JSON.stringify(buttons.tlacitka));
   check("přetékající karta: na tlačítka jde kliknout", buttons.tlacitka.every((b) => b.trefim), JSON.stringify(buttons.tlacitka));
 
-  // ---- 5. Karta s povolením nepřežije svou žádost ---------------------------
-  // Rust strana čeká nejvýš deset minut. Když se úklidová událost cestou ztratí,
-  // karta zůstane viset a klikání na ni mlčí, protože tu žádost už nikdo nedrží.
-  // Čas se tu posune falešným Date.now, jinak by test musel čekat čtvrt hodiny.
+  // ---- 5. A permission card does not outlive its request --------------------
+  // The Rust side waits ten minutes at most. If the cleanup event is lost on the way, the card
+  // hangs around and clicking it stays silent, because nobody holds that request any more.
+  // Time is moved here with a fake Date.now, or the test would have to wait a quarter of an hour.
   await page.setViewportSize({ width: 1000, height: 220 });
   await open();
   await fire("notch-open", true);
@@ -204,11 +204,11 @@ async function main() {
   await settle();
   const porad = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
 
-  // Čistá stránka, ať do měření nemluví ta čerstvá karta výš.
+  // A clean page, so the fresh card above does not interfere with the measurement.
   await open();
   await fire("notch-open", true);
   await fire("dispecink-state", snapshot());
-  // Ta samá karta, ale jako by přišla před dvanácti minutami.
+  // The same card, but as if it had arrived twelve minutes ago.
   await page.evaluate(() => {
     window.__realNow = Date.now;
     Date.now = () => window.__realNow() - 12 * 60_000;

@@ -19,10 +19,10 @@ struct DispecinkApp: App {
                 .task {
                     await store.refresh()
                     _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
-                    // Jen kvůli filtru soustředění: bez svolení se filtr prostě neuplatní.
+                    // For the Focus filter only: without permission the filter simply does not apply.
                     INFocusStatusCenter.default.requestAuthorization { _ in }
-                    // Ohlásí zkratky za běhu. Bez toho je iOS má jen ze statických
-                    // metadat a při spuštění hlásí „couldn't find the AppShortcutsProvider“.
+                    // Announces the shortcuts at runtime. Without it, iOS only has them from
+                    // static metadata and logs „couldn't find the AppShortcutsProvider“ at launch.
                     WispShortcuts.updateAppShortcutParameters()
                 }
                 .onChange(of: phase) { _, p in
@@ -95,8 +95,8 @@ final class Store: ObservableObject {
         for p in s.perms ?? [] where !seen.contains("perm:\(p.id)") {
             fresh.append(("perm:\(p.id)", "\(p.project) · Claude chce povolit", p.detail))
         }
-        // Při soustředění s filtrem Wispu zůstanou jen povolení: ta po tobě Claude
-        // vysloveně chce, zbytek počká, až se podíváš sám.
+        // During Focus with Wisp's filter on, only permissions get through: those are what Claude
+        // explicitly wants from you, the rest waits until you look for yourself.
         let quiet = focusQuiet()
         for i in s.waiting where !quiet && !seen.contains("item:\(i.id):\(i.state)") {
             fresh.append(("item:\(i.id):\(i.state)", i.state == "bad" ? "\(i.name) selhal" : "\(i.name) na tebe čeká", i.doing))
