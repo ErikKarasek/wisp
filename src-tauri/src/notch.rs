@@ -339,6 +339,9 @@ pub fn set_enabled(app: &AppHandle, enabled: bool) {
             let _ = w.hide();
         }
     }
+    // The page draws the shape; tell it too, or it keeps the open one while this
+    // side lets clicks through everywhere but the closed notch.
+    set_open(app, false, g);
 }
 
 /// Open for a moment on its own, to show what just happened.
@@ -351,12 +354,12 @@ pub fn peek(app: &AppHandle, millis: u64) {
         s.peek_until = Some(Instant::now() + Duration::from_millis(millis));
         s.outside_since = None;
         let _ = app.emit_to(LABEL, "notch-countdown", millis);
-        if s.open {
-            return;
-        }
         s.open = true;
         s.geometry
     };
+    // Always, even when this side already thinks the notch is open: a reloaded
+    // webview draws it closed and never hears otherwise, and the question nobody
+    // sees is a question nobody answers.
     set_open(app, true, g);
 }
 
@@ -381,6 +384,13 @@ pub fn release() {
     if let Ok(mut s) = STATE.lock() {
         s.peek_until = None;
     }
+}
+
+/// Whether the notch is open right now. A page that has just loaded asks for this:
+/// it starts out drawing the closed shape and would otherwise stay that way while
+/// this side keeps taking the clicks meant for the open one.
+pub fn is_open() -> bool {
+    STATE.lock().map(|s| s.open).unwrap_or(false)
 }
 
 /// Where the open notch is drawn, in global top-left coordinates.

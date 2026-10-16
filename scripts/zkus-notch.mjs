@@ -34,6 +34,19 @@ const snapshot = (items = []) => ({
   focus: false,
 });
 
+/** An agent that waits on an answer: its question takes over the notch's card. */
+const ASKING_AGENT = {
+  id: "agent:b",
+  name: "Hlídač závislostí",
+  state: "you",
+  chip: "Ptá se",
+  doing: "",
+  when: "",
+  where: "",
+  character: { color: "#8b9cff" },
+  ask: { companyId: "c", agentId: "b", issueId: "i1", title: "Mám to vydat?" },
+};
+
 const BAD_AGENT = {
   id: "agent:a",
   name: "Hlídač závislostí",
@@ -225,6 +238,29 @@ async function main() {
   check("povolení: karta se ukáže", cerstva.includes("CHCE SPUSTIT"), cerstva);
   check("povolení: čerstvá karta zůstane", porad.includes("CHCE SPUSTIT"), porad);
   check("povolení: karta starší než čekání Rustu zmizí sama", !stara.text.includes("CHCE SPUSTIT") && !stara.asking, JSON.stringify(stara));
+
+  // ---- 6. An answered question gives the card back ---------------------------
+  // While an agent waits on an answer, its question owns the card. Claude's question paints
+  // over it; answering that one has to hand the card back. It used to stay on screen with
+  // buttons that answered nobody, because the agent's question counted as already drawn.
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot([ASKING_AGENT]));
+  await settle();
+  const agentuvDotaz = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
+  await fire("cc-question", {
+    id: "q3",
+    project: "nexus-grind",
+    items: [{ question: "Zůstane karta viset?", header: "Projekty", multi: false, options: [{ label: "Alfa", description: "" }, { label: "Beta", description: "" }] }],
+  });
+  await settle();
+  await page.click('.steps .perm button:text-is("Alfa")');
+  await settle();
+  await fire("dispecink-state", snapshot([ASKING_AGENT]));
+  await settle();
+  const poOdpovedi = await page.evaluate(() => document.querySelector(".steps").innerText);
+  check("otázka přes agentův dotaz: agent drží kartu", agentuvDotaz.includes("SE PTÁ"), agentuvDotaz);
+  check("otázka přes agentův dotaz: po odpovědi karta nezůstane viset", !poOdpovedi.includes("Zůstane karta viset"), poOdpovedi.split("\n")[0]);
 
   check("stránka nespadla", errors.length === 0, errors.join("\n"));
 

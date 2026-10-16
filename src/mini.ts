@@ -501,13 +501,16 @@ export async function startNotch() {
   // When closed, the cards leave the page entirely: a transparent WebKit window
   // otherwise keeps faint ghosts of layers that were only faded out.
   let goneTimer = 0;
-  void listen<boolean>("notch-open", (e) => {
+  const setOpen = (open: boolean) => {
     clearTimeout(goneTimer);
     // A new opening starts without a closing line; the native side sends a fresh one.
     clearTimeout(countTimer);
     countdown.classList.remove("run");
-    if (e.payload) {
+    if (open) {
       wake();
+      // Already open: the native side only repeated itself (it does that so a reloaded
+      // page catches up). Replaying the opening would make the pills jump.
+      if (root.classList.contains("is-open")) return;
       // The four small faces beside the closed notch grow into the crew's pills.
       const from = new Map<string, DOMRect>();
       const ids = ($(".faces4").dataset.ids ?? "").split("|");
@@ -534,7 +537,11 @@ export async function startNotch() {
       closeMirror();
       goneTimer = window.setTimeout(() => panes.classList.add("gone"), 360);
     }
-  });
+  };
+  void listen<boolean>("notch-open", (e) => setOpen(e.payload));
+  // A reload starts with the closed shape drawn, while the native side may well be
+  // holding the notch open (and taking every click over that whole area). Ask.
+  void invoke<boolean>("notch_is_open").then((open) => open && setOpen(true)).catch(() => {});
 
 
   // ----- settings -----
@@ -1511,10 +1518,13 @@ export async function startNotch() {
 
     const asking = !working && !(fresh && fresh.id === "morning") ? s.items.find((i) => i.ask) : undefined;
     if (asking?.ask) {
-      if (askFor !== asking.ask.issueId) showAsk(asking);
+      // What the card holds right now, not a remembered id. Claude's question and a
+      // permission paint over this card; with a remembered id the agent's question
+      // counts as drawn already, nothing redraws it, and whatever painted over it
+      // hangs in the notch for good (its buttons answer nobody).
+      if (steps.dataset.mode !== `ask:${asking.ask.issueId}`) void showAsk(asking);
       return renderCrew(s, working);
     }
-    askFor = null;
     if (working) {
       renderTicker(working.name, working.lines, working.voice);
     } else if (doneCc) {
@@ -1533,16 +1543,14 @@ export async function startNotch() {
   subscribe(draw);
 
   // An agent that waits on you: its question, and a box to answer it right here.
-  let askFor: string | null = null;
   async function showAsk(item: MiniItem) {
     const ask = item.ask!;
-    askFor = ask.issueId;
     setMode(`ask:${ask.issueId}`);
     steps.innerHTML = `<small class="who">${escHtml(item.name)} se ptá</small><div class="step now big-text small">${escHtml(ask.title)}</div>
       <div class="step past wrap q">…</div>
       <div class="answer"><input type="text" placeholder="Odpověz ${escHtml(item.name)}…" spellcheck="false"><button>Poslat</button></div>`;
     const comments = await invoke<Record<string, any>[] | { items: Record<string, any>[] }>("paperclip_request", { method: "GET", path: `/issues/${ask.issueId}/comments`, body: null }).catch(() => []);
-    const list = Array.isArray(comments) ? comments : comments.items;
+    const list = Array.isArray(comments) ? comments : comments?.items ?? [];
     const last = [...list].reverse().find((c) => c.authorAgentId);
     const q = steps.querySelector(".q");
     if (q) q.textContent = (last?.body ?? "").replace(/[*`#>]/g, "").replace(/\s+/g, " ").slice(0, 240) || "Otevři úkol ve Wispu.";
