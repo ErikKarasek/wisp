@@ -501,13 +501,16 @@ export async function startNotch() {
   // When closed, the cards leave the page entirely: a transparent WebKit window
   // otherwise keeps faint ghosts of layers that were only faded out.
   let goneTimer = 0;
-  void listen<boolean>("notch-open", (e) => {
+  const setOpen = (open: boolean) => {
     clearTimeout(goneTimer);
     // A new opening starts without a closing line; the native side sends a fresh one.
     clearTimeout(countTimer);
     countdown.classList.remove("run");
-    if (e.payload) {
+    if (open) {
       wake();
+      // Already open: the native side only repeated itself (it does that so a reloaded
+      // page catches up). Replaying the opening would make the pills jump.
+      if (root.classList.contains("is-open")) return;
       // The four small faces beside the closed notch grow into the crew's pills.
       const from = new Map<string, DOMRect>();
       const ids = ($(".faces4").dataset.ids ?? "").split("|");
@@ -534,7 +537,11 @@ export async function startNotch() {
       closeMirror();
       goneTimer = window.setTimeout(() => panes.classList.add("gone"), 360);
     }
-  });
+  };
+  void listen<boolean>("notch-open", (e) => setOpen(e.payload));
+  // A reload starts with the closed shape drawn, while the native side may well be
+  // holding the notch open (and taking every click over that whole area). Ask.
+  void invoke<boolean>("notch_is_open").then((open) => open && setOpen(true)).catch(() => {});
 
 
   // ----- settings -----
@@ -676,7 +683,6 @@ export async function startNotch() {
   // screen forever. A request nobody waits for any more cannot be answered, and clicking it stays
   // silent, which looks like a broken app.
   let perms: (Perm & { at: number })[] = [];
-  let permShown: string | null = null;
   const ccWorking = () => {
     const now = Date.now();
     const [id, v] = [...ccSessions.entries()].filter(([, v]) => v.busy && now - v.at < 120_000).sort((a, b) => b[1].at - a[1].at)[0] ?? [];
@@ -745,8 +751,10 @@ export async function startNotch() {
   // A permission prompt from Claude Code: allow, always, deny, or leave it to the terminal.
   function renderPerm() {
     const p = perms[0];
-    if (permShown === p.id) return;
-    permShown = p.id;
+    // What the card holds right now, not a remembered id: anything else painted over this
+    // card (a dropped window's error, a quick question) would otherwise count as drawn and
+    // the prompt would never come back, leaving the notch open on a card nobody can answer.
+    if (steps.dataset.mode === `perm:${p.id}`) return;
     setMode(`perm:${p.id}`);
     const tool = p.tool === "Bash" ? "chce spustit" : p.tool === "Edit" || p.tool === "Write" || p.tool === "MultiEdit" ? "chce upravit" : `chce použít ${p.tool}`;
     steps.innerHTML = `<small class="who warn">${escHtml(p.project)} · Claude ${tool}${perms.length > 1 ? ` <i>(+${perms.length - 1})</i>` : ""}</small>
@@ -765,7 +773,6 @@ export async function startNotch() {
           if (heard && (b.dataset.a === "allow" || b.dataset.a === "always")) wink();
         });
         perms = perms.filter((x) => x.id !== p.id);
-        permShown = null;
         redraw();
       }),
     );
@@ -892,7 +899,6 @@ export async function startNotch() {
     quickAsk = false;
     snipOn = false;
     root.classList.add("asking");
-    permShown = null;
     setMode(`file:${path}`);
     steps.innerHTML = `<small class="who">${escHtml(name)}<button class="x" title="Zavřít">✕</button></small>
       <div class="step past wrap reply">${escHtml(hint)}</div>
@@ -938,7 +944,6 @@ export async function startNotch() {
     quickAsk = true;
     fileAsk = null;
     snipOn = false;
-    permShown = null;
     root.classList.add("asking");
     setMode("quick");
     let clip = e.payload.trim();
@@ -1002,7 +1007,6 @@ export async function startNotch() {
     snipOn = true;
     fileAsk = null;
     quickAsk = false;
-    permShown = null;
     root.classList.add("asking");
     setMode("snip");
     steps.innerHTML = `<small class="who">${escHtml(head)}<button class="x" title="Zavřít (Esc)">✕</button></small>${body}`;
@@ -1494,10 +1498,23 @@ export async function startNotch() {
       renderPerm();
       return renderCrew(s, working);
     }
-    permShown = null;
     if (ccQ) {
       renderQuestion();
       return renderCrew(s, working);
+    }
+    // These three cards are drawn outside draw(), by the listener that opens them, so here
+    // there is nothing to redraw and the card is left alone. But a permission prompt and
+    // Claude's question paint over them, and then the state behind the card outlives the card
+    // itself: this would return early and whatever painted over it would stay on screen with
+    // nothing behind it, its buttons answering nobody. The card holds what it holds.
+    const own = steps.dataset.mode ?? "";
+    if (fileAsk && !own.startsWith("file:")) fileAsk = null;
+    if (quickAsk && own !== "quick") quickAsk = false;
+    if (snipOn && own !== "snip") {
+      // A fix still waiting for Nechat or Vrátit is kept, as closing the card would.
+      if (snipPending) void invoke("snip_keep", { id: snipPending });
+      snipPending = null;
+      snipOn = false;
     }
     if (fileAsk || quickAsk || snipOn) return renderCrew(s, working);
     if (Date.now() < beatenUntil) return renderCrew(s, working);
@@ -1511,10 +1528,13 @@ export async function startNotch() {
 
     const asking = !working && !(fresh && fresh.id === "morning") ? s.items.find((i) => i.ask) : undefined;
     if (asking?.ask) {
-      if (askFor !== asking.ask.issueId) showAsk(asking);
+      // What the card holds right now, not a remembered id. Claude's question and a
+      // permission paint over this card; with a remembered id the agent's question
+      // counts as drawn already, nothing redraws it, and whatever painted over it
+      // hangs in the notch for good (its buttons answer nobody).
+      if (steps.dataset.mode !== `ask:${asking.ask.issueId}`) void showAsk(asking);
       return renderCrew(s, working);
     }
-    askFor = null;
     if (working) {
       renderTicker(working.name, working.lines, working.voice);
     } else if (doneCc) {
@@ -1533,16 +1553,14 @@ export async function startNotch() {
   subscribe(draw);
 
   // An agent that waits on you: its question, and a box to answer it right here.
-  let askFor: string | null = null;
   async function showAsk(item: MiniItem) {
     const ask = item.ask!;
-    askFor = ask.issueId;
     setMode(`ask:${ask.issueId}`);
     steps.innerHTML = `<small class="who">${escHtml(item.name)} se ptá</small><div class="step now big-text small">${escHtml(ask.title)}</div>
       <div class="step past wrap q">…</div>
       <div class="answer"><input type="text" placeholder="Odpověz ${escHtml(item.name)}…" spellcheck="false"><button>Poslat</button></div>`;
     const comments = await invoke<Record<string, any>[] | { items: Record<string, any>[] }>("paperclip_request", { method: "GET", path: `/issues/${ask.issueId}/comments`, body: null }).catch(() => []);
-    const list = Array.isArray(comments) ? comments : comments.items;
+    const list = Array.isArray(comments) ? comments : comments?.items ?? [];
     const last = [...list].reverse().find((c) => c.authorAgentId);
     const q = steps.querySelector(".q");
     if (q) q.textContent = (last?.body ?? "").replace(/[*`#>]/g, "").replace(/\s+/g, " ").slice(0, 240) || "Otevři úkol ve Wispu.";
