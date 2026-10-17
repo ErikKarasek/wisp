@@ -286,10 +286,10 @@ async function main() {
   const prekryto = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
   await fire("dispecink-state", snapshot());
   await settle();
-  await klikni(page, "Povolit");
+  const kliknuto7 = await klikni(page, "Povolit");
   const odpoved = await page.evaluate(() => window.__calls.filter((c) => c.cmd === "cc_decide").pop());
   check("povolení pod jinou kartou: karta ji opravdu přepsala", prekryto.includes("OKNO"), prekryto);
-  check("povolení pod jinou kartou: po překreslení jde odkliknout", odpoved?.args?.id === "perm3" && odpoved?.args?.answer === "allow", JSON.stringify(odpoved));
+  check("povolení pod jinou kartou: po překreslení jde odkliknout", kliknuto7 && odpoved?.args?.id === "perm3" && odpoved?.args?.answer === "allow", `kliknuto=${kliknuto7} ${JSON.stringify(odpoved)}`);
 
   // ---- 8. A prompt over a quick question clears away with its answer -------
   // A quick question owns the card until it is closed, and a permission prompt paints over it.
@@ -304,12 +304,39 @@ async function main() {
   const rychla = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
   await fire("cc-permission", { ...perm, id: "perm4" });
   await settle();
-  await klikni(page, "Povolit");
+  // Without this the case would pass on a notch that never drew the prompt at all.
+  const presOtazku = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
+  const kliknuto = await klikni(page, "Povolit");
   await fire("dispecink-state", snapshot());
   await settle();
   const poPovoleni = await page.evaluate(() => document.querySelector(".steps").innerText);
   check("povolení přes rychlou otázku: otázka drží kartu", rychla.includes("RYCHLÁ OTÁZKA"), rychla);
-  check("povolení přes rychlou otázku: po odkliknutí karta nezůstane viset", !poPovoleni.includes("CHCE SPUSTIT"), poPovoleni.split("\n")[0]);
+  check("povolení přes rychlou otázku: povolení ji přepsalo", presOtazku.includes("CHCE SPUSTIT"), presOtazku);
+  check("povolení přes rychlou otázku: po odkliknutí karta nezůstane viset", kliknuto && !poPovoleni.includes("CHCE SPUSTIT"), `kliknuto=${kliknuto} ${poPovoleni.split("\n")[0]}`);
+
+  // ---- 9. The beating does not strand a prompt either -----------------------
+  // Poked five times, the bot takes a beating and holds the card for three seconds. A
+  // permission prompt paints over that too, and answering it has to give the card back:
+  // the same early return that stranded the quick question's card used to strand this one.
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot());
+  await settle();
+  // Fired on the element itself: a real pointer click lands wherever the layout puts it,
+  // and what is under test here is the card, not the hit testing.
+  await page.evaluate(() => {
+    for (let i = 0; i < 5; i++) document.querySelector(".m.big").click();
+  });
+  await settle();
+  const nakladacka = await page.evaluate(() => document.querySelector(".steps").innerText);
+  await fire("cc-permission", { ...perm, id: "perm5" });
+  await settle();
+  const kliknuto9 = await klikni(page, "Povolit");
+  await fire("dispecink-state", snapshot());
+  await settle();
+  const poNakladacce = await page.evaluate(() => document.querySelector(".steps").innerText);
+  check("nakládačka: karta se nakreslí", nakladacka.includes("nakládačku"), nakladacka.split("\n")[0]);
+  check("nakládačka: povolení přes ni po odkliknutí nezůstane viset", kliknuto9 && !poNakladacce.includes("CHCE SPUSTIT"), `kliknuto=${kliknuto9} ${poNakladacce.split("\n")[0]}`);
 
   check("stránka nespadla", errors.length === 0, errors.join("\n"));
 

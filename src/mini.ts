@@ -503,14 +503,15 @@ export async function startNotch() {
   let goneTimer = 0;
   const setOpen = (open: boolean) => {
     clearTimeout(goneTimer);
+    // Already open: the native side only repeated itself (it does that so a reloaded page
+    // catches up). Replaying the opening would make the pills jump, and it would wipe the
+    // closing line that a peek asks for one event earlier.
+    if (open && root.classList.contains("is-open")) return wake();
     // A new opening starts without a closing line; the native side sends a fresh one.
     clearTimeout(countTimer);
     countdown.classList.remove("run");
     if (open) {
       wake();
-      // Already open: the native side only repeated itself (it does that so a reloaded
-      // page catches up). Replaying the opening would make the pills jump.
-      if (root.classList.contains("is-open")) return;
       // The four small faces beside the closed notch grow into the crew's pills.
       const from = new Map<string, DOMRect>();
       const ids = ($(".faces4").dataset.ids ?? "").split("|");
@@ -1517,6 +1518,8 @@ export async function startNotch() {
       snipOn = false;
     }
     if (fileAsk || quickAsk || snipOn) return renderCrew(s, working);
+    // The beating holds the card the same way, and ends the same way: painted over, it is over.
+    if (own !== "beaten") beatenUntil = 0;
     if (Date.now() < beatenUntil) return renderCrew(s, working);
     const failed = !working ? s.items.find((i) => i.state === "bad") : undefined;
     if (failed) {
@@ -1564,8 +1567,11 @@ export async function startNotch() {
     const last = [...list].reverse().find((c) => c.authorAgentId);
     const q = steps.querySelector(".q");
     if (q) q.textContent = (last?.body ?? "").replace(/[*`#>]/g, "").replace(/\s+/g, " ").slice(0, 240) || "Otevři úkol ve Wispu.";
-    const input = steps.querySelector("input") as HTMLInputElement;
-    const send = steps.querySelector(".answer button") as HTMLButtonElement;
+    // A permission prompt or Claude's question may have painted over this card while the
+    // comments were on their way. Then these are gone, and so is the card they belong to.
+    const input = steps.querySelector("input") as HTMLInputElement | null;
+    const send = steps.querySelector(".answer button") as HTMLButtonElement | null;
+    if (!input || !send) return;
     const go = async () => {
       const text = input.value.trim();
       if (!text) return;
@@ -1578,7 +1584,8 @@ export async function startNotch() {
         void emit(EV_REFRESH);
       } catch (err) {
         send.disabled = false;
-        (steps.querySelector(".q") as HTMLElement).textContent = String(err);
+        const q2 = steps.querySelector(".q") as HTMLElement | null;
+        if (q2) q2.textContent = String(err);
       }
     };
     send.addEventListener("click", () => void go());
