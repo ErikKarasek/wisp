@@ -180,6 +180,8 @@ struct State {
     last_look: (f64, f64),
     /// Whether the window currently lets clicks through to what is below it.
     click_through: bool,
+    /// When that was last said to the window, so it can be said again.
+    click_set: Option<Instant>,
     away: bool,
     away_checked: Option<Instant>,
 }
@@ -193,6 +195,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     peek_until: None,
     last_look: (0.0, 0.0),
     click_through: false,
+    click_set: None,
     away: false,
     away_checked: None,
 });
@@ -274,9 +277,15 @@ pub fn setup(app: &AppHandle) {
         }
 
         // Only the drawn notch takes clicks; the rest of the window is see-through.
+        // Said again every second even when nothing changed. The call is cheap, and a setting
+        // that never landed (the main thread's closure ran while the window was being shown or
+        // moved) would otherwise stay wrong for good: this side believes it has been made, the
+        // window keeps letting clicks through, and a card in the notch takes no answer at all.
         let wants_clicks = s.open || inside(p, closed, 3.0);
-        if wants_clicks == s.click_through {
+        let stale = s.click_set.is_none_or(|t| now.duration_since(t) > Duration::from_secs(1));
+        if wants_clicks == s.click_through || stale {
             s.click_through = !wants_clicks;
+            s.click_set = Some(now);
             set_click_through(&app, !wants_clicks);
         }
 
