@@ -636,6 +636,12 @@ fn notch_peek(app: AppHandle, millis: u64) {
     notch::peek(&app, millis.min(10_000));
 }
 
+/// A page that has just loaded asks which shape it should be drawing.
+#[tauri::command]
+fn notch_is_open() -> bool {
+    notch::is_open()
+}
+
 /// The bot is being dragged out of the notch: carry it until the button is let go.
 #[tauri::command]
 fn buddy_drag(app: AppHandle) {
@@ -809,6 +815,7 @@ pub fn run() {
             calendar_events,
             notch_set_enabled,
             notch_peek,
+            notch_is_open,
             notch_geometry,
             notch_set_width,
             notch_set_close_delay,
