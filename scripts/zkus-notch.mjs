@@ -21,6 +21,16 @@ function check(name, ok, detail = "") {
   console.log(`  ${ok ? "✓" : "✗"} ${name}${ok || !detail ? "" : `\n      ${detail}`}`);
 }
 
+/** Click a button on the card by its text. A button that is not there is a failed check,
+ * not a timeout: the run has to reach the end and show every result. */
+async function klikni(page, text) {
+  const b = page.locator(`.steps .perm button:text-is("${text}")`);
+  if (!(await b.count())) return false;
+  await b.first().click();
+  await new Promise((r) => setTimeout(r, 260));
+  return true;
+}
+
 /** The Mac state the notch expects. Empty when nothing is passed. */
 const snapshot = (items = []) => ({
   items,
@@ -261,6 +271,45 @@ async function main() {
   const poOdpovedi = await page.evaluate(() => document.querySelector(".steps").innerText);
   check("otázka přes agentův dotaz: agent drží kartu", agentuvDotaz.includes("SE PTÁ"), agentuvDotaz);
   check("otázka přes agentův dotaz: po odpovědi karta nezůstane viset", !poOdpovedi.includes("Zůstane karta viset"), poOdpovedi.split("\n")[0]);
+
+  // ---- 7. A card painted over a permission prompt gives it back ------------
+  // A dropped window's error writes straight into the card. The prompt underneath it is still
+  // waiting, so the next redraw has to bring it back; otherwise the notch stays open on a card
+  // with no buttons and the prompt can never be answered.
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot());
+  await fire("cc-permission", { ...perm, id: "perm3" });
+  await settle();
+  await fire("buddy-failed", "Okno se nepodařilo přenést.");
+  await settle();
+  const prekryto = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
+  await fire("dispecink-state", snapshot());
+  await settle();
+  await klikni(page, "Povolit");
+  const odpoved = await page.evaluate(() => window.__calls.filter((c) => c.cmd === "cc_decide").pop());
+  check("povolení pod jinou kartou: karta ji opravdu přepsala", prekryto.includes("OKNO"), prekryto);
+  check("povolení pod jinou kartou: po překreslení jde odkliknout", odpoved?.args?.id === "perm3" && odpoved?.args?.answer === "allow", JSON.stringify(odpoved));
+
+  // ---- 8. A prompt over a quick question clears away with its answer -------
+  // A quick question owns the card until it is closed, and a permission prompt paints over it.
+  // Answering the prompt has to give the card back; it used to stay on screen, because the
+  // quick question was still open behind it and nothing was allowed to redraw over it. Every
+  // further click then went to a request nobody held any more, which looks like a dead notch.
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot());
+  await fire("quick-ask", "zkopírovaný text");
+  await settle();
+  const rychla = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
+  await fire("cc-permission", { ...perm, id: "perm4" });
+  await settle();
+  await klikni(page, "Povolit");
+  await fire("dispecink-state", snapshot());
+  await settle();
+  const poPovoleni = await page.evaluate(() => document.querySelector(".steps").innerText);
+  check("povolení přes rychlou otázku: otázka drží kartu", rychla.includes("RYCHLÁ OTÁZKA"), rychla);
+  check("povolení přes rychlou otázku: po odkliknutí karta nezůstane viset", !poPovoleni.includes("CHCE SPUSTIT"), poPovoleni.split("\n")[0]);
 
   check("stránka nespadla", errors.length === 0, errors.join("\n"));
 

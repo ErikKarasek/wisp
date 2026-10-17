@@ -683,7 +683,6 @@ export async function startNotch() {
   // screen forever. A request nobody waits for any more cannot be answered, and clicking it stays
   // silent, which looks like a broken app.
   let perms: (Perm & { at: number })[] = [];
-  let permShown: string | null = null;
   const ccWorking = () => {
     const now = Date.now();
     const [id, v] = [...ccSessions.entries()].filter(([, v]) => v.busy && now - v.at < 120_000).sort((a, b) => b[1].at - a[1].at)[0] ?? [];
@@ -752,8 +751,10 @@ export async function startNotch() {
   // A permission prompt from Claude Code: allow, always, deny, or leave it to the terminal.
   function renderPerm() {
     const p = perms[0];
-    if (permShown === p.id) return;
-    permShown = p.id;
+    // What the card holds right now, not a remembered id: anything else painted over this
+    // card (a dropped window's error, a quick question) would otherwise count as drawn and
+    // the prompt would never come back, leaving the notch open on a card nobody can answer.
+    if (steps.dataset.mode === `perm:${p.id}`) return;
     setMode(`perm:${p.id}`);
     const tool = p.tool === "Bash" ? "chce spustit" : p.tool === "Edit" || p.tool === "Write" || p.tool === "MultiEdit" ? "chce upravit" : `chce použít ${p.tool}`;
     steps.innerHTML = `<small class="who warn">${escHtml(p.project)} · Claude ${tool}${perms.length > 1 ? ` <i>(+${perms.length - 1})</i>` : ""}</small>
@@ -772,7 +773,6 @@ export async function startNotch() {
           if (heard && (b.dataset.a === "allow" || b.dataset.a === "always")) wink();
         });
         perms = perms.filter((x) => x.id !== p.id);
-        permShown = null;
         redraw();
       }),
     );
@@ -899,7 +899,6 @@ export async function startNotch() {
     quickAsk = false;
     snipOn = false;
     root.classList.add("asking");
-    permShown = null;
     setMode(`file:${path}`);
     steps.innerHTML = `<small class="who">${escHtml(name)}<button class="x" title="Zavřít">✕</button></small>
       <div class="step past wrap reply">${escHtml(hint)}</div>
@@ -945,7 +944,6 @@ export async function startNotch() {
     quickAsk = true;
     fileAsk = null;
     snipOn = false;
-    permShown = null;
     root.classList.add("asking");
     setMode("quick");
     let clip = e.payload.trim();
@@ -1009,7 +1007,6 @@ export async function startNotch() {
     snipOn = true;
     fileAsk = null;
     quickAsk = false;
-    permShown = null;
     root.classList.add("asking");
     setMode("snip");
     steps.innerHTML = `<small class="who">${escHtml(head)}<button class="x" title="Zavřít (Esc)">✕</button></small>${body}`;
@@ -1501,10 +1498,23 @@ export async function startNotch() {
       renderPerm();
       return renderCrew(s, working);
     }
-    permShown = null;
     if (ccQ) {
       renderQuestion();
       return renderCrew(s, working);
+    }
+    // These three cards are drawn outside draw(), by the listener that opens them, so here
+    // there is nothing to redraw and the card is left alone. But a permission prompt and
+    // Claude's question paint over them, and then the state behind the card outlives the card
+    // itself: this would return early and whatever painted over it would stay on screen with
+    // nothing behind it, its buttons answering nobody. The card holds what it holds.
+    const own = steps.dataset.mode ?? "";
+    if (fileAsk && !own.startsWith("file:")) fileAsk = null;
+    if (quickAsk && own !== "quick") quickAsk = false;
+    if (snipOn && own !== "snip") {
+      // A fix still waiting for Nechat or Vrátit is kept, as closing the card would.
+      if (snipPending) void invoke("snip_keep", { id: snipPending });
+      snipPending = null;
+      snipOn = false;
     }
     if (fileAsk || quickAsk || snipOn) return renderCrew(s, working);
     if (Date.now() < beatenUntil) return renderCrew(s, working);
