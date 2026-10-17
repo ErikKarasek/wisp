@@ -21,6 +21,16 @@ function check(name, ok, detail = "") {
   console.log(`  ${ok ? "✓" : "✗"} ${name}${ok || !detail ? "" : `\n      ${detail}`}`);
 }
 
+/** Click a button on the card by its text. A button that is not there is a failed check,
+ * not a timeout: the run has to reach the end and show every result. */
+async function klikni(page, text) {
+  const b = page.locator(`.steps .perm button:text-is("${text}")`);
+  if (!(await b.count())) return false;
+  await b.first().click();
+  await new Promise((r) => setTimeout(r, 260));
+  return true;
+}
+
 /** The Mac state the notch expects. Empty when nothing is passed. */
 const snapshot = (items = []) => ({
   items,
@@ -33,6 +43,19 @@ const snapshot = (items = []) => ({
   gemini: [],
   focus: false,
 });
+
+/** An agent that waits on an answer: its question takes over the notch's card. */
+const ASKING_AGENT = {
+  id: "agent:b",
+  name: "Hlídač závislostí",
+  state: "you",
+  chip: "Ptá se",
+  doing: "",
+  when: "",
+  where: "",
+  character: { color: "#8b9cff" },
+  ask: { companyId: "c", agentId: "b", issueId: "i1", title: "Mám to vydat?" },
+};
 
 const BAD_AGENT = {
   id: "agent:a",
@@ -225,6 +248,95 @@ async function main() {
   check("povolení: karta se ukáže", cerstva.includes("CHCE SPUSTIT"), cerstva);
   check("povolení: čerstvá karta zůstane", porad.includes("CHCE SPUSTIT"), porad);
   check("povolení: karta starší než čekání Rustu zmizí sama", !stara.text.includes("CHCE SPUSTIT") && !stara.asking, JSON.stringify(stara));
+
+  // ---- 6. An answered question gives the card back ---------------------------
+  // While an agent waits on an answer, its question owns the card. Claude's question paints
+  // over it; answering that one has to hand the card back. It used to stay on screen with
+  // buttons that answered nobody, because the agent's question counted as already drawn.
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot([ASKING_AGENT]));
+  await settle();
+  const agentuvDotaz = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
+  await fire("cc-question", {
+    id: "q3",
+    project: "nexus-grind",
+    items: [{ question: "Zůstane karta viset?", header: "Projekty", multi: false, options: [{ label: "Alfa", description: "" }, { label: "Beta", description: "" }] }],
+  });
+  await settle();
+  await page.click('.steps .perm button:text-is("Alfa")');
+  await settle();
+  await fire("dispecink-state", snapshot([ASKING_AGENT]));
+  await settle();
+  const poOdpovedi = await page.evaluate(() => document.querySelector(".steps").innerText);
+  check("otázka přes agentův dotaz: agent drží kartu", agentuvDotaz.includes("SE PTÁ"), agentuvDotaz);
+  check("otázka přes agentův dotaz: po odpovědi karta nezůstane viset", !poOdpovedi.includes("Zůstane karta viset"), poOdpovedi.split("\n")[0]);
+
+  // ---- 7. A card painted over a permission prompt gives it back ------------
+  // A dropped window's error writes straight into the card. The prompt underneath it is still
+  // waiting, so the next redraw has to bring it back; otherwise the notch stays open on a card
+  // with no buttons and the prompt can never be answered.
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot());
+  await fire("cc-permission", { ...perm, id: "perm3" });
+  await settle();
+  await fire("buddy-failed", "Okno se nepodařilo přenést.");
+  await settle();
+  const prekryto = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
+  await fire("dispecink-state", snapshot());
+  await settle();
+  const kliknuto7 = await klikni(page, "Povolit");
+  const odpoved = await page.evaluate(() => window.__calls.filter((c) => c.cmd === "cc_decide").pop());
+  check("povolení pod jinou kartou: karta ji opravdu přepsala", prekryto.includes("OKNO"), prekryto);
+  check("povolení pod jinou kartou: po překreslení jde odkliknout", kliknuto7 && odpoved?.args?.id === "perm3" && odpoved?.args?.answer === "allow", `kliknuto=${kliknuto7} ${JSON.stringify(odpoved)}`);
+
+  // ---- 8. A prompt over a quick question clears away with its answer -------
+  // A quick question owns the card until it is closed, and a permission prompt paints over it.
+  // Answering the prompt has to give the card back; it used to stay on screen, because the
+  // quick question was still open behind it and nothing was allowed to redraw over it. Every
+  // further click then went to a request nobody held any more, which looks like a dead notch.
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot());
+  await fire("quick-ask", "zkopírovaný text");
+  await settle();
+  const rychla = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
+  await fire("cc-permission", { ...perm, id: "perm4" });
+  await settle();
+  // Without this the case would pass on a notch that never drew the prompt at all.
+  const presOtazku = await page.evaluate(() => document.querySelector(".steps").innerText.split("\n")[0]);
+  const kliknuto = await klikni(page, "Povolit");
+  await fire("dispecink-state", snapshot());
+  await settle();
+  const poPovoleni = await page.evaluate(() => document.querySelector(".steps").innerText);
+  check("povolení přes rychlou otázku: otázka drží kartu", rychla.includes("RYCHLÁ OTÁZKA"), rychla);
+  check("povolení přes rychlou otázku: povolení ji přepsalo", presOtazku.includes("CHCE SPUSTIT"), presOtazku);
+  check("povolení přes rychlou otázku: po odkliknutí karta nezůstane viset", kliknuto && !poPovoleni.includes("CHCE SPUSTIT"), `kliknuto=${kliknuto} ${poPovoleni.split("\n")[0]}`);
+
+  // ---- 9. The beating does not strand a prompt either -----------------------
+  // Poked five times, the bot takes a beating and holds the card for three seconds. A
+  // permission prompt paints over that too, and answering it has to give the card back:
+  // the same early return that stranded the quick question's card used to strand this one.
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot());
+  await settle();
+  // Fired on the element itself: a real pointer click lands wherever the layout puts it,
+  // and what is under test here is the card, not the hit testing.
+  await page.evaluate(() => {
+    for (let i = 0; i < 5; i++) document.querySelector(".m.big").click();
+  });
+  await settle();
+  const nakladacka = await page.evaluate(() => document.querySelector(".steps").innerText);
+  await fire("cc-permission", { ...perm, id: "perm5" });
+  await settle();
+  const kliknuto9 = await klikni(page, "Povolit");
+  await fire("dispecink-state", snapshot());
+  await settle();
+  const poNakladacce = await page.evaluate(() => document.querySelector(".steps").innerText);
+  check("nakládačka: karta se nakreslí", nakladacka.includes("nakládačku"), nakladacka.split("\n")[0]);
+  check("nakládačka: povolení přes ni po odkliknutí nezůstane viset", kliknuto9 && !poNakladacce.includes("CHCE SPUSTIT"), `kliknuto=${kliknuto9} ${poNakladacce.split("\n")[0]}`);
 
   check("stránka nespadla", errors.length === 0, errors.join("\n"));
 
