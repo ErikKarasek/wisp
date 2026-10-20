@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2026-09-01"
 workers_dev = true
 
+# Keeps the logs of every request, so it is possible to see what an outside
+# agent actually called over /mcp instead of taking its word for it.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [[d1_databases]]
 binding = "DB"
 database_name = "dispecink-relay"
