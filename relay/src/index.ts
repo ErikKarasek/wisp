@@ -1,10 +1,17 @@
 // Wisp relay: the Mac pushes its state here and picks up commands; the
 // iPhone app and its widget read the state and leave commands. One shared
 // bearer token (RELAY_TOKEN secret) guards everything.
+//
+// /mcp is the exception: an MCP server for an outside agent, with its own
+// MCP_TOKEN so it can be revoked without locking out the Mac and the phone.
+// It is off until that secret is set. See mcp.ts.
+
+import { handleMcp } from "./mcp";
 
 export interface Env {
   DB: D1Database;
   RELAY_TOKEN: string;
+  MCP_TOKEN?: string;
 }
 
 const json = (body: unknown, status = 200) =>
@@ -25,6 +32,11 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === "/") return new Response("Wisp relay", { status: 200 });
+
+    // Before the RELAY_TOKEN gate: /mcp carries its own token.
+    const mcp = await handleMcp(req, url, env);
+    if (mcp) return mcp;
+
     if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
 
     // The Mac: the whole state, replaced each time.
