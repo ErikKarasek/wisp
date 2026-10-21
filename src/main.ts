@@ -661,7 +661,9 @@ function renderSummary() {
 }
 
 function groupLabel(g: Group) {
-  return g.id === "mac" ? "Mac" : g.id === "cloudflare" ? "Cloudflare" : g.id === "github" ? "GitHub" : g.note;
+  const named: Record<string, string> = { mac: "Mac", cloudflare: "Cloudflare", github: "GitHub", grokbot: "Grok Bot" };
+  // A Paperclip group is named after its company, which is what its note holds.
+  return named[g.id] ?? g.note;
 }
 
 let legendEl: HTMLElement | null = null;

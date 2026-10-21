@@ -108,7 +108,7 @@ const CHARACTERS: Record<string, Partial<MascotCharacter>> = {
   "cf:site-watch": { shape: "round", color: "#5fcfa8" },
   "cf:job-tracker-scout": { shape: "lemon", color: "#f2a65a" },
   "cf:github-reels": { shape: "cloud", color: "#e7a3dc" },
-  grokbot: { shape: "cube", color: "#8d8d94" },
+  grokbot: { shape: "cube", color: "#8c93b8" },
 };
 
 // ---------- launchd ----------
@@ -726,6 +726,8 @@ export type GrokBotSnapshot = {
  * happens in its own window, and its routines live in the cloud where nothing
  * here can see them, which is why there is no countdown to the next run.
  */
+const ABOUT = "Agent od Cursoru nad Grokem, pracuje na svém počítači v cloudu";
+
 export function grokGroup(snap: GrokBotSnapshot, now = Date.now()): Group | null {
   // Not installed is not a problem to report; it is simply not part of this Mac.
   if (!snap.installed) return null;
@@ -740,7 +742,8 @@ export function grokGroup(snap: GrokBotSnapshot, now = Date.now()): Group | null
     doing = snap.unread === 1 ? "Napsal ti" : `Napsal ti ${snap.unread}×`;
   } else {
     state = "ok";
-    doing = snap.daemon ? "Připravený" : "Běží, ale nedrží spojení s Macem";
+    // At rest the other cards say what the agent is for, not that it is idle.
+    doing = snap.daemon ? ABOUT : "Běží, ale nedrží spojení s Macem";
   }
 
   const facts: [string, string][] = [];
@@ -760,7 +763,7 @@ export function grokGroup(snap: GrokBotSnapshot, now = Date.now()): Group | null
     group: "grokbot",
     name: snap.botName ?? "Grok Bot",
     doing,
-    about: "Agent od Cursoru nad Grokem, s vlastním počítačem v cloudu",
+    about: ABOUT,
     when: snap.lastActivityMs ? `naposledy ${ago(snap.lastActivityMs, now)}` : "zatím mlčel",
     state,
     character: characterFor("grokbot"),
