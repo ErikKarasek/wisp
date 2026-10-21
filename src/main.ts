@@ -18,6 +18,7 @@ import {
   cloudflareGroup,
   cloudflareNeurons,
   githubGroup,
+  grokGroup,
   macGroup,
   NEURONS_PER_DAY,
   paperclipGroups,
@@ -26,6 +27,7 @@ import {
   type ActionSpec,
   type CloudflareSnapshot,
   type GithubSnapshot,
+  type GrokBotSnapshot,
   type Group,
   type Item,
   type Job,
@@ -91,14 +93,17 @@ let history: HistoryEntry[] = [];
 
 async function loadLocal() {
   const now = Date.now();
-  const [jobList, snap] = await Promise.all([
+  const [jobList, snap, grok] = await Promise.all([
     invoke<Job[]>("list_jobs").catch(() => [] as Job[]),
     invoke<PaperclipSnapshot>("paperclip_snapshot").catch((e) => ({ online: false, error: String(e) }) as PaperclipSnapshot),
+    // Reading someone else's files: when they move, the card goes away instead of the page.
+    invoke<GrokBotSnapshot>("grokbot_snapshot").catch(() => null),
   ]);
   jobs = jobList;
   paperclip = snap;
   void watchPaperclip(snap.online);
-  localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now)];
+  const grokbot = grok && grokGroup(grok, now);
+  localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now), ...(grokbot ? [grokbot] : [])];
 }
 
 // ---------- Claude Code sessions (from its hooks), for the phone ----------
