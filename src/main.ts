@@ -55,6 +55,7 @@ let cfg: Config;
 let localGroups: Group[] = [];
 let cloudGroups: Group[] = [];
 let cloudflare: CloudflareSnapshot | null = null;
+let grokbot: GrokBotSnapshot | null = null;
 let groups: Group[] = [];
 /** The name and face each item has before the user's own settings. */
 const automatic = new Map<string, { name: string; character: Partial<MascotCharacter> }>();
@@ -102,8 +103,9 @@ async function loadLocal() {
   jobs = jobList;
   paperclip = snap;
   void watchPaperclip(snap.online);
-  const grokbot = grok && grokGroup(grok, now);
-  localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now), ...(grokbot ? [grokbot] : [])];
+  grokbot = grok;
+  const grokGrp = grok && grokGroup(grok, now);
+  localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now), ...(grokGrp ? [grokGrp] : [])];
 }
 
 // ---------- Claude Code sessions (from its hooks), for the phone ----------
@@ -720,11 +722,19 @@ function renderSide() {
   const gemini =
     (gemRows.length ? `<h6 title="Google AI Pro v Antigravity">Limit Gemini</h6>${gauges(gemRows)}` : "") +
     (proRows.length ? `<h6 title="Claude a GPT modely v Antigravity, zvlášť od tvého předplatného Claude">Claude v AI Pro</h6>${gauges(proRows)}` : "");
+  // Grok Bot reports one weekly number, not a window per model.
+  const grok =
+    grokbot?.percentUsed == null
+      ? ""
+      : `<h6 title="${esc(grokbot.plan ?? "Grok Bot")}">Limit Grok</h6>` +
+        `<div class="gauge${grokbot.percentUsed >= 85 ? " hot" : ""}"${grokbot.resetsMs ? ` title="obnoví se ${esc(resetText(grokbot.resetsMs))}"` : ""}><div class="bar"><i style="width:${grokbot.percentUsed}%"></i></div>
+          <small>týden: ${grokbot.percentUsed} %</small></div>`;
   const neurons = cloudflare ? cloudflareNeurons(cloudflare) : null;
   const gauge =
     claude +
     gpt +
     gemini +
+    grok +
     (neurons == null
       ? ""
       : `<h6>Workers AI dnes</h6><div class="gauge${neurons >= NEURONS_PER_DAY * 0.9 ? " hot" : ""}"><div class="bar"><i style="width:${Math.min(100, (neurons / NEURONS_PER_DAY) * 100).toFixed(1)}%"></i></div>
