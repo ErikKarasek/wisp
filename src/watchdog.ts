@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { PaperclipSnapshot } from "./model";
 import { checks, type PR } from "./reviews";
+import { ownTaskId } from "./ownTask";
 
 type Obj = Record<string, any>;
 const list = (v: Obj[] | { items: Obj[] } | null | undefined) => (Array.isArray(v) ? v : v?.items ?? []);
@@ -283,29 +284,6 @@ export async function announcePrs(prs: PR[]) {
 }
 
 // ---------- work that is done but still sits in review ----------
-
-const TASK_ID = /\b[A-Z]{2,5}-\d+\b/g;
-/** A mention that points at somebody else's task: "follow-up to NEX-38", "part of NEX-40", "does not fix NEX-12". */
-const NOT_OWN = /(?:follow[- ]?up|part|related|refs?|see|after|before|not|instead|unlike|blocked by|depends on)(?: of| to| on| by| fix| close)?\s*[:(]?\s*$/i;
-/** The line after "Closes", "Fixes" or "Paperclip:" in the body names the task the PR finishes. */
-const OWN_LINE = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|paperclip(?: issue)?)\b[ \t]*:?[ \t]*([^\n]*)/gi;
-
-/**
- * The one task a merged pull request finishes (`gh search prs` can't return the branch).
- * Own IDs are the ones in the title and the ones right after `Closes`/`Fixes`/`Paperclip:` in the
- * body; a passing mention ("follow-up to NEX-38") is not. A PR with several own IDs is skipped.
- */
-export function ownTaskId(pr: Obj): string | null {
-  const title = String(pr.title ?? "");
-  const body = String(pr.body ?? "");
-  const own = new Set<string>();
-  for (const m of title.matchAll(TASK_ID)) if (!NOT_OWN.test(title.slice(0, m.index))) own.add(m[0]);
-  for (const m of body.matchAll(OWN_LINE)) {
-    if (/\b(?:not|n't|never)\s+$/i.test(body.slice(0, m.index))) continue;
-    for (const id of m[1].match(TASK_ID) ?? []) own.add(id);
-  }
-  return own.size === 1 ? [...own][0] : null;
-}
 
 /** Where a merged pull request is allowed to finish the task. */
 const CLOSEABLE = new Set(["in_review", "blocked"]);

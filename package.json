@@ -10,6 +10,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "icon": "node scripts/make-icon.mjs && tauri icon src-tauri/icons/source.png",
+    "test": "node --test src/ownTask.test.ts",
     "test:notch": "node scripts/zkus-notch.mjs"
   },
   "dependencies": {
