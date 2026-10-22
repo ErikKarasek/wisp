@@ -301,6 +301,19 @@ const CLOSEABLE = new Set(["in_review", "blocked"]);
  * closed it, which is how it got into this comment).
  */
 export async function closeMergedIssues(snap: PaperclipSnapshot | null, repos: string[], note: (t: string) => void) {
+  // Every cloud refresh starts a run and `mergedDone` is only written after the awaits below, so an overlapping run would close the same task twice.
+  if (closingMerged) return;
+  closingMerged = true;
+  try {
+    await closeMerged(snap, repos, note);
+  } finally {
+    closingMerged = false;
+  }
+}
+
+let closingMerged = false;
+
+async function closeMerged(snap: PaperclipSnapshot | null, repos: string[], note: (t: string) => void) {
   if (!snap?.online || !repos.length) return;
   const prs = await invoke<Obj[]>("github_merged_prs", { repos }).catch(() => [] as Obj[]);
   if (!prs.length) return;
