@@ -160,14 +160,16 @@ function findIssue(state: Json, wanted: string): Json | null {
 }
 
 async function callTool(name: string, args: Json, env: McpEnv) {
-  // The three writes do not need the state, so they answer before it is read.
+  // wisp_comment and wisp_ask do not need the state, so they answer before it is read.
   if (name === "wisp_task") {
     const agentId = String(args.agentId ?? "").trim();
     const body = String(args.text ?? "").trim();
     if (!agentId || !body) return failed("wisp_task needs both agentId and text.");
     const snap = await snapshot(env);
-    const known = snap ? agentsOf(snap.state).some((a) => String(a.id) === agentId) : false;
-    if (snap && !known) return failed(`No agent ${agentId}. Call wisp_agents for the ids that exist.`);
+    if (!snap) return failed(STALE);
+    if (!agentsOf(snap.state).some((a) => String(a.id) === agentId)) {
+      return failed(`No agent ${agentId}. Call wisp_agents for the ids that exist.`);
+    }
     const id = await command(env, { kind: "task", agentId, text: body });
     return text(`Queued as command ${id}. The Mac picks it up within a minute and the task appears in that agent's issues.`);
   }
