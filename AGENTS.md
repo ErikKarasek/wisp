@@ -52,6 +52,25 @@ NEX-12` are deliberately not own tasks, and two own IDs in one pull request clos
 request finishes one task. Any change to these rules gets a case in `src/ownTask.test.ts`, which
 `pnpm test` runs.
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request: tests and the
+typecheck plus build on Ubuntu, the notch harness on Ubuntu, and `cargo check` on macOS. The repo
+is public, so the runners are free.
+
+Run the same four things before you push, because a red CI on a merged PR is nobody's job to catch:
+
+```
+pnpm test        # node --test src/ownTask.test.ts
+pnpm build       # tsc --noEmit && vite build
+pnpm test:notch  # the real notch page through notch-harness.html
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+The Mac app itself is **not** built in CI. `tauri build` needs a signing identity that only Erik's
+Mac has. The header of `ci.yml` lists what else is deliberately left out (`cargo fmt`, clippy as a
+gate, and `relay/`, which no tsconfig covers) and what would have to change first.
+
 ## Committing
 
 Commit messages and PR descriptions carry **no** `Co-Authored-By: Claude` and no "Generated with Claude Code" line. The repo shows Erik as the only author. A squash merge copies co-author trailers out of the branch commits, so they have to be gone before the PR is merged.

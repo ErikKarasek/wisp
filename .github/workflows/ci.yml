@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# The repo is public, so these runners cost nothing. Keep it that way: the Mac app itself is
+# not built here. `tauri build` needs a signing identity that only Erik's Mac has, and a
+# release build takes tens of minutes for a binary nobody downloads from CI. What runs here
+# is everything that can fail without a signature.
+#
+# Not here on purpose:
+#   - `cargo fmt --check`: the Rust is not rustfmt-formatted and reformatting it would be a
+#     diff across every file, so the gate would be red from the first run.
+#   - `cargo clippy -D warnings`: six warnings today, all cosmetic or false positives (the
+#     `night.lock` open without `truncate` is correct for a lock file). Worth fixing one day,
+#     then this can be turned on.
+#   - `relay/`: tsconfig only includes `src`, so the Worker is typechecked nowhere. Needs its
+#     own tsconfig before a job here would mean anything.
+
+env:
+  # The package scripts call `corepack pnpm`; never wait on a download prompt.
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+
+# Cancel superseded runs on the same ref
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Tests + typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Update corepack
+        run: npm install -g corepack@latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # node --test runs the .ts file directly, which needs Node 22.6+
+      - name: Run tests
+        run: pnpm test
+
+      # `tsc --noEmit && vite build`, so this covers the typecheck too
+      - name: Typecheck and build
+        run: pnpm build
+
+  notch:
+    name: Notch harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Update corepack
+        run: npm install -g corepack@latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Drives the real notch page through notch-harness.html in the Chrome the runner image
+      # already has (playwright-core, channel "chrome"), so no browser download.
+      - name: Walk the notch
+        run: pnpm test:notch
+
+  rust:
+    name: Rust check
+    # macOS, because the Tauri side is Mac-only: it links AppKit and the notch overlay has no
+    # Linux equivalent, so a Linux runner cannot even check it.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # No frontend build first: `dist/` is not needed to check, only to `tauri build`.
+      - name: cargo check
+        run: cargo check --manifest-path src-tauri/Cargo.toml
