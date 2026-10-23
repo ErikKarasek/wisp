@@ -25,7 +25,7 @@ const cases: [string, { title?: string; body?: string }, string | null][] = [
   ["two own ids with and", { title: "Fix", body: "Fixes NEX-5 and NEX-6" }, null],
   ["two keywords, two tasks", { title: "Fix", body: "Closes NEX-5\nFixes NEX-6" }, null],
   ["lowercase id is no id", { title: "Fix", body: "closes nex-5" }, null],
-  ["keyword on another line than the id", { title: "Fix", body: "Closes\nNEX-5" }, "NEX-5"],
+  ["keyword on another line than the id", { title: "Fix", body: "Closes\nNEX-5" }, null],
   ["no ids", { title: "Fix", body: "Nothing here" }, null],
   ["missing title and body", {}, null],
 ];

@@ -4,7 +4,7 @@ const TASK_ID = /\b[A-Z]{2,5}-\d+\b/g;
 /** Text right before an ID that makes it somebody else's task: "follow-up to NEX-38", "does not fix NEX-12". */
 const NOT_OWN = /(?:\b(?:follow[- ]?up|part|related|refs?|see|after|before|from|not|never|instead|unlike|blocked by|depends on)|n't)(?: of| to| on| by| fix(?:e[sd])?| close[sd]?| resolve[sd]?)?\s*[:(]?\s*$/i;
 /** An ID, or a list of them, straight after the keyword. "Closes the loop on NEX-12" has no ID there. */
-const OWN_IDS = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|paperclip(?:\s+issue)?)\s*:?\s*([a-z]{2,5}-\d+(?:\s*(?:,|&|and)\s*[a-z]{2,5}-\d+)*)/gi;
+const OWN_IDS = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|paperclip(?:[ \t]+issue)?)[ \t]*:?[ \t]*([a-z]{2,5}-\d+(?:\s*(?:,|&|and)\s*[a-z]{2,5}-\d+)*)/gi;
 
 /**
  * The one task a merged pull request finishes (`gh search prs` can't return the branch).
