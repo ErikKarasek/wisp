@@ -6,6 +6,7 @@ mod calendar;
 mod claudecode;
 mod cloudflare;
 mod github;
+mod grokbot;
 mod launchd;
 mod lifeline;
 mod media;
@@ -336,6 +337,11 @@ fn notch_set_close_delay(millis: u64) {
 #[tauri::command]
 async fn claude_usage() -> Result<usage::Usage, String> {
     blocking(usage::claude_usage).await?
+}
+
+#[tauri::command]
+fn grokbot_snapshot() -> grokbot::GrokBot {
+    grokbot::snapshot()
 }
 
 #[tauri::command]
@@ -780,6 +786,7 @@ pub fn run() {
             awake_week,
             panel_fit,
             claude_usage,
+            grokbot_snapshot,
             codex_command,
             set_tray_title,
             chatgpt_usage,

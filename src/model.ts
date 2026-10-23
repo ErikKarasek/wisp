@@ -108,6 +108,7 @@ const CHARACTERS: Record<string, Partial<MascotCharacter>> = {
   "cf:site-watch": { shape: "round", color: "#5fcfa8" },
   "cf:job-tracker-scout": { shape: "lemon", color: "#f2a65a" },
   "cf:github-reels": { shape: "cloud", color: "#e7a3dc" },
+  grokbot: { shape: "cube", color: "#8c93b8" },
 };
 
 // ---------- launchd ----------
@@ -699,4 +700,79 @@ export function githubGroup(snap: GithubSnapshot, now = Date.now()): Group | nul
     }
   }
   return { id: "github", title: "GitHub", note: "Actions", items, notice: errors.length ? errors.join(" · ") : undefined };
+}
+
+// ---------- Grok Bot ----------
+
+/** Everything Grok Bot leaves on this disk; see src-tauri/src/grokbot.rs. */
+export type GrokBotSnapshot = {
+  installed: boolean;
+  running: boolean;
+  version: string | null;
+  daemon: boolean;
+  botName: string | null;
+  lastMessage: string | null;
+  lastActivityMs: number | null;
+  unread: number;
+  plan: string | null;
+  percentUsed: number | null;
+  resetsMs: number | null;
+  computerUse: boolean;
+  localEgress: boolean;
+};
+
+/**
+ * An agent of someone else's making, so this card only watches. Talking to it
+ * happens in its own window, and its routines live in the cloud where nothing
+ * here can see them, which is why there is no countdown to the next run.
+ */
+const ABOUT = "Agent od Cursoru nad Grokem, pracuje na svém počítači v cloudu";
+
+export function grokGroup(snap: GrokBotSnapshot, now = Date.now()): Group | null {
+  // Not installed is not a problem to report; it is simply not part of this Mac.
+  if (!snap.installed) return null;
+
+  let state: State;
+  let doing: string;
+  if (!snap.running) {
+    state = "off";
+    doing = "Neběží";
+  } else if (snap.unread > 0) {
+    state = "you";
+    doing = snap.unread === 1 ? "Napsal ti" : `Napsal ti ${snap.unread}×`;
+  } else {
+    state = "ok";
+    // At rest the other cards say what the agent is for, not that it is idle.
+    doing = snap.daemon ? ABOUT : "Běží, ale nedrží spojení s Macem";
+  }
+
+  const facts: [string, string][] = [];
+  if (snap.plan) {
+    const quota = snap.percentUsed == null ? "" : ` · vyčerpáno ${snap.percentUsed} %`;
+    const reset = snap.resetsMs ? ` · obnoví se ${ahead(snap.resetsMs, now)}` : "";
+    facts.push(["Předplatné", `${snap.plan}${quota}${reset}`]);
+  }
+  // The two that decide how far into this Mac the cloud may reach.
+  facts.push(["Spouštění na Macu", snap.daemon ? "zapnuté, ptá se před každým příkazem" : "neběží"]);
+  facts.push(["Ovládání aplikací", snap.computerUse ? "zapnuté" : "vypnuté"]);
+  if (snap.localEgress) facts.push(["Provoz přes tvoji linku", "povolený"]);
+  if (snap.version) facts.push(["Verze", snap.version]);
+
+  const item: Item = {
+    id: "grokbot",
+    group: "grokbot",
+    name: snap.botName ?? "Grok Bot",
+    doing,
+    about: ABOUT,
+    when: snap.lastActivityMs ? `naposledy ${ago(snap.lastActivityMs, now)}` : "zatím mlčel",
+    state,
+    character: characterFor("grokbot"),
+    facts,
+    log: { lines: snap.lastMessage ? [snap.lastMessage] : ["Zatím nic neřekl."] },
+    // Reading only: it is told what to do in its own window, not from here.
+    // The bundle path, not the grokbot:// scheme: runCommand sends anything that
+    // is not http(s) to openPath, which wants a path.
+    actions: [{ label: "Otevřít Grok Bota", primary: true, command: { type: "open", target: "/Applications/Grok Bot.app" } }],
+  };
+  return { id: "grokbot", title: "Grok Bot", note: "cizí agent", items: [item] };
 }

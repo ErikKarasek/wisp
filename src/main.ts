@@ -18,6 +18,7 @@ import {
   cloudflareGroup,
   cloudflareNeurons,
   githubGroup,
+  grokGroup,
   macGroup,
   NEURONS_PER_DAY,
   paperclipGroups,
@@ -26,6 +27,7 @@ import {
   type ActionSpec,
   type CloudflareSnapshot,
   type GithubSnapshot,
+  type GrokBotSnapshot,
   type Group,
   type Item,
   type Job,
@@ -53,6 +55,7 @@ let cfg: Config;
 let localGroups: Group[] = [];
 let cloudGroups: Group[] = [];
 let cloudflare: CloudflareSnapshot | null = null;
+let grokbot: GrokBotSnapshot | null = null;
 let groups: Group[] = [];
 /** The name and face each item has before the user's own settings. */
 const automatic = new Map<string, { name: string; character: Partial<MascotCharacter> }>();
@@ -91,14 +94,18 @@ let history: HistoryEntry[] = [];
 
 async function loadLocal() {
   const now = Date.now();
-  const [jobList, snap] = await Promise.all([
+  const [jobList, snap, grok] = await Promise.all([
     invoke<Job[]>("list_jobs").catch(() => [] as Job[]),
     invoke<PaperclipSnapshot>("paperclip_snapshot").catch((e) => ({ online: false, error: String(e) }) as PaperclipSnapshot),
+    // Reading someone else's files: when they move, the card goes away instead of the page.
+    invoke<GrokBotSnapshot>("grokbot_snapshot").catch(() => null),
   ]);
   jobs = jobList;
   paperclip = snap;
   void watchPaperclip(snap.online);
-  localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now)];
+  grokbot = grok;
+  const grokGrp = grok && grokGroup(grok, now);
+  localGroups = [macGroup(jobs, now), ...paperclipGroups(snap, now), ...(grokGrp ? [grokGrp] : [])];
 }
 
 // ---------- Claude Code sessions (from its hooks), for the phone ----------
@@ -656,7 +663,9 @@ function renderSummary() {
 }
 
 function groupLabel(g: Group) {
-  return g.id === "mac" ? "Mac" : g.id === "cloudflare" ? "Cloudflare" : g.id === "github" ? "GitHub" : g.note;
+  const named: Record<string, string> = { mac: "Mac", cloudflare: "Cloudflare", github: "GitHub", grokbot: "Grok Bot" };
+  // A Paperclip group is named after its company, which is what its note holds.
+  return named[g.id] ?? g.note;
 }
 
 let legendEl: HTMLElement | null = null;
@@ -713,11 +722,19 @@ function renderSide() {
   const gemini =
     (gemRows.length ? `<h6 title="Google AI Pro v Antigravity">Limit Gemini</h6>${gauges(gemRows)}` : "") +
     (proRows.length ? `<h6 title="Claude a GPT modely v Antigravity, zvlášť od tvého předplatného Claude">Claude v AI Pro</h6>${gauges(proRows)}` : "");
+  // Grok Bot reports one weekly number, not a window per model.
+  const grok =
+    grokbot?.percentUsed == null
+      ? ""
+      : `<h6 title="${esc(grokbot.plan ?? "Grok Bot")}">Limit Grok</h6>` +
+        `<div class="gauge${grokbot.percentUsed >= 85 ? " hot" : ""}"${grokbot.resetsMs ? ` title="obnoví se ${esc(resetText(grokbot.resetsMs))}"` : ""}><div class="bar"><i style="width:${grokbot.percentUsed}%"></i></div>
+          <small>týden: ${grokbot.percentUsed} %</small></div>`;
   const neurons = cloudflare ? cloudflareNeurons(cloudflare) : null;
   const gauge =
     claude +
     gpt +
     gemini +
+    grok +
     (neurons == null
       ? ""
       : `<h6>Workers AI dnes</h6><div class="gauge${neurons >= NEURONS_PER_DAY * 0.9 ? " hot" : ""}"><div class="bar"><i style="width:${Math.min(100, (neurons / NEURONS_PER_DAY) * 100).toFixed(1)}%"></i></div>
