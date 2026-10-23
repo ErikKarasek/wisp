@@ -30,6 +30,28 @@ Read `steps.dataset.mode` instead, and when state behind a card outlives the car
 Check any change to those cards with `pnpm test:notch`, which drives the real page through
 `notch-harness.html`. Add a case for whatever broke; a new test has to fail before the fix.
 
+## The task a pull request finishes
+
+Wisp's watchdog closes a Paperclip task once the pull request that finishes it is merged, and it
+works out which task from the pull request itself (`gh search prs` cannot return the branch).
+`ownTaskId` in `src/ownTask.ts` takes an ID from the title, or one standing **on the same line,
+directly after** `Closes` / `Fixes` / `Resolves` / `Paperclip`, with nothing but spaces between.
+
+So name the task in English, on a line of its own:
+
+```
+Closes NEX-68
+```
+
+Czech wording around the keyword is not parsed. `Paperclip úkol: NEX-61` and `Úkol v Paperclipu:
+NEX-68` both come out as "no own task", and the task then sits in `in_review` until somebody closes
+it by hand. That is what happened to NEX-68 (#14), whose title carried no ID either.
+
+A passing mention stays a mention: `follow-up to NEX-38`, `part of NEX-40` and `does not fix
+NEX-12` are deliberately not own tasks, and two own IDs in one pull request close nothing. One pull
+request finishes one task. Any change to these rules gets a case in `src/ownTask.test.ts`, which
+`pnpm test` runs.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every push to `main` and every pull request: tests and the
