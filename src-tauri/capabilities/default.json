@@ -17,6 +17,18 @@
       "allow": [
         {
           "path": "$HOME/**"
+        },
+        {
+          "path": "/Applications/Grok Bot.app"
+        },
+        {
+          "path": "/opt/homebrew/var/log/**"
+        },
+        {
+          "path": "/usr/local/var/log/**"
+        },
+        {
+          "path": "/var/log/**"
         }
       ]
     },
