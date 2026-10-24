@@ -53,9 +53,12 @@ const OFF = /^(vyp\w*|off|ne|stop|konec)$/;
 /** The Mac in a few lines, for /mac and as the answer to the awake commands. */
 function macText(a: Awake): string {
   const heat = a.temp != null ? `${a.temp} °C` : ["v pohodě", "teplý", "horký", "přehřátý"][a.thermal];
+  const gb = (mb: number) => `${Math.round(mb / 102.4) / 10} GB`.replace(".", ",");
+  const squeezed = a.ramPressure >= 2 ? " (došla)" : a.ramPressure >= 1 ? " (dochází)" : "";
   const lines = [
     `💻 ${a.why}`,
     `Baterie ${a.battery ?? "–"} %${a.charging ? " (nabíjí)" : a.onAc ? " (v nabíječce)" : ""} · procesor ${heat} · CPU ${a.cpu} %${a.lidClosed ? " · víko zavřené" : ""}`,
+    `Paměť ${a.ram} %${squeezed} · ${gb(a.ramUsedMb)} z ${gb(a.ramTotalMb)}${a.swapMb ? ` · swap ${gb(a.swapMb)}` : ""}`,
   ];
   if (a.working.length) lines.push(`Pracuje: ${a.working.join(", ")}`);
   const on: string[] = [];

@@ -131,6 +131,14 @@ pub struct Status {
     /// The hottest CPU die sensor, °C.
     pub temp: Option<u8>,
     pub cpu: u8,
+    /// Memory in use, in percent of what the Mac has.
+    pub ram: u8,
+    pub ram_used_mb: u32,
+    pub ram_total_mb: u32,
+    /// What sits in swap, in MB. Anything much above zero is why a Mac stutters.
+    pub swap_mb: u32,
+    /// How hard memory is squeezed: 0 fine, 1 tight, 2 critical.
+    pub ram_pressure: u8,
     pub idle_secs: u64,
     pub others: Vec<Holder>,
     pub week_minutes: u64,
@@ -354,27 +362,165 @@ fn idle_secs() -> u64 {
     if s.is_finite() && s > 0.0 { s as u64 } else { 0 }
 }
 
-/// Whole-machine CPU use in percent, and the build tools that are busy.
-fn processes() -> (u8, Vec<String>) {
-    let Some(out) = run("/bin/ps", &["-A", "-o", "%cpu=,comm="]) else { return (0, vec![]) };
-    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8) as f64;
-    let mut total = 0.0;
-    let mut busy: Vec<String> = vec![];
+// Whole-machine CPU load and memory, through the kernel. `host_statistics` hands back
+// counters that only ever go up, so a reading is the difference between two of them.
+type MachPort = u32;
+extern "C" {
+    fn mach_host_self() -> MachPort;
+    fn host_statistics(host: MachPort, flavor: i32, info: *mut u32, count: *mut u32) -> i32;
+}
+
+/// The tick counts the last reading saw, and what they came to, so the next one can take
+/// the difference and a reading too soon after can answer with what it knows.
+static CPU_TICKS: Mutex<Option<([u32; 4], u8)>> = Mutex::new(None);
+
+/// Whole-machine CPU use in percent, over the time since the last call.
+///
+/// `ps %cpu` used to answer this, and it was wrong: on macOS that column is the process's
+/// whole-life average (CPU time divided by time since it started), so `mds` running for
+/// three weeks reported 40 % for ever while a build that started a second ago reported
+/// almost nothing. The kernel's own tick counters are what Activity Monitor and `top` read.
+fn cpu_percent() -> u8 {
+    // HOST_CPU_LOAD_INFO, host_cpu_load_info_data_t: user, system, idle, nice ticks.
+    const HOST_CPU_LOAD_INFO: i32 = 3;
+    let mut ticks = [0u32; 4];
+    let mut count = 4u32;
+    let rc = unsafe { host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, ticks.as_mut_ptr(), &mut count) };
+    if rc != 0 {
+        return 0;
+    }
+    let Ok(mut last) = CPU_TICKS.lock() else { return 0 };
+    let Some((prev, prev_pct)) = *last else {
+        *last = Some((ticks, 0));
+        return 0;
+    };
+    // The counters are u32 and wrap; wrapping_sub keeps the difference right when they do.
+    let diff: Vec<f64> = ticks.iter().zip(prev).map(|(n, p)| n.wrapping_sub(p) as f64).collect();
+    let total: f64 = diff.iter().sum();
+    // A change can ask for a tick right after the last one. Too few ticks to divide by says
+    // nothing about the load, so the answer stands and the next reading counts from further
+    // back, rather than the pill dropping to zero every time a switch is flipped.
+    if total < 10.0 {
+        return prev_pct;
+    }
+    // Everything that isn't idle: user + system + nice.
+    let pct = (((total - diff[2]) / total) * 100.0).round().clamp(0.0, 100.0) as u8;
+    *last = Some((ticks, pct));
+    pct
+}
+
+/// What `vm_stat` says is taken, in MB: what apps hold, what the kernel wired down, and
+/// what the compressor holds. Free, cached and speculative pages are not in use.
+fn vm_used_mb(out: &str) -> u32 {
+    let page = out
+        .lines()
+        .next()
+        .and_then(|l| l.split("page size of ").nth(1))
+        .and_then(|l| l.split_whitespace().next())
+        .and_then(|n| n.parse::<u64>().ok())
+        .unwrap_or(16384);
+    let pages = |label: &str| -> u64 {
+        out.lines()
+            .find(|l| l.starts_with(label))
+            .and_then(|l| l.rsplit(':').next())
+            .map(|v| v.trim().trim_end_matches('.'))
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    ((pages("Pages active") + pages("Pages wired down") + pages("Pages occupied by compressor")) * page / 1_048_576) as u32
+}
+
+/// How much memory is taken, in percent, how many MB that is, and how much is in swap.
+///
+/// Counted the way Activity Monitor counts "Memory Used": what apps hold, plus what the
+/// kernel wired down, plus what the compressor holds. Free and cached pages don't count.
+fn memory() -> (u8, u32, u32, u32) {
+    let total_mb = (run("/usr/sbin/sysctl", &["-n", "hw.memsize"])
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0)
+        / 1_048_576) as u32;
+    let Some(out) = run("/usr/bin/vm_stat", &[]) else { return (0, 0, total_mb, 0) };
+    let used_mb = vm_used_mb(&out);
+    // "total = 13312.00M  used = 11681.38M  free = 1630.62M  (encrypted)"
+    let swap_mb = run("/usr/sbin/sysctl", &["-n", "vm.swapusage"])
+        .and_then(|s| {
+            let used = s.split("used = ").nth(1)?;
+            used.trim_start().split('M').next()?.parse::<f64>().ok()
+        })
+        .unwrap_or(0.0)
+        .round() as u32;
+    let pct = if total_mb > 0 { ((used_mb as f64 / total_mb as f64) * 100.0).round().clamp(0.0, 100.0) as u8 } else { 0 };
+    (pct, used_mb, total_mb, swap_mb)
+}
+
+/// How hard the Mac is squeezed for memory: 0 fine, 1 tight, 2 critical. The kernel's own
+/// level, the one that makes apps give memory back; a high reading with a full swap is what
+/// a Mac that stutters feels like, even while the CPU is idle.
+fn memory_pressure() -> u8 {
+    // kern.memorystatus_vm_pressure_level: 1 normal, 2 warn, 4 critical.
+    match run("/usr/sbin/sysctl", &["-n", "kern.memorystatus_vm_pressure_level"]).map(|s| s.trim().parse::<i32>().unwrap_or(1)) {
+        Some(4) => 2,
+        Some(2) => 1,
+        _ => 0,
+    }
+}
+
+/// A `ps time` column in seconds: "[DD-]HH:MM:SS.ss", or "MM:SS.ss" under a day.
+fn cpu_seconds(time: &str) -> f64 {
+    let (days, rest) = time.split_once('-').map_or((0.0, time), |(d, r)| (d.parse::<f64>().unwrap_or(0.0), r));
+    let mut secs = 0.0;
+    for part in rest.split(':') {
+        secs = secs * 60.0 + part.parse::<f64>().unwrap_or(0.0);
+    }
+    secs + days * 86_400.0
+}
+
+/// The build tools that are busy right now.
+///
+/// Per process this is the same story as `cpu_percent`: `ps %cpu` is a whole-life average,
+/// so a long-running tool looks busy for hours after it finished. `ps time` is the CPU time
+/// it has used in total, to a hundredth of a second, so the difference between two ticks
+/// five seconds apart says what it is doing now.
+fn busy_tools() -> Vec<String> {
+    /// pid -> (CPU seconds used, the moment it was read).
+    static LAST: Mutex<Option<(BTreeMap<u32, f64>, u64)>> = Mutex::new(None);
+    let Some(out) = run("/bin/ps", &["-A", "-o", "pid=,time=,comm="]) else { return vec![] };
+    let at = now();
+    let mut seen: BTreeMap<u32, f64> = BTreeMap::new();
+    let mut names: BTreeMap<u32, &str> = BTreeMap::new();
     for line in out.lines() {
-        let line = line.trim();
-        let Some((cpu, comm)) = line.split_once(' ') else { continue };
-        let cpu: f64 = cpu.trim().parse().unwrap_or(0.0);
-        total += cpu;
+        let mut parts = line.trim().splitn(3, char::is_whitespace);
+        let (Some(pid), Some(time), Some(comm)) = (parts.next(), parts.next(), parts.next()) else { continue };
+        let Ok(pid) = pid.parse::<u32>() else { continue };
         let name = comm.trim().rsplit('/').next().unwrap_or("");
-        if cpu >= 5.0 {
-            if let Some((_, label)) = TOOLS.iter().find(|(p, _)| *p == name) {
-                if !busy.iter().any(|b| b == label) {
-                    busy.push(label.to_string());
-                }
-            }
+        if !TOOLS.iter().any(|(p, _)| *p == name) {
+            continue;
+        }
+        seen.insert(pid, cpu_seconds(time));
+        names.insert(pid, TOOLS.iter().find(|(p, _)| *p == name).map(|(_, l)| *l).unwrap_or(""));
+    }
+    let Ok(mut last) = LAST.lock() else { return vec![] };
+    let prev = last.replace((seen.clone(), at));
+    let Some((prev, prev_at)) = prev else { return vec![] };
+    let elapsed = at.saturating_sub(prev_at) as f64 / 1000.0;
+    if elapsed <= 0.0 {
+        return vec![];
+    }
+    let mut busy: Vec<String> = vec![];
+    for (pid, secs) in &seen {
+        // A pid that wasn't there last time is new: no difference to take, wait a tick.
+        let Some(before) = prev.get(pid) else { continue };
+        // Percent of one core, the same scale the old `ps %cpu` threshold was written for.
+        let pct = (secs - before) / elapsed * 100.0;
+        if pct < 5.0 {
+            continue;
+        }
+        let label = names.get(pid).copied().unwrap_or("");
+        if !label.is_empty() && !busy.iter().any(|b| b == label) {
+            busy.push(label.to_string());
         }
     }
-    ((total / cores).round().clamp(0.0, 100.0) as u8, busy)
+    busy
 }
 
 /// Claude Code sessions that wrote to their transcript in the last 90 s. Hooks don't reach
@@ -616,7 +762,10 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
     let closed = lid_closed();
     let heat = thermal();
     let temp = cpu_temp().map(|t| t.round() as u8);
-    let (cpu, mut tools) = processes();
+    let cpu = cpu_percent();
+    let (ram, ram_used_mb, ram_total_mb, swap_mb) = memory();
+    let ram_pressure = memory_pressure();
+    let mut tools = busy_tools();
     tools.extend(claude_sessions());
     // Asked by its own thread (start): a slow Paperclip must not hold this lock up.
     tools.extend(PAPERCLIP_WORK.lock().map(|w| w.clone()).unwrap_or_default());
@@ -782,6 +931,11 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
         thermal: heat,
         temp,
         cpu,
+        ram,
+        ram_used_mb,
+        ram_total_mb,
+        swap_mb,
+        ram_pressure,
         idle_secs: idle,
         others: inner.status.others.clone(),
         week_minutes: week_minutes(inner, t),
@@ -794,6 +948,13 @@ fn tick(app: &AppHandle, inner: &mut Inner) {
     b.idle_secs = 0;
     a.cpu /= 10;
     b.cpu /= 10;
+    // Memory drifts by a few MB all the time; only a real move is worth an event.
+    a.ram /= 5;
+    b.ram /= 5;
+    a.ram_used_mb /= 512;
+    b.ram_used_mb /= 512;
+    a.swap_mb /= 512;
+    b.swap_mb /= 512;
     a.temp = a.temp.map(|t| t / 3);
     b.temp = b.temp.map(|t| t / 3);
     inner.status = next;
@@ -997,4 +1158,56 @@ pub fn night(since_ms: u64) -> Option<String> {
         ))
     })
     .flatten()
+}
+
+#[cfg(test)]
+mod load_tests {
+    use super::*;
+
+    #[test]
+    fn ps_time_column_in_seconds() {
+        assert_eq!(cpu_seconds("0:00.01"), 0.01);
+        assert_eq!(cpu_seconds("12:30.50"), 750.5);
+        assert_eq!(cpu_seconds("3:12:30.00"), 11_550.0);
+        assert_eq!(cpu_seconds("21-20:45:26.00"), 1_889_126.0);
+        assert_eq!(cpu_seconds("nonsense"), 0.0);
+    }
+
+    #[test]
+    fn vm_stat_counts_what_is_held() {
+        // 1 MB pages keep the arithmetic readable: 3 + 5 + 2 held, the rest is not in use.
+        let out = "Mach Virtual Memory Statistics: (page size of 1048576 bytes)\n\
+                   Pages free:                      100.\n\
+                   Pages active:                      3.\n\
+                   Pages inactive:                   50.\n\
+                   Pages speculative:                 7.\n\
+                   Pages wired down:                  5.\n\
+                   Pages occupied by compressor:      2.\n";
+        assert_eq!(vm_used_mb(out), 10);
+    }
+
+    #[test]
+    fn vm_stat_without_a_page_size_assumes_16k() {
+        assert_eq!(vm_used_mb("Pages active: 64.\nPages wired down: 0.\n"), 1);
+    }
+
+    #[test]
+    fn cpu_needs_two_readings() {
+        // The first call has nothing to subtract from, so it answers 0 rather than guessing.
+        *CPU_TICKS.lock().unwrap() = None;
+        assert_eq!(cpu_percent(), 0);
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(cpu_percent() <= 100);
+    }
+
+    #[test]
+    fn cpu_too_soon_keeps_the_last_answer() {
+        // A tick forced by a flipped switch lands right behind the last one: with too few
+        // ticks to divide by, the answer stands instead of dropping to zero.
+        *CPU_TICKS.lock().unwrap() = None;
+        cpu_percent();
+        std::thread::sleep(Duration::from_millis(400));
+        let measured = cpu_percent();
+        assert_eq!(cpu_percent(), measured);
+    }
 }

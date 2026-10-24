@@ -34,6 +34,14 @@ export type Awake = {
   /** The hottest CPU die sensor, °C. */
   temp: number | null;
   cpu: number;
+  /** Memory in use, in percent of what the Mac has. */
+  ram: number;
+  ramUsedMb: number;
+  ramTotalMb: number;
+  /** What sits in swap, in MB. */
+  swapMb: number;
+  /** How hard memory is squeezed: 0 fine, 1 tight, 2 critical. */
+  ramPressure: number;
   idleSecs: number;
   others: { app: string; what: string }[];
   weekMinutes: number;
@@ -56,14 +64,17 @@ const ICON = {
   bat: svg(`<rect x="2.5" y="7" width="17" height="10" rx="2.5"/><path d="M21.5 10.5v3"/>`),
   heat: svg(`<path d="M10 4.5a2 2 0 0 1 4 0v9.2a4 4 0 1 1-4 0z"/>`),
   cpu: svg(`<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 2.5v3.5M14.5 2.5v3.5M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5"/>`),
+  ram: svg(`<rect x="2.5" y="7" width="19" height="10" rx="2"/><path d="M6.5 17v2.5M12 17v2.5M17.5 17v2.5M7 10.5h2.5v3H7zM14.5 10.5H17v3h-2.5z"/>`),
 };
 const HEAT = ["v pohodě", "teplý", "horký", "přehřátý"];
+const RAMP = ["", "paměť dochází", "paměť došla"];
 const TIMERS: [number, string][] = [[0, "bez časovače"], [30, "30 min"], [60, "1 h"], [120, "2 h"], [240, "4 h"], [480, "8 h"]];
 
 const left = (ms: number) => {
   const min = Math.max(0, Math.round((ms - Date.now()) / 60_000));
   return min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`;
 };
+const gb = (mb: number) => `${Math.round(mb / 102.4) / 10} GB`.replace(".", ",");
 const hours = (min: number) => (min >= 60 ? `${Math.round(min / 6) / 10} h`.replace(".", ",") : `${min} min`);
 
 /** A short line for the panel's header, and the mode pill beside it. */
@@ -86,6 +97,7 @@ export function mountAwake(host: HTMLElement, onChange: (a: Awake) => void) {
       <span class="pill" data-p="bat">${ICON.bat}<b></b></span>
       <span class="pill" data-p="heat">${ICON.heat}<b></b></span>
       <span class="pill" data-p="cpu">${ICON.cpu}<b></b></span>
+      <span class="pill" data-p="ram">${ICON.ram}<b></b></span>
       <span class="pill" data-p="lid">${ICON.lid}<b></b></span>
     </div>
     <div class="awrows">
@@ -131,7 +143,7 @@ export function mountAwake(host: HTMLElement, onChange: (a: Awake) => void) {
       const on = !!p[el.dataset.sw as keyof AwakePrefs];
       el.setAttribute("aria-checked", String(on));
     }
-    // Pills: battery, heat, CPU, lid.
+    // Pills: battery, heat, CPU, memory, lid.
     const pill = (k: string, text: string, cls = "") => {
       const el = q<HTMLElement>(`[data-p="${k}"]`);
       el.className = `pill ${cls}`;
@@ -140,7 +152,11 @@ export function mountAwake(host: HTMLElement, onChange: (a: Awake) => void) {
     pill("bat", a.battery == null ? "–" : `${a.battery} %${a.charging ? " ⚡" : ""}`, a.battery != null && !a.onAc && a.battery <= p.batteryStop ? "warn" : "");
     pill("heat", a.temp != null ? `${a.temp} °C` : (HEAT[a.thermal] ?? "–"), a.thermal >= 2 || (a.temp ?? 0) >= 95 ? "warn" : "");
     q<HTMLElement>('[data-p="heat"]').title = `Procesor: ${HEAT[a.thermal] ?? ""}`;
-    pill("cpu", `${a.cpu} %`);
+    pill("cpu", `${a.cpu} %`, a.cpu >= 85 ? "warn" : "");
+    // Memory on a Mac is nearly always nearly full, so the colour follows the kernel's
+    // own pressure level and the swap, not the percentage: that is what makes it stutter.
+    pill("ram", `${a.ram} %`, a.ramPressure >= 2 || a.swapMb >= 4096 ? "warn" : a.ramPressure >= 1 ? "on" : "");
+    q<HTMLElement>('[data-p="ram"]').title = `Paměť ${gb(a.ramUsedMb)} z ${gb(a.ramTotalMb)}${a.swapMb ? ` · swap ${gb(a.swapMb)}` : ""}${RAMP[a.ramPressure] ? ` · ${RAMP[a.ramPressure]}` : ""}`;
     pill("lid", a.lidActive ? "víko zap" : a.lidClosed ? "zavřené" : "víko vyp", a.lidActive ? "on" : "");
 
     sub("auto", p.auto ? (a.working.length ? a.working.slice(0, 4).join(", ") : "Nic nepracuje") : "Vypnuto");
