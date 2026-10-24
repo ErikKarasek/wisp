@@ -37,8 +37,9 @@ body.mini button { font: inherit; color: inherit; }
 
 /* keep awake (awake.ts) */
 .aw { margin-bottom: 10px; }
-.aw .pills { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 6px; }
-.aw .pill { display: flex; align-items: center; justify-content: center; gap: 4px; height: 26px; border-radius: 8px;
+/* Five pills don't fit one 340 px row, so they wrap: the numbers on top, the lid below. */
+.aw .pills { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
+.aw .pill { display: flex; flex: 1 1 auto; align-items: center; justify-content: center; gap: 4px; height: 26px; padding: 0 7px; border-radius: 8px;
   background: rgba(255, 255, 255, .05); font-size: 11px; color: #c9ced8; white-space: nowrap; overflow: hidden; }
 .aw .pill b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .aw .pill.warn { background: rgba(224, 96, 90, .16); color: #ff9c95; }
