@@ -719,6 +719,7 @@ export type GrokBotSnapshot = {
   resetsMs: number | null;
   computerUse: boolean;
   localEgress: boolean;
+  toolPermission: string | null;
 };
 
 /**
@@ -753,7 +754,15 @@ export function grokGroup(snap: GrokBotSnapshot, now = Date.now()): Group | null
     facts.push(["Předplatné", `${snap.plan}${quota}${reset}`]);
   }
   // The two that decide how far into this Mac the cloud may reach.
-  facts.push(["Spouštění na Macu", snap.daemon ? "zapnuté, ptá se před každým příkazem" : "neběží"]);
+  // Only "ask" is known to mean it asks first; any other value is shown as it is, never as a promise.
+  const exec = !snap.daemon
+    ? "neběží"
+    : snap.toolPermission === "ask"
+      ? "zapnuté, ptá se před každým příkazem"
+      : snap.toolPermission
+        ? `zapnuté, potvrzování: ${snap.toolPermission}`
+        : "zapnuté";
+  facts.push(["Spouštění na Macu", exec]);
   facts.push(["Ovládání aplikací", snap.computerUse ? "zapnuté" : "vypnuté"]);
   if (snap.localEgress) facts.push(["Provoz přes tvoji linku", "povolený"]);
   if (snap.version) facts.push(["Verze", snap.version]);
