@@ -271,25 +271,34 @@ function nudgeText(pr: PR, now: number) {
   return [`⏳ ${short(pr.repo)}#${pr.number}: ${pr.title}`, `Pořád čeká na mergnutí, už ${prWaited(pr, now)}.`].join("\n");
 }
 
-// Telegram off or remote control off: the morning digest and the Mac list still show it.
-const tell = (text: string, pr: PR) =>
-  invoke("telegram_buttons", { text, keyboard: prKeyboard(pr) }).then(() => true).catch(() => false);
+/** Telegram without the buttons, for when the phone cannot answer them. */
+type Plain = (text: string) => Promise<boolean>;
+
+// Remote control off means the buttons have nobody to answer them, so the same message
+// goes out plain with the link instead. Telegram off entirely: the morning digest and
+// the Mac list still show it.
+const tell = async (text: string, pr: PR, plain?: Plain) => {
+  const buttons = await invoke("telegram_buttons", { text, keyboard: prKeyboard(pr) }).then(() => true).catch(() => false);
+  if (buttons) return true;
+  return plain ? await plain(`${text}\n${pr.url}`) : false;
+};
 
 /** At the first look, the open ones are sent too, newest first, but no more than this. */
 const FIRST_LOOK = 6;
 /** A green pull request that keeps waiting gets one nudge a day. */
 const NUDGE_MS = 24 * 3_600_000;
-/** Ready and nudge messages in one look, so a backlog doesn't flood the phone. */
-const EXTRA_AT_ONCE = 4;
+/** Messages in one look, so a backlog doesn't flood the phone. The rest follows a minute later. */
+const AT_ONCE = 4;
 
 /**
  * Each new pull request once, with buttons. The first message goes out the moment
  * the pull request appears, which is before CI has had time to finish, so all it
  * can usually say is "CI běží". Two more follow: one when the thing is really
  * green and mergeable, and then a nudge a day for as long as it sits there. Both
- * of #21 and #22 waited over a week on a single first message.
+ * of #21 and #22 waited over a week on a single first message. Without remote control
+ * the buttons are dead, so `plain` sends the same text with the link instead.
  */
-export async function announcePrs(prs: PR[], now = Date.now()) {
+export async function announcePrs(prs: PR[], now = Date.now(), plain?: Plain) {
   if (!prs.length) return;
   const s = await watchState();
   if (!s.prSeen) {
@@ -298,16 +307,20 @@ export async function announcePrs(prs: PR[], now = Date.now()) {
     s.prSeen = newest.slice(FIRST_LOOK).map(prKey);
   }
   let changed = false;
+  // One budget for the whole look: a backlog nobody could be told about, because the
+  // phone had no way to answer, must not land as a single burst of messages.
+  let sent = 0;
   for (const pr of prs) {
     if (pr.isDraft || s.prSeen.includes(prKey(pr))) continue;
-    if (!(await tell(prText(pr), pr))) continue;
+    if (sent >= AT_ONCE) break;
+    if (!(await tell(prText(pr), pr, plain))) continue;
+    sent += 1;
     s.prSeen.push(prKey(pr));
     // Already green at the first sighting: this message said so, so no second one.
     if (prReady(pr)) s.prReadyAt![prKey(pr)] = now;
     changed = true;
   }
 
-  let extra = 0;
   for (const pr of prs) {
     const k = prKey(pr);
     if (!prReady(pr)) {
@@ -317,19 +330,19 @@ export async function announcePrs(prs: PR[], now = Date.now()) {
       delete s.prNudgedAt![k];
       continue;
     }
-    if (extra >= EXTRA_AT_ONCE) continue;
+    if (sent >= AT_ONCE) continue;
     const readyAt = s.prReadyAt![k];
     if (readyAt === undefined) {
-      if (!(await tell(readyText(pr, now), pr))) continue;
+      if (!(await tell(readyText(pr, now), pr, plain))) continue;
       s.prReadyAt![k] = now;
-      extra += 1;
+      sent += 1;
       changed = true;
       continue;
     }
     if (now - readyAt < NUDGE_MS || now - (s.prNudgedAt![k] ?? 0) < NUDGE_MS) continue;
-    if (!(await tell(nudgeText(pr, now), pr))) continue;
+    if (!(await tell(nudgeText(pr, now), pr, plain))) continue;
     s.prNudgedAt![k] = now;
-    extra += 1;
+    sent += 1;
     changed = true;
   }
 

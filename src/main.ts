@@ -432,6 +432,12 @@ async function healCodex() {
   if (fixed.length) warn(`Po aktualizaci Paperclipu jsem opravil cestu ke Codexu: ${fixed.join(", ")}.`);
 }
 
+/** A pull request message without buttons: what goes out when the phone cannot answer them. */
+const tgPlain = (text: string) =>
+  cfg.telegram.enabled && cfg.telegram.chat
+    ? invoke("telegram_send", { chat: cfg.telegram.chat, text }).then(() => true).catch(() => false)
+    : Promise.resolve(false);
+
 async function loadCloud() {
   const now = Date.now();
   const [cf, gh] = await Promise.all([
@@ -447,7 +453,7 @@ async function loadCloud() {
     prCount = prList.length;
     const waiting = prGroup(prList as PR[], Date.now());
     if (waiting) cloudGroups.push(waiting);
-    void announcePrs(prList as PR[]);
+    void announcePrs(prList as PR[], Date.now(), tgPlain);
     // Merged work still sitting in review: the agent may not close it itself.
     void closeMergedIssues(paperclip, cfg.githubRepos, (t) => toast(t, true));
   }
