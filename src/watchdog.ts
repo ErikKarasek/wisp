@@ -310,6 +310,8 @@ export async function announcePrs(prs: PR[], now = Date.now()) {
   let extra = 0;
   for (const pr of prs) {
     const k = prKey(pr);
+    // The opener hasn't gone out (Telegram down): ready and nudge would arrive without it.
+    if (!s.prSeen.includes(k)) continue;
     if (!prReady(pr)) {
       // Red, draft or conflicting: the next time it goes green is news again.
       if (s.prReadyAt![k] !== undefined || s.prNudgedAt![k] !== undefined) changed = true;
