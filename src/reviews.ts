@@ -3,33 +3,15 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-
-export type PR = {
-  repo: string;
-  number: number;
-  title: string;
-  author: { login: string };
-  headRefName: string;
-  updatedAt: string;
-  url: string;
-  additions: number;
-  deletions: number;
-  changedFiles: number;
-  isDraft: boolean;
-  body: string;
-  mergeable: string;
-  statusCheckRollup: { name?: string; context?: string; conclusion?: string; state?: string; status?: string }[];
-};
+import { prChecks, type PR } from "./pr";
 
 const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
 export function checks(pr: PR): { cls: string; text: string } {
-  const all = pr.statusCheckRollup ?? [];
-  if (!all.length) return { cls: "s-sleep", text: "bez kontrol" };
-  const bad = all.filter((c) => ["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED"].includes(c.conclusion ?? c.state ?? ""));
-  const running = all.filter((c) => (c.status && c.status !== "COMPLETED") || c.state === "PENDING");
-  if (bad.length) return { cls: "s-bad", text: `červená (${bad.length})` };
-  if (running.length) return { cls: "s-run", text: "CI běží" };
+  const ci = prChecks(pr);
+  if (ci.state === "none") return { cls: "s-sleep", text: "bez kontrol" };
+  if (ci.state === "bad") return { cls: "s-bad", text: `červená (${ci.bad})` };
+  if (ci.state === "run") return { cls: "s-run", text: "CI běží" };
   return { cls: "s-ok", text: "zelená" };
 }
 
@@ -51,6 +33,11 @@ function diffHtml(diff: string) {
 }
 
 let openPr: string | null = null;
+
+/** Open the view on one pull request, for the card's "Prohlédnout změny". */
+export function openReview(key: string | null) {
+  openPr = key;
+}
 
 export async function renderReviews(el: HTMLElement, repos: string[], toast: (t: string, ok?: boolean) => void, changed: () => void) {
   el.innerHTML = `<p class="muted">Načítám pull requesty…</p>`;
