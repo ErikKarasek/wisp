@@ -31,6 +31,8 @@ pub struct GrokBot {
     pub computer_use: bool,
     /// Letting the cloud's box route its traffic through this Mac's connection.
     pub local_egress: bool,
+    /// What the app does before a command from the cloud runs here; "ask" means it asks first.
+    pub tool_permission: Option<String>,
 }
 
 const APP: &str = "/Applications/Grok Bot.app";
@@ -128,6 +130,7 @@ pub fn snapshot() -> GrokBot {
     // count here would show zero next to a server that is plainly connected.
     if let Some(settings) = read_json(home().join(".grokbot/settings.json")) {
         s.local_egress = settings["localEgressAllowed"].as_bool().unwrap_or(false);
+        s.tool_permission = settings["localToolPermission"].as_str().map(str::to_string);
     }
     if let Some(gate) = read_json(home().join(".grokbot/local-computer-use-gate.json")) {
         s.computer_use = gate["isOn"].as_bool().unwrap_or(false);
@@ -192,7 +195,8 @@ mod tests {
         println!("installed {} | running {} | daemon {}", s.installed, s.running, s.daemon);
         println!("version {:?} | plan {:?} | percent {:?}", s.version, s.plan, s.percent_used);
         println!("bot {:?} | unread {} | egress {}", s.bot_name, s.unread, s.local_egress);
-        println!("computer use {} | last activity {:?}", s.computer_use, s.last_activity_ms);
+        println!("computer use {} | tool permission {:?}", s.computer_use, s.tool_permission);
+        println!("last activity {:?}", s.last_activity_ms);
         println!("last message {:?}", s.last_message.as_deref().map(|m| m.chars().take(80).collect::<String>()));
     }
 }
