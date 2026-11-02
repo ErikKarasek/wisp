@@ -337,8 +337,9 @@ async function rerunRoutines(agentId: string, since: string): Promise<string[]> 
       );
       if (!shot) continue;
       // Once per routine, however many of its runs the pause swallowed.
-      await invoke("paperclip_action", { kind: "routineRun", id: r.id }).catch(() => {});
-      caught.push(String(r.title ?? "rutina"));
+      await invoke("paperclip_action", { kind: "routineRun", id: r.id })
+        .then(() => caught.push(String(r.title ?? "rutina")))
+        .catch(() => {});
     }
   }
   return caught;
