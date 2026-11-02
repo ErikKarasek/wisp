@@ -3,6 +3,7 @@
 
 import type { ExpressionName, MascotCharacter, MascotShape } from "./mascot/mascot";
 import { cronEvery, nextCron } from "./cron";
+import { prChecks, prFace, type PR } from "./pr";
 import { ago, ahead, cronInWords, duration, nextCalendar, type CalendarTime } from "./time";
 
 export type State = "run" | "ok" | "done" | "sleep" | "you" | "new" | "bad" | "off";
@@ -25,6 +26,7 @@ export type Command =
   | { type: "job"; label: string; action: "run" | "restart" | "pause" | "resume" }
   | { type: "paperclip"; kind: "agentPause" | "agentResume" | "agentInvoke" | "routineRun"; id: string }
   | { type: "github"; repo: string; workflowId: number; action: "run" | "enable" | "disable" }
+  | { type: "pr"; repo: string; number: number; action: "merge" | "close" | "review" }
   | { type: "editJob"; label: string }
   | { type: "editAgent"; companyId: string; agentId: string }
   | { type: "chatAgent"; agentId: string }
@@ -700,6 +702,67 @@ export function githubGroup(snap: GithubSnapshot, now = Date.now()): Group | nul
     }
   }
   return { id: "github", title: "GitHub", note: "Actions", items, notice: errors.length ? errors.join(" · ") : undefined };
+}
+
+// ---------- pull requests waiting to be merged ----------
+
+const CI_WORDS = { ok: "zelená", bad: "červená", run: "běží", none: "bez kontrol" } as const;
+const files = (n: number) => `${n} ${n === 1 ? "soubor" : n < 5 ? "soubory" : "souborů"}`;
+
+/** How long a pull request has been waiting, in words. */
+export function prWaited(pr: PR, now = Date.now()): string {
+  return duration(Math.max(0, now - Date.parse(pr.createdAt)) / 1000);
+}
+
+function prItem(pr: PR, now: number): Item {
+  const ci = prChecks(pr);
+  const conflict = pr.mergeable === "CONFLICTING";
+  const id = `pr:${pr.repo}#${pr.number}`;
+  const face = prFace(pr, prWaited(pr, now));
+  const actions: ActionSpec[] = [
+    { label: "Prohlédnout změny", primary: true, command: { type: "pr", repo: pr.repo, number: pr.number, action: "review" } },
+  ];
+  // Mergnout is missing where gh would only refuse: a draft or a conflict.
+  if (!pr.isDraft && !conflict)
+    actions.push({
+      label: "Mergnout",
+      confirm: ci.state === "bad" ? "CI je červená. Mergnout i tak?" : "Squashne to do main a smaže větev. Pokračovat?",
+      command: { type: "pr", repo: pr.repo, number: pr.number, action: "merge" },
+    });
+  actions.push({ label: "Zavřít bez mergnutí", confirm: "Opravdu zavřít?", command: { type: "pr", repo: pr.repo, number: pr.number, action: "close" } });
+  actions.push({ label: "Otevřít na GitHubu", command: { type: "open", target: pr.url } });
+  return {
+    id,
+    group: "prs",
+    name: `${pr.repo.split("/")[1] ?? pr.repo} #${pr.number}`,
+    doing: pr.title,
+    about: `Pull request od ${pr.author?.login ?? "někoho"}, čeká na tvoje mergnutí`,
+    when: `otevřený ${ago(Date.parse(pr.createdAt), now)}`,
+    state: face.state,
+    chip: face.chip,
+    character: characterFor(id),
+    facts: [
+      ["Větev", pr.headRefName],
+      ["Autor", pr.author?.login ?? "–"],
+      ["Velikost", `+${pr.additions} −${pr.deletions} · ${files(pr.changedFiles)}`],
+      ["CI", CI_WORDS[ci.state]],
+      ["Sloučitelný", pr.mergeable === "MERGEABLE" ? "ano" : conflict ? "konflikt" : "zjišťuje se"],
+      ["Čeká", prWaited(pr, now)],
+    ],
+    log: { lines: (pr.body || "Bez popisu.").split("\n").slice(0, 80) },
+    actions,
+  };
+}
+
+/**
+ * Every open pull request as a character of its own, so work waiting for Erik is
+ * in the notch and in the crew, not only in the review tab he has to open. The
+ * oldest first: that is the one that has been forgotten the longest.
+ */
+export function prGroup(prs: PR[], now = Date.now()): Group | null {
+  if (!prs.length) return null;
+  const items = [...prs].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).map((pr) => prItem(pr, now));
+  return { id: "prs", title: "Ke kontrole", note: "pull requesty", items };
 }
 
 // ---------- Grok Bot ----------

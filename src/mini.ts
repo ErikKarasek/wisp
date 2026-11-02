@@ -1358,10 +1358,12 @@ export async function startNotch() {
     if (steps.dataset.fail === bad.id) return;
     steps.dataset.fail = bad.id;
     setMode(`fail:${bad.id}`);
-    steps.innerHTML = `<small class="who bad">${escHtml(bad.name)} selhal</small>
+    // A pull request did not fail, its checks did, and nothing here can rerun them.
+    const pr = bad.id.startsWith("pr:");
+    steps.innerHTML = `<small class="who bad">${escHtml(bad.name)}${pr ? `: ${escHtml(bad.chip)}` : " selhal"}</small>
       <div class="step past wrap failtext">${escHtml(bad.doing)}</div>
-      <div class="perm"><button class="go retry">Zkusit znovu</button><button data-open>Otevřít</button></div>`;
-    steps.querySelector(".retry")!.addEventListener("click", () => {
+      <div class="perm">${pr ? "" : `<button class="go retry">Zkusit znovu</button>`}<button class="${pr ? "go" : ""}" data-open>Otevřít</button></div>`;
+    steps.querySelector(".retry")?.addEventListener("click", () => {
       if (bad.id.startsWith("job:")) void emit("relay-cmd", { kind: "job", label: bad.id.slice(4), action: "run" });
       else if (bad.id.startsWith("agent:")) void emit("relay-cmd", { kind: "agent", agentId: bad.id.slice(6), action: "agentInvoke" });
       steps.innerHTML = `<small class="who">${escHtml(bad.name)}</small><div class="step now big-text">Zkouším to znovu…</div>`;
@@ -1596,7 +1598,21 @@ export async function startNotch() {
 
   // The crew: four agents as coloured pills with what they do (agents first, then the busiest others).
   const crewStatus = (i: MiniItem) =>
-    i.state === "run" ? i.doing : i.state === "you" ? "Čeká na tebe" : i.state === "bad" ? "Selhal" : i.state === "done" ? "Hotovo" : i.state === "new" ? "Něco našel" : i.name;
+    // A pull request's own chip says how long it has been waiting, or what is in the way;
+    // that beats "Čeká na tebe", and nothing about it ever "selhalo".
+    i.id.startsWith("pr:")
+      ? i.chip
+      : i.state === "run"
+        ? i.doing
+        : i.state === "you"
+          ? "Čeká na tebe"
+          : i.state === "bad"
+            ? "Selhal"
+            : i.state === "done"
+              ? "Hotovo"
+              : i.state === "new"
+                ? "Něco našel"
+                : i.name;
   // Four: who is busy right now first, then whoever did something most recently.
   function crewPick(s: Snapshot, working?: { id: string }) {
     const busy = s.items.filter((i) => ACTIVE.includes(i.state) && i.id !== working?.id);
