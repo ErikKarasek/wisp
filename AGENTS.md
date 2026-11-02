@@ -71,6 +71,24 @@ The Mac app itself is **not** built in CI. `tauri build` needs a signing identit
 Mac has. The header of `ci.yml` lists what else is deliberately left out (`cargo fmt`, clippy as a
 gate, and `relay/`, which no tsconfig covers) and what would have to change first.
 
+## Building on macOS 27.2
+
+Since macOS 27.2 (Xcode 27.2, ld-27106) a local `cargo check` or `pnpm tauri:build` fails with
+`error[E0463]: can't find crate for serde_derive` (or `tauri_macros`, `phf_macros`, `thiserror_impl`,
+`foreign_types_macros`, `serialize_to_javascript_impl`). Nothing is wrong with the code or the cargo
+cache: Apple's linker leaves the LINKEDIT string pool of those dylibs on a 4-byte boundary and dyld
+refuses to load them. `scripts/rustc-align.py` pads them afterwards; its docstring has the details.
+
+```
+RUSTC_WRAPPER=$PWD/scripts/rustc-align.py pnpm tauri:build
+RUSTC_WRAPPER=$PWD/scripts/rustc-align.py cargo check --manifest-path src-tauri/Cargo.toml
+scripts/rustc-align.py --sweep src-tauri/target   # repair what a build without the wrapper left
+```
+
+Cargo treats a dylib it has already linked as fresh even when dyld cannot load it, and only replays
+its recorded stderr, so the sweep (or deleting the artifacts) is what gets those relinked. Drop all
+of this once Apple fixes the linker: the wrapper leaves a build alone when the offsets are fine.
+
 ## Committing
 
 Commit messages and PR descriptions carry **no** `Co-Authored-By: Claude` and no "Generated with Claude Code" line. The repo shows Erik as the only author. A squash merge copies co-author trailers out of the branch commits, so they have to be gone before the PR is merged.
