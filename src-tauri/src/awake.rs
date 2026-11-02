@@ -475,6 +475,18 @@ fn cpu_seconds(time: &str) -> f64 {
     secs + days * 86_400.0
 }
 
+/// One `ps -o pid=,time=,comm=` row as (pid, time, comm). `ps` pads its columns with runs of
+/// spaces, so pid and time are read as whitespace-separated words and the rest is `comm`
+/// (a path that may itself contain spaces).
+fn split_ps_line(line: &str) -> Option<(&str, &str, &str)> {
+    let line = line.trim_start();
+    let (pid, rest) = line.split_once(char::is_whitespace)?;
+    let rest = rest.trim_start();
+    let (time, comm) = rest.split_once(char::is_whitespace)?;
+    let comm = comm.trim();
+    (!comm.is_empty()).then_some((pid, time, comm))
+}
+
 /// The build tools that are busy right now.
 ///
 /// Per process this is the same story as `cpu_percent`: `ps %cpu` is a whole-life average,
@@ -489,10 +501,9 @@ fn busy_tools() -> Vec<String> {
     let mut seen: BTreeMap<u32, f64> = BTreeMap::new();
     let mut names: BTreeMap<u32, &str> = BTreeMap::new();
     for line in out.lines() {
-        let mut parts = line.trim().splitn(3, char::is_whitespace);
-        let (Some(pid), Some(time), Some(comm)) = (parts.next(), parts.next(), parts.next()) else { continue };
+        let Some((pid, time, comm)) = split_ps_line(line) else { continue };
         let Ok(pid) = pid.parse::<u32>() else { continue };
-        let name = comm.trim().rsplit('/').next().unwrap_or("");
+        let name = comm.rsplit('/').next().unwrap_or("");
         if !TOOLS.iter().any(|(p, _)| *p == name) {
             continue;
         }
@@ -1163,6 +1174,15 @@ pub fn night(since_ms: u64) -> Option<String> {
 #[cfg(test)]
 mod load_tests {
     use super::*;
+
+    #[test]
+    fn ps_line_with_padded_columns() {
+        assert_eq!(split_ps_line("  123    0:00.01 /usr/bin/cargo"), Some(("123", "0:00.01", "/usr/bin/cargo")));
+        assert_eq!(split_ps_line("    1 308:38.44 /sbin/launchd"), Some(("1", "308:38.44", "/sbin/launchd")));
+        assert_eq!(split_ps_line("99 0:01.00 /Applications/Some App/bin/cargo "), Some(("99", "0:01.00", "/Applications/Some App/bin/cargo")));
+        assert_eq!(split_ps_line("  123    0:00.01"), None);
+        assert_eq!(split_ps_line(""), None);
+    }
 
     #[test]
     fn ps_time_column_in_seconds() {
