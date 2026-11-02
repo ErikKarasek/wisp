@@ -3,8 +3,9 @@
 // cause, and every new pull request lands on the phone with merge / close buttons.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { PaperclipSnapshot } from "./model";
-import { checks, type PR } from "./reviews";
+import { prWaited, type PaperclipSnapshot } from "./model";
+import { prReady, type PR } from "./pr";
+import { checks } from "./reviews";
 import { ownTaskId } from "./ownTask";
 
 type Obj = Record<string, any>;
@@ -31,6 +32,10 @@ type WatchState = {
   failing: Record<string, string>;
   /** Pull requests already sent to the phone, as "repo#number". Missing until the first look. */
   prSeen?: string[];
+  /** When each pull request first stood green and mergeable, as "repo#number": that is when the "jde mergnout" message went out. */
+  prReadyAt?: Record<string, number>;
+  /** When each one was last nudged for still waiting after that. */
+  prNudgedAt?: Record<string, number>;
   /** Issues closed because their pull request was merged, so each one is closed and told about once. */
   mergedDone?: string[];
 };
@@ -44,6 +49,8 @@ async function watchState(): Promise<WatchState> {
     told: saved?.told ?? [],
     failing: saved?.failing ?? {},
     prSeen: saved?.prSeen,
+    prReadyAt: saved?.prReadyAt ?? {},
+    prNudgedAt: saved?.prNudgedAt ?? {},
     mergedDone: saved?.mergedDone ?? [],
   };
   return state;
@@ -256,11 +263,33 @@ function prKeyboard(pr: PR) {
   return [row, [{ text: "Otevřít na GitHubu", url: pr.url }]];
 }
 
+function readyText(pr: PR, now: number) {
+  return [`✅ ${short(pr.repo)}#${pr.number}: ${pr.title}`, `Zelená CI, žádný konflikt. Čeká ${prWaited(pr, now)} a jde mergnout.`].join("\n");
+}
+
+function nudgeText(pr: PR, now: number) {
+  return [`⏳ ${short(pr.repo)}#${pr.number}: ${pr.title}`, `Pořád čeká na mergnutí, už ${prWaited(pr, now)}.`].join("\n");
+}
+
+// Telegram off or remote control off: the morning digest and the Mac list still show it.
+const tell = (text: string, pr: PR) =>
+  invoke("telegram_buttons", { text, keyboard: prKeyboard(pr) }).then(() => true).catch(() => false);
+
 /** At the first look, the open ones are sent too, newest first, but no more than this. */
 const FIRST_LOOK = 6;
+/** A green pull request that keeps waiting gets one nudge a day. */
+const NUDGE_MS = 24 * 3_600_000;
+/** Ready and nudge messages in one look, so a backlog doesn't flood the phone. */
+const EXTRA_AT_ONCE = 4;
 
-/** Each new pull request once, with buttons. */
-export async function announcePrs(prs: PR[]) {
+/**
+ * Each new pull request once, with buttons. The first message goes out the moment
+ * the pull request appears, which is before CI has had time to finish, so all it
+ * can usually say is "CI běží". Two more follow: one when the thing is really
+ * green and mergeable, and then a nudge a day for as long as it sits there. Both
+ * of #21 and #22 waited over a week on a single first message.
+ */
+export async function announcePrs(prs: PR[], now = Date.now()) {
   if (!prs.length) return;
   const s = await watchState();
   if (!s.prSeen) {
@@ -271,12 +300,48 @@ export async function announcePrs(prs: PR[]) {
   let changed = false;
   for (const pr of prs) {
     if (pr.isDraft || s.prSeen.includes(prKey(pr))) continue;
-    // Telegram off or remote control off: the morning digest and the Mac list still show it.
-    const sent = await invoke("telegram_buttons", { text: prText(pr), keyboard: prKeyboard(pr) }).then(() => true).catch(() => false);
-    if (!sent) continue;
+    if (!(await tell(prText(pr), pr))) continue;
     s.prSeen.push(prKey(pr));
+    // Already green at the first sighting: this message said so, so no second one.
+    if (prReady(pr)) s.prReadyAt![prKey(pr)] = now;
     changed = true;
   }
+
+  let extra = 0;
+  for (const pr of prs) {
+    const k = prKey(pr);
+    if (!prReady(pr)) {
+      // Red, draft or conflicting: the next time it goes green is news again.
+      if (s.prReadyAt![k] !== undefined || s.prNudgedAt![k] !== undefined) changed = true;
+      delete s.prReadyAt![k];
+      delete s.prNudgedAt![k];
+      continue;
+    }
+    if (extra >= EXTRA_AT_ONCE) continue;
+    const readyAt = s.prReadyAt![k];
+    if (readyAt === undefined) {
+      if (!(await tell(readyText(pr, now), pr))) continue;
+      s.prReadyAt![k] = now;
+      extra += 1;
+      changed = true;
+      continue;
+    }
+    if (now - readyAt < NUDGE_MS || now - (s.prNudgedAt![k] ?? 0) < NUDGE_MS) continue;
+    if (!(await tell(nudgeText(pr, now), pr))) continue;
+    s.prNudgedAt![k] = now;
+    extra += 1;
+    changed = true;
+  }
+
+  // Merged or closed ones: forget them, so a reopened number starts over.
+  const open = new Set(prs.map(prKey));
+  for (const map of [s.prReadyAt!, s.prNudgedAt!])
+    for (const k of Object.keys(map))
+      if (!open.has(k)) {
+        delete map[k];
+        changed = true;
+      }
+
   if (changed) {
     s.prSeen = s.prSeen.slice(-300);
     await save();
