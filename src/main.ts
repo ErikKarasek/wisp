@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { openAgentForm } from "./agentform";
 import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type QuotaWindow, type AgyWindow, type Snapshot, windowName, resetText } from "./broadcast";
-import { renderReviews } from "./reviews";
+import { openReview, renderReviews } from "./reviews";
 import { focusAgent, renderChat } from "./chat";
 import { startPhone } from "./phone";
 import { startRelay } from "./relay";
@@ -22,6 +22,7 @@ import {
   macGroup,
   NEURONS_PER_DAY,
   paperclipGroups,
+  prGroup,
   SEVERITY,
   STATES,
   type ActionSpec,
@@ -34,6 +35,7 @@ import {
   type PaperclipSnapshot,
   type State,
 } from "./model";
+import type { PR } from "./pr";
 import { openJobForm } from "./jobform";
 import { latestRun, LiveRun, stepLine, voiceOf, type Step, type Voice } from "./live";
 import { openRoutineForm } from "./routineform";
@@ -43,7 +45,6 @@ import { sounds } from "./sounds";
 import { openStudio } from "./studio";
 import { ago } from "./time";
 import { announcePrs, closeMergedIssues, loadState, prButton, restoreIssue, saveState, watchAgents } from "./watchdog";
-import type { PR } from "./reviews";
 
 const LOCAL_MS = 10_000; // launchd and Paperclip, both on this Mac
 const CLOUD_MS = 60_000; // Cloudflare and GitHub, rate limits apply
@@ -444,6 +445,8 @@ async function loadCloud() {
   if (cfg.githubRepos?.length) {
     prList = await invoke<Record<string, any>[]>("github_prs", { repos: cfg.githubRepos }).catch(() => []);
     prCount = prList.length;
+    const waiting = prGroup(prList as PR[], Date.now());
+    if (waiting) cloudGroups.push(waiting);
     void announcePrs(prList as PR[]);
     // Merged work still sitting in review: the agent may not close it itself.
     void closeMergedIssues(paperclip, cfg.githubRepos, (t) => toast(t, true));
@@ -700,7 +703,7 @@ function renderSummary() {
 }
 
 function groupLabel(g: Group) {
-  const named: Record<string, string> = { mac: "Mac", cloudflare: "Cloudflare", github: "GitHub", grokbot: "Grok Bot" };
+  const named: Record<string, string> = { mac: "Mac", cloudflare: "Cloudflare", github: "GitHub", grokbot: "Grok Bot", prs: "Pull requesty" };
   // A Paperclip group is named after its company, which is what its note holds.
   return named[g.id] ?? g.note;
 }
@@ -1063,6 +1066,13 @@ async function runCommand(a: ActionSpec) {
     return render();
   }
   if (c.type === "editRoutine") return routineForm(c.companyId, c.routineId);
+  // Reading the changes happens in the review view, which already has the diff.
+  if (c.type === "pr" && c.action === "review") {
+    openReview(`${c.repo}#${c.number}`);
+    filter = "reviews";
+    selected = null;
+    return render();
+  }
   try {
     if (c.type === "open") {
       if (/^https?:/.test(c.target)) await openUrl(c.target);
@@ -1071,13 +1081,14 @@ async function runCommand(a: ActionSpec) {
     }
     if (c.type === "job") await invoke("job_action", { label: c.label, action: c.action });
     else if (c.type === "paperclip") await invoke("paperclip_action", { kind: c.kind, id: c.id });
+    else if (c.type === "pr") await invoke("github_pr_action", { repo: c.repo, number: c.number, action: c.action });
     else await invoke("github_action", { repo: c.repo, workflowId: c.workflowId, action: c.action });
     toast(`${a.label}: hotovo`, true);
   } catch (e) {
     toast(String(e));
   }
   // The sources need a moment before the new state shows.
-  const cloud = c.type === "github";
+  const cloud = c.type === "github" || c.type === "pr";
   setTimeout(() => void refresh(cloud), 1000);
   setTimeout(() => void refresh(cloud), cloud ? 6000 : 3000);
 }
@@ -1140,17 +1151,20 @@ async function onChanges() {
     else if (alarming.length) sounds.you();
     else if (changed.some((i) => i.state === "done")) sounds.done();
   }
-  if (!alarming.length) return;
+  // A pull request gets its own message with merge and close buttons (announcePrs),
+  // so here it only peeks out of the notch; a line of plain text would say it twice.
+  const tell = alarming.filter((i) => !i.id.startsWith("pr:"));
+  if (!tell.length) return;
 
   const title = (i: Item) => (i.state === "bad" ? `${i.name}: selhal` : `${i.name} na tebe čeká`);
   if (cfg.notifications) {
     if (notifyAllowed === null) {
       notifyAllowed = (await isPermissionGranted().catch(() => false)) || (await requestPermission().catch(() => "denied")) === "granted";
     }
-    if (notifyAllowed) for (const i of alarming.slice(0, 3)) sendNotification({ title: title(i), body: i.doing });
+    if (notifyAllowed) for (const i of tell.slice(0, 3)) sendNotification({ title: title(i), body: i.doing });
   }
   if (cfg.telegram.enabled && cfg.telegram.chat) {
-    const text = ["Wisp", ...alarming.map((i) => `• ${title(i)}\n  ${i.doing}`)].join("\n");
+    const text = ["Wisp", ...tell.map((i) => `• ${title(i)}\n  ${i.doing}`)].join("\n");
     void invoke("telegram_send", { chat: cfg.telegram.chat, text }).catch((e) => toast(`Telegram: ${e}`));
   }
 }
@@ -1224,6 +1238,12 @@ function agentForm(companyId: string, agentId?: string) {
 
 // ---------- panel and notch ----------
 
+/** How many are in which mood, for the notch's summary and the phone's header. */
+function countStates(items: Item[]) {
+  const n = (states: State[]) => items.filter((i) => states.includes(i.state)).length;
+  return { attention: n(["bad", "you", "new"]), run: n(["run"]), sleep: n(["sleep"]), ok: n(["ok", "done"]), off: n(["off"]) };
+}
+
 function snapshot(): Snapshot {
   const items = allItems();
   const mini = (i: Item): MiniItem => ({
@@ -1237,10 +1257,9 @@ function snapshot(): Snapshot {
     character: i.character,
     ask: i.ask,
   });
-  const n = (states: State[]) => items.filter((i) => states.includes(i.state)).length;
   return {
     items: items.map(mini),
-    counts: { attention: n(["bad", "you", "new"]), run: n(["run"]), sleep: n(["sleep"]), ok: n(["ok", "done"]), off: n(["off"]) },
+    counts: countStates(items),
     news,
     at: newsAt,
     live: liveNow,
@@ -1608,10 +1627,13 @@ async function start() {
     companies: () => (paperclip?.online ? paperclip.companies : []),
     overview: () => {
       const s = snapshot();
+      // The phone has a screen of its own for pull requests, with the diff and the
+      // buttons, so they stay out of its crew list and out of its counts.
+      const forPhone = allItems().filter((i) => i.group !== "prs");
       return {
         focus,
-        counts: s.counts,
-        items: allItems().map((i) => ({
+        counts: countStates(forPhone),
+        items: forPhone.map((i) => ({
           id: i.id,
           name: i.name,
           state: i.state,
@@ -1631,7 +1653,7 @@ async function start() {
         looks: { bot: cfg.notchPrefs.bot, claude: cfg.notchPrefs.claude, items: cfg.assignments },
         claude: claudeLook(),
         // Where things run, by name, so the phone can group them like the sidebar.
-        groups: groups.map((g) => ({ id: g.id, name: groupLabel(g) })),
+        groups: groups.filter((g) => g.id !== "prs").map((g) => ({ id: g.id, name: groupLabel(g) })),
         history: history.slice(-30).reverse().map((h) => ({ id: h.id, name: h.name, state: h.state, at: h.at, text: h.text })),
         prs: prList.map((pr) => {
           const all: Record<string, string>[] = pr.statusCheckRollup ?? [];

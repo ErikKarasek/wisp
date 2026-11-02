@@ -57,6 +57,21 @@ const ASKING_AGENT = {
   ask: { companyId: "c", agentId: "b", issueId: "i1", title: "Mám to vydat?" },
 };
 
+/** A pull request waiting to be merged: its own character in the crew. */
+const PR_WAITING = {
+  id: "pr:ErikKarasek/wisp#22",
+  name: "wisp #22",
+  state: "you",
+  chip: "čeká 6 dní",
+  doing: "Fix busy_tools parsing of space-padded ps rows",
+  when: "otevřený 27. 10. 19:03",
+  where: "Ke kontrole",
+  character: { color: "#e8c46a" },
+};
+
+/** The same, with red checks: nothing here can rerun them, so it offers no retry. */
+const PR_RED = { ...PR_WAITING, id: "pr:ErikKarasek/job-mail#4", name: "job-mail #4", state: "bad", chip: "červená CI" };
+
 const BAD_AGENT = {
   id: "agent:a",
   name: "Hlídač závislostí",
@@ -337,6 +352,37 @@ async function main() {
   const poNakladacce = await page.evaluate(() => document.querySelector(".steps").innerText);
   check("nakládačka: karta se nakreslí", nakladacka.includes("nakládačku"), nakladacka.split("\n")[0]);
   check("nakládačka: povolení přes ni po odkliknutí nezůstane viset", kliknuto9 && !poNakladacce.includes("CHCE SPUSTIT"), `kliknuto=${kliknuto9} ${poNakladacce.split("\n")[0]}`);
+
+  // ---- 10. A pull request waiting to be merged is in the crew ---------------
+  // The whole point of giving a pull request a character: it has to be visible without
+  // opening the main window. The pill says how long it has waited, not "Čeká na tebe",
+  // and a click opens that card on the Mac.
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot([PR_WAITING]));
+  await settle();
+  const pill = await page.evaluate(() => {
+    const p = document.querySelector('.crew .pill[data-id="pr:ErikKarasek/wisp#22"]');
+    return p && { name: p.querySelector("b")?.innerText, small: p.querySelector("small")?.innerText, faces: document.querySelectorAll(".faces4 > *").length };
+  });
+  await page.click('.crew .pill[data-id="pr:ErikKarasek/wisp#22"]');
+  await settle();
+  const otevreno = await page.evaluate(() => window.__calls.filter((c) => c.args?.event === "dispecink-open").at(-1)?.args?.payload);
+  check("PR: pilulka v posádce říká, jak dlouho čeká", pill?.name === "wisp #22" && pill?.small === "čeká 6 dní", JSON.stringify(pill));
+  check("PR: u zavřeného notche má svoji tvář", pill?.faces === 1, JSON.stringify(pill));
+  check("PR: kliknutí otevře jeho kartu na Macu", otevreno?.id === "pr:ErikKarasek/wisp#22", JSON.stringify(otevreno));
+
+  // ---- 11. A red pull request does not pretend it can be rerun --------------
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot([PR_RED]));
+  await settle();
+  const cervenyPr = await page.evaluate(() => ({
+    head: document.querySelector(".steps").innerText.split("\n")[0],
+    buttons: [...document.querySelectorAll(".steps .perm button")].map((b) => b.innerText),
+  }));
+  check("PR s červenou CI: karta neříká, že selhal", cervenyPr.head.includes("ČERVENÁ CI") && !cervenyPr.head.includes("SELHAL"), JSON.stringify(cervenyPr));
+  check("PR s červenou CI: žádné „Zkusit znovu“, které nic neudělá", !cervenyPr.buttons.includes("Zkusit znovu") && cervenyPr.buttons.includes("Otevřít"), JSON.stringify(cervenyPr));
 
   check("stránka nespadla", errors.length === 0, errors.join("\n"));
 
