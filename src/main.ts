@@ -273,14 +273,20 @@ async function guardClaude(u: ClaudeUsage | null) {
       // One un-paused by hand in the meantime is already running: only wake the ones still asleep.
       const back = agents.filter((a) => paused.includes(a.id) && a.status === "paused");
       const since = state.since;
+      const caught: string[] = [];
       for (const a of back) {
         await invoke("paperclip_action", { kind: "agentResume", id: a.id }).catch(() => {});
         const at = since[a.id] ?? since["*"];
-        if (at) await unstrand(a.id, at);
+        if (at) {
+          await unstrand(a.id, at);
+          // Before the wake-up, so the runs it fires are work the agent finds waiting.
+          caught.push(...(await rerunRoutines(a.id, at)));
+        }
         // Woken right away, so the tasks it left half done get finished.
         await invoke("paperclip_action", { kind: "agentInvoke", id: a.id }).catch(() => {});
       }
       if (back.length) warn(`Limit Claude se obnovil: ${back.map((a) => a.name).join(", ")} zase pracuje a dodělá rozdělané úkoly.`);
+      if (caught.length) warn(`Rutiny, na které limit nestačil, jsem pustil znovu: ${caught.join(", ")}.`);
       state.paused = [];
       state.since = {};
       await guardSave();
@@ -305,6 +311,37 @@ async function unstrand(agentId: string, since: string) {
     const stranded = issues.filter((x) => x.assigneeAgentId === agentId && x.status === "blocked" && Date.parse(x.blockedTransitionAt) >= Date.parse(since));
     for (const i of stranded) await restoreIssue(agentId, i.id, "Wisp: the Claude limit guard paused the agent; it is resumed now.");
   }
+}
+
+/**
+ * A routine whose run fires while the guard holds the agent never starts at all: Paperclip turns the dispatch down
+ * ("Agent is not invokable in its current state"), and with catch-up set to skip what was missed, nothing fires it
+ * again. No task comes out of such a run, so `unstrand` has nothing to find. So after a resume every routine the
+ * pause shot down runs once more, instead of waiting a whole week for its next turn.
+ */
+async function rerunRoutines(agentId: string, since: string): Promise<string[]> {
+  if (!paperclip?.online) return [];
+  type Obj = Record<string, any>;
+  const caught: string[] = [];
+  for (const c of paperclip.companies) {
+    if (!c.agents.some((a) => a.id === agentId)) continue;
+    for (const r of c.routines.filter((x) => x.assigneeAgentId === agentId && x.status === "active")) {
+      const detail = await invoke<Obj>("paperclip_request", { method: "GET", path: `/routines/${r.id}`, body: null }).catch(() => null);
+      const recent = detail?.recentRuns;
+      const runs: Obj[] = Array.isArray(recent) ? recent : [];
+      const shot = runs.some(
+        (run) =>
+          run.status === "failed" &&
+          String(run.failureReason ?? "").includes("not invokable") &&
+          Date.parse(run.triggeredAt) >= Date.parse(since),
+      );
+      if (!shot) continue;
+      // Once per routine, however many of its runs the pause swallowed.
+      await invoke("paperclip_action", { kind: "routineRun", id: r.id }).catch(() => {});
+      caught.push(String(r.title ?? "rutina"));
+    }
+  }
+  return caught;
 }
 
 // ---------- every morning: what Fixer did overnight ----------

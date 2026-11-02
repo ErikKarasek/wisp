@@ -131,6 +131,7 @@ const ALLOWED: &[(&str, &str)] = &[
     ("POST", "/companies/{id}/secrets"),
     ("POST", "/secrets/{id}/rotate"),
     // routines and their schedules
+    ("GET", "/routines/{id}"),
     ("POST", "/companies/{id}/routines"),
     ("PATCH", "/routines/{id}"),
     ("POST", "/routines/{id}/triggers"),
