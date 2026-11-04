@@ -647,21 +647,16 @@ pub fn start(app: &AppHandle) {
     if key().is_none() {
         eprintln!("Claude Code hooks: no secret, so /cc/ stays closed");
     }
-    let server = match tiny_http::Server::http(("127.0.0.1", PORT)) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Claude Code hooks: port {PORT} is taken ({e})");
-            return;
-        }
-    };
-    // The key file from older versions was readable by every account on the Mac.
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(dirs_config().join("cc-hook-key"), std::fs::Permissions::from_mode(0o600));
-    }
-    follow_transcripts(app.clone());
     let app = app.clone();
+    // The bind waits for the port, so it cannot sit on the thread that is still setting the app up.
     std::thread::spawn(move || {
+        let Some(server) = bind() else { return };
+        // The key file from older versions was readable by every account on the Mac.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(dirs_config().join("cc-hook-key"), std::fs::Permissions::from_mode(0o600));
+        }
+        follow_transcripts(app.clone());
         for req in server.incoming_requests() {
             // Each request on its own thread, so one slow sender can't hold up the
             // rest; a cap keeps a flood from spawning without end.
@@ -677,6 +672,37 @@ pub fn start(app: &AppHandle) {
             });
         }
     });
+}
+
+/// Replacing the app leaves the old copy holding the port for a few seconds. Giving up on the
+/// first failed bind left every local script without /notify until the next launch, with nothing
+/// to show for it but a line on stderr, so the bind is retried. Once the wait is this long,
+/// something else owns the port and waiting longer would not help.
+const BIND_WAIT: Duration = Duration::from_secs(2);
+const BIND_TRIES: u32 = 30;
+
+fn bind() -> Option<tiny_http::Server> {
+    for attempt in 1..=BIND_TRIES {
+        match tiny_http::Server::http(("127.0.0.1", PORT)) {
+            Ok(server) => {
+                if attempt > 1 {
+                    eprintln!("Claude Code hooks: port {PORT} came free on try {attempt}");
+                }
+                return Some(server);
+            }
+            // Only the first failure is worth a line; the rest would be the same one thirty times.
+            Err(e) => {
+                if attempt == 1 {
+                    eprintln!("Claude Code hooks: port {PORT} is taken ({e}), waiting for it");
+                }
+                if attempt < BIND_TRIES {
+                    std::thread::sleep(BIND_WAIT);
+                }
+            }
+        }
+    }
+    eprintln!("Claude Code hooks: port {PORT} stayed taken, so /notify and /cc/ are closed");
+    None
 }
 
 /// Requests in flight, and how many may be at once (permission prompts wait for minutes).
