@@ -262,7 +262,7 @@ export function jobItem(j: Job, now = Date.now()): Item {
   // run.sh's third argument is the model, or several separated by commas: it falls through
   // to the next one when a bucket runs out. Claude there is AI Pro's own Claude, not Erik's
   // subscription, and AI Pro meters Claude separately from Gemini, so one chain survives both.
-  const chain = (/run\.sh\s+\S+\s+\S+\s+(\S+)/.exec(cmd)?.[1] ?? "gemini-3.1-pro-high").split(",");
+  const chain = (/run\.sh\s+\S+\s+\S+\s+(\S+)/.exec(cmd)?.[1] ?? "gemini-3.8-flash-high").split(",");
   // "claude-cli" is not an Antigravity model: it is Erik's own Claude subscription.
   const modelName = (m: string) => (m === "claude-cli" ? "claude CLI (tvoje předplatné)" : m);
   const model = engine === "Gemini" ? chain[0] : null;
