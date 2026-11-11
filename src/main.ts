@@ -1708,6 +1708,7 @@ async function start() {
       return [
         `${n(["run"])} pracuje, ${n(["ok", "done"])} v pořádku, ${n(["sleep"])} spí.`,
         waiting.length ? `Čeká na tebe: ${waiting.map((i) => i.name).join(", ")}.` : "Nic na tebe nečeká.",
+        ...(prList.length ? [`Na mergnutí ${prList.length} PR: /pr je pošle s tlačítky, /mergni smerguje zelené.`] : []),
       ];
     },
     limits: () => {
@@ -1717,6 +1718,7 @@ async function start() {
       for (const w of geminiQuota) out.push(`${w.group === "Gemini" ? "Gemini" : "Claude v AI Pro"}: ${windowName(w.windowSecs)} ${w.percent} %`);
       return out;
     },
+    prs: () => prList as PR[],
   });
   setInterval(() => void refresh(false), LOCAL_MS);
   setInterval(() => void refresh(true), CLOUD_MS);

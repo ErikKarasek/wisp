@@ -230,6 +230,12 @@ pub fn start_listening(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut offset: i64 = 0;
         let mut menu_set = false;
+        // Why the phone goes unanswered, said out loud. The menu under "/" is set with the token
+        // alone, so the commands stand there even when not a single message ever reaches us, and
+        // the silence looks like a broken command. Each reason goes out once, so a bot that stays
+        // broken does not turn into a stream of complaints.
+        let mut told: Option<String> = None;
+        let mut told_chat: Option<String> = None;
         let long = reqwest::Client::builder().timeout(Duration::from_secs(65)).build();
         let Ok(long) = long else { return };
         loop {
@@ -246,6 +252,8 @@ pub fn start_listening(app: &AppHandle) {
                         { "command": "stav", "description": "Co se děje: kdo pracuje, co čeká na tebe" },
                         { "command": "agenti", "description": "Agenti a jak jim dát úkol" },
                         { "command": "limity", "description": "Limity Claude, ChatGPT a Gemini" },
+                        { "command": "pr", "description": "Otevřené pull requesty i s tlačítky (/pr wisp)" },
+                        { "command": "mergni", "description": "Mergnout všechny zelené naráz (/mergni wisp)" },
                         { "command": "mac", "description": "Baterie, teplota a jestli Mac drží vzhůru" },
                         { "command": "vzhuru", "description": "Držet Mac vzhůru (třeba /vzhuru 2h, /vzhuru vyp)" },
                         { "command": "viko", "description": "Běžet i se zavřeným víkem (/viko vyp)" },
@@ -268,11 +276,29 @@ pub fn start_listening(app: &AppHandle) {
                     continue;
                 }
             };
-            if v["error_code"] == json!(409) {
-                // Another program (job-mail's bot) takes this bot's updates.
-                let _ = app.emit("tg-conflict", ());
-                tokio_sleep(300).await;
+            if v["ok"] != json!(true) {
+                // 409 is another program on the same token, or a webhook set on the bot: either
+                // way the messages go elsewhere and nothing here will ever see them.
+                let conflict = v["error_code"] == json!(409);
+                let why = v["description"].as_str().unwrap_or("Telegram neodpověděl, jak má").to_string();
+                if told.as_deref() != Some(why.as_str()) {
+                    let hint = if conflict {
+                        "\n\nTenhle token poslouchá ještě někdo jiný, nebo je na botovi webhook. Dokud to trvá, tvoje zprávy ani tlačítka ke mně nedojdou. Dej Wispu vlastního bota, nebo tomu druhému programu jeho vlastního."
+                    } else {
+                        ""
+                    };
+                    let _ = send_quiet(&r.token, &r.chat, &format!("⚠️ Neslyším tě: {why}{hint}")).await;
+                    told = Some(why);
+                }
+                if conflict {
+                    let _ = app.emit("tg-conflict", ());
+                }
+                tokio_sleep(if conflict { 300 } else { 10 }).await;
                 continue;
+            }
+            if told.is_some() {
+                told = None;
+                let _ = send_quiet(&r.token, &r.chat, "✅ Už tě zase slyším.").await;
             }
             for u in v["result"].as_array().into_iter().flatten() {
                 offset = offset.max(u["update_id"].as_i64().unwrap_or(0) + 1);
@@ -292,7 +318,16 @@ pub fn start_listening(app: &AppHandle) {
                         let _ = app.emit_to("main", "tg-pr", json!({ "data": data, "messageId": q["message"]["message_id"] }));
                     }
                 } else if let Some(m) = u.get("message") {
-                    if m["chat"]["id"].as_i64().map(|i| i.to_string()) != Some(r.chat.clone()) {
+                    let from = m["chat"]["id"].as_i64().map(|i| i.to_string());
+                    if from != Some(r.chat.clone()) {
+                        // A message from a chat the settings do not point at was dropped without a
+                        // word, and from the phone that is the same silence as a broken command.
+                        if let Some(id) = from {
+                            if told_chat.as_deref() != Some(id.as_str()) {
+                                let _ = send_quiet(&r.token, &r.chat, &format!("Psal jsi mi z chatu {id}, ale poslouchám jen {}. Přepni chat v nastavení Telegramu u Macu.", r.chat)).await;
+                                told_chat = Some(id);
+                            }
+                        }
                         continue;
                     }
                     let text = m["text"].as_str().unwrap_or("").trim().to_string();
@@ -305,9 +340,6 @@ pub fn start_listening(app: &AppHandle) {
                         json!({ "text": text, "replyTo": m["reply_to_message"]["text"].as_str().unwrap_or("") }),
                     );
                 }
-            }
-            if v["ok"] != json!(true) {
-                tokio_sleep(10).await;
             }
         }
     });

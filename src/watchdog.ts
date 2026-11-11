@@ -4,7 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { prWaited, type PaperclipSnapshot } from "./model";
-import { prReady, type PR } from "./pr";
+import { prPick, prReady, type PR } from "./pr";
 import { checks } from "./reviews";
 import { ownTaskId } from "./ownTask";
 
@@ -424,8 +424,103 @@ async function closeMerged(snap: PaperclipSnapshot | null, repos: string[], note
   }
 }
 
+// ---------- the buttons on demand: /pr and /mergni ----------
+
+/** Pull requests sent as their own message in one answer, so /pr in a backlog is not a flood. */
+const ON_DEMAND = 6;
+
+/**
+ * `/pr` from the phone: the open pull requests again, each as its own message with its
+ * own buttons. The announcement goes out once and then scrolls away in the chat, or its
+ * keyboard is already spent, and the phone has nothing left to tap; this brings the
+ * tapping back whenever he asks for it.
+ */
+export async function prMessages(prs: PR[], arg: string, plain: Plain) {
+  const picked = prPick(prs, arg);
+  const named = arg.trim();
+  if (!picked.length) {
+    return void plain(named ? `Na „${named}“ nemám nic otevřeného. Samotné /pr pošle všechny.` : "Nic ke kontrole, žádný otevřený pull request.");
+  }
+  const ready = picked.filter(prReady);
+  const head = `Otevřené: ${picked.length}, mergnout jde ${ready.length ? ready.length : "zatím ani jeden"}.`;
+  await plain(ready.length > 1 ? `${head}\nVšechny zelené naráz: /mergni` : head);
+  for (const pr of picked.slice(0, ON_DEMAND)) await tell(prText(pr), pr, plain);
+  if (picked.length > ON_DEMAND) await plain(`…a dalších ${picked.length - ON_DEMAND}. Napiš /pr a jméno repa a pošlu jen jeho.`);
+}
+
+/**
+ * What the "Ano, mergnout" button on a `/mergni` message stands for, so a tap merges
+ * exactly the pull requests that message listed, not whatever happens to be green a
+ * few minutes later. Keyed by the message, because the answer comes back with its id.
+ */
+let pendingAll: { messageId: number; keys: string[] } | null = null;
+
+/**
+ * `/mergni` from the phone: merge everything that is green in one go, after one
+ * question. A single one gets its usual card instead, which asks the same thing
+ * in the same place as always.
+ */
+export async function prMergeAsk(prs: PR[], arg: string, plain: Plain) {
+  const picked = prPick(prs, arg);
+  const ready = picked.filter(prReady);
+  const named = arg.trim();
+  if (!ready.length) {
+    if (!picked.length) return void plain(named ? `Na „${named}“ nemám nic otevřeného.` : "Není co mergnout, nic otevřeného.");
+    await plain(`Zelený a bez konfliktu není ani jeden z ${picked.length}. Posílám je, ať vidíš proč:`);
+    for (const pr of picked.slice(0, ON_DEMAND)) await tell(prText(pr), pr, plain);
+    return;
+  }
+  if (ready.length === 1) return void tell(prText(ready[0]), ready[0], plain);
+  const text = [`Mergnout do main všech ${ready.length}?`, "", ...ready.map((pr) => `• ${short(pr.repo)}#${pr.number}: ${pr.title}`)].join("\n");
+  const keyboard = [[
+    { text: `Ano, mergnout (${ready.length})`, callback_data: "pr:A" },
+    { text: "Nechat být", callback_data: "pr:z" },
+  ]];
+  const messageId = await invoke<number>("telegram_buttons", { text, keyboard }).catch(() => null);
+  if (messageId == null) {
+    // Remote control off: the buttons would have nobody to answer them.
+    return void plain(`${text}\n\nTlačítka nejdou, Wisp má vypnuté ovládání z telefonu. Zapni ho u Macu v nastavení Telegramu.`);
+  }
+  pendingAll = { messageId, keys: ready.map(prKey) };
+}
+
+/** The "Ano, mergnout" button under a `/mergni` message: merge them one after another. */
+async function mergeAll(messageId: number, prs: PR[], done: (text: string) => void) {
+  const edit = (text: string, keyboard: object[] = []) => invoke("telegram_edit", { messageId, text, keyboard }).catch(() => {});
+  // A restarted app forgets what the question stood for; then merge what stands green now and say so.
+  const asked = pendingAll?.messageId === messageId ? pendingAll.keys : null;
+  pendingAll = null;
+  const picked = (asked ? asked.map((k) => prs.find((p) => prKey(p) === k)) : prs.filter(prReady)).filter(
+    (p): p is PR => !!p && prReady(p),
+  );
+  if (!picked.length) return void edit("Už není co mergnout, mezitím se to změnilo.");
+  const merged: string[] = [];
+  const failed: string[] = [];
+  for (const pr of picked) {
+    await edit(`⏳ Merguju ${short(pr.repo)}#${pr.number}… (${merged.length + failed.length + 1} z ${picked.length})`);
+    try {
+      await invoke("github_pr_action", { repo: pr.repo, number: pr.number, action: "merge" });
+      merged.push(`${short(pr.repo)}#${pr.number}`);
+    } catch (e) {
+      failed.push(`${short(pr.repo)}#${pr.number}: ${String(e).slice(0, 150)}`);
+    }
+  }
+  const lines = [
+    merged.length ? `✅ Mergnuto: ${merged.join(", ")}.` : "Nemergnul jsem nic.",
+    ...(failed.length ? ["", "❌ Nepovedlo se:", ...failed.map((f) => `• ${f}`)] : []),
+    ...(asked ? [] : ["", "Wisp se mezitím restartoval, tak jsem mergnul to, co stálo zelené teď."]),
+  ];
+  await edit(lines.join("\n"));
+  if (merged.length) done(`Z Telegramu mergnuto: ${merged.join(", ")}.`);
+}
+
 /** A button under a pull request message: ask "really?" first, then merge or close. */
 export async function prButton(data: string, messageId: number, prs: PR[], done: (text: string) => void) {
+  if (data === "pr:z") {
+    pendingAll = null;
+    return void invoke("telegram_edit", { messageId, text: "Nechávám být. Až budeš chtít, napiš /mergni.", keyboard: [] }).catch(() => {});
+  }
+  if (data === "pr:A") return void mergeAll(messageId, prs, done);
   const m = /^pr:([mcMCb]):([\w.-]+\/[\w.-]+)#(\d+)$/.exec(data);
   if (!m) return;
   const [, act, repo, num] = m;
