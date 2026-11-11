@@ -5,6 +5,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { pc } from "./live";
+import { prMergeAsk, prMessages } from "./watchdog";
+import type { PR } from "./pr";
 import type { Awake } from "./awake";
 
 type Obj = Record<string, any>;
@@ -16,6 +18,8 @@ export type PhoneContext = {
   /** "Všechno v pořádku, 2 čekají na tebe…" and the limits, as lines. */
   status: () => string[];
   limits: () => string[];
+  /** The open pull requests, as the last cloud look left them. */
+  prs: () => PR[];
 };
 
 const plain = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
@@ -29,6 +33,9 @@ const HELP = [
   "/stav – kdo pracuje a co čeká na tebe",
   "/agenti – kdo tu je a na čem běží",
   "/limity – Claude, ChatGPT, Gemini",
+  "",
+  "/pr – otevřené pull requesty znovu, i s tlačítky (/pr wisp jen z jednoho repa)",
+  "/mergni – mergnout všechny zelené naráz, na jedno potvrzení (/mergni wisp, /mergni #22)",
   "",
   "/kde – kde jsi u Macu skončil a co dál",
   "/noc projekt: úkol – Claude to udělá, až budeš pryč (v noci nebo po 20 min), a pošle PR. /noc hned … začne hned, /noc ukáže frontu",
@@ -74,6 +81,12 @@ export function startPhone(ctx: PhoneContext) {
     const chat = ctx.chat();
     if (chat) void invoke("telegram_send", { chat, text }).catch(() => {});
   };
+  /** The same, but it says whether the message went out: that is what the buttons fall back to. */
+  const sent = async (text: string) => {
+    const chat = ctx.chat();
+    if (!chat) return false;
+    return invoke("telegram_send", { chat, text }).then(() => true).catch(() => false);
+  };
   const agents = (): Obj[] => ctx.companies().flatMap((c) => c.agents.filter((a) => a.status !== "terminated").map((a) => ({ ...a, companyId: c.company.id })));
   const wake = (id: string) => invoke("paperclip_action", { kind: "agentInvoke", id }).catch(() => {});
 
@@ -83,6 +96,17 @@ export function startPhone(ctx: PhoneContext) {
       if (/^\/(start|pomoc|help)\b/i.test(text)) return send(HELP);
       if (/^\/stav\b/i.test(text)) return send(ctx.status().join("\n"));
       if (/^\/limity\b/i.test(text)) return send(ctx.limits().join("\n") || "Limity zatím nemám načtené.");
+      // Pull requests: the buttons again whenever he asks, and all the green ones at once.
+      const pr = /^\/(pr|prs|mergni|mergnout|merge)(?:@\w+)?\b\s*([\s\S]*)$/i.exec(text);
+      if (pr) {
+        // Awaited, so a failure lands in the catch below and says so. Fired off with `void`
+        // it would reject into nothing and the phone would just sit there in silence.
+        const list = ctx.prs();
+        const arg = pr[2] ?? "";
+        if (/^prs?$/i.test(pr[1])) await prMessages(list, arg, sent);
+        else await prMergeAsk(list, arg, sent);
+        return;
+      }
       // The night shift: Claude works on a task while Erik is away (night.rs).
       const noc = /^\/noc\b\s*([\s\S]*)$/i.exec(text);
       if (noc) return send(await invoke<string>("night_command", { arg: noc[1] }));

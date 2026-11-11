@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { prChecks, prFace, prReady, type PR } from "./pr.ts";
+import { prChecks, prFace, prPick, prReady, type PR } from "./pr.ts";
 
 type Check = PR["statusCheckRollup"][number];
 const green: Check = { name: "CI", status: "COMPLETED", conclusion: "SUCCESS" };
@@ -61,4 +61,24 @@ test("face: waiting on Erik says how long, the rest says why not", () => {
   assert.deepEqual(prFace(pr({ isDraft: true }), "1 den"), { state: "sleep", chip: "rozdělaný" });
   // A draft with red checks still only sleeps: the author is still writing it.
   assert.equal(prFace(pr({ isDraft: true, statusCheckRollup: [red] }), "1 den").state, "sleep");
+});
+
+test("pick: what a /pr or /mergni from the phone means", () => {
+  const green1 = pr({ repo: "ErikKarasek/wisp", number: 22, title: "Notch", createdAt: "2026-11-01T00:00:00Z" });
+  const green2 = pr({ repo: "ErikKarasek/nexus-grind", number: 7, title: "Supabase migrace", createdAt: "2026-10-01T00:00:00Z" });
+  const redOne = pr({ repo: "ErikKarasek/wisp", number: 30, title: "Hlasem", statusCheckRollup: [red] });
+  const draft = pr({ repo: "ErikKarasek/wisp", number: 31, isDraft: true });
+  const all = [redOne, green1, draft, green2];
+  // Mergeable first, the one waiting longest ahead of the newer one, and never a draft.
+  assert.deepEqual(prPick(all).map((p) => p.number), [7, 22, 30]);
+  assert.deepEqual(prPick(all, "vše").map((p) => p.number), [7, 22, 30]);
+  // A repo name, with or without diacritics and case; a number with or without the hash.
+  assert.deepEqual(prPick(all, "WISP").map((p) => p.number), [22, 30]);
+  assert.deepEqual(prPick(all, "#7").map((p) => p.number), [7]);
+  assert.deepEqual(prPick(all, "7").map((p) => p.number), [7]);
+  // The title counts too, so he does not have to remember the number.
+  assert.deepEqual(prPick(all, "migrace").map((p) => p.number), [7]);
+  assert.deepEqual(prPick(all, "nic takoveho"), []);
+  // A draft is not picked even when it is named outright.
+  assert.deepEqual(prPick(all, "31"), []);
 });
