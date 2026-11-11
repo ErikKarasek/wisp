@@ -54,3 +54,22 @@ export function prFace(pr: PR, waited: string): { state: "sleep" | "bad" | "run"
   if (ci.state === "run") return { state: "run", chip: "CI běží" };
   return { state: "you", chip: `čeká ${waited}` };
 }
+
+/**
+ * Which pull requests a `/pr` or `/mergni` from the phone means. Without an argument
+ * everything that is open, and "vše" the same; anything else matches the repo's name,
+ * the number or the title, so `/mergni wisp` and `/mergni #22` both land. A draft is
+ * never picked: it waits on whoever opened it, not on Erik.
+ *
+ * The ones that can be merged come first, and inside each half the one waiting longest,
+ * because that is the order they should be dealt with.
+ */
+export function prPick(prs: PR[], arg = ""): PR[] {
+  const plain = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  const a = plain(arg).trim().replace(/^#/, "");
+  const open = prs.filter((p) => !p.isDraft);
+  const picked = !a || /^(vse|vsechno|vsechny|all)$/.test(a)
+    ? open
+    : open.filter((p) => String(p.number) === a || plain(p.repo.split("/").pop() ?? "").includes(a) || plain(p.title).includes(a));
+  return [...picked].sort((x, y) => Number(prReady(y)) - Number(prReady(x)) || Date.parse(x.createdAt) - Date.parse(y.createdAt));
+}
