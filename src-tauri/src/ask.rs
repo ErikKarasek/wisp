@@ -50,7 +50,7 @@ pub fn ask_report(report: &str, thread: &str, question: &str) -> Result<String, 
          smíš je číst, ale nic nespouštěj a nic neměň."
     );
     let out = Command::new(agy)
-        .args(["-p", &prompt, "--model", "gemini-3.1-pro-low", "--output-format", "json", "--print-timeout", "4m"])
+        .args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "4m"])
         .current_dir(&dev)
         .output()
         .map_err(|e| e.to_string())?;
