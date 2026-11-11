@@ -38,6 +38,8 @@ type WatchState = {
   prNudgedAt?: Record<string, number>;
   /** Issues closed because their pull request was merged, so each one is closed and told about once. */
   mergedDone?: string[];
+  /** Whether the "buttons are off" note already went out, so it goes out once per outage, not under every pull request. */
+  noButtonsTold?: boolean;
 };
 let state: WatchState | null = null;
 async function watchState(): Promise<WatchState> {
@@ -52,6 +54,7 @@ async function watchState(): Promise<WatchState> {
     prReadyAt: saved?.prReadyAt ?? {},
     prNudgedAt: saved?.prNudgedAt ?? {},
     mergedDone: saved?.mergedDone ?? [],
+    noButtonsTold: saved?.noButtonsTold ?? false,
   };
   return state;
 }
@@ -274,13 +277,36 @@ function nudgeText(pr: PR, now: number) {
 /** Telegram without the buttons, for when the phone cannot answer them. */
 type Plain = (text: string) => Promise<boolean>;
 
+/**
+ * Why the buttons are missing. Without this, a message with nothing to tap looks
+ * like a bug in Wisp; #35 started because the switch had been off for weeks and
+ * nothing ever said so.
+ */
+export const BUTTONS_OFF = "Tlačítka nejdou, Wisp má u Macu vypnuté ovládání z telefonu. Zapni ho v nastavení Telegramu a pak je u pull requestů zase uvidíš.";
+
 // Remote control off means the buttons have nobody to answer them, so the same message
-// goes out plain with the link instead. Telegram off entirely: the morning digest and
-// the Mac list still show it.
+// goes out plain with the link instead, and the first such message says why. Telegram
+// off entirely: the morning digest and the Mac list still show it.
 const tell = async (text: string, pr: PR, plain?: Plain) => {
   const buttons = await invoke("telegram_buttons", { text, keyboard: prKeyboard(pr) }).then(() => true).catch(() => false);
-  if (buttons) return true;
-  return plain ? await plain(`${text}\n${pr.url}`) : false;
+  const s = await watchState();
+  if (buttons) {
+    // Buttons are back, so the next outage gets a note of its own.
+    if (s.noButtonsTold) {
+      s.noButtonsTold = false;
+      await save();
+    }
+    return true;
+  }
+  if (!plain) return false;
+  const why = s.noButtonsTold ? "" : `\n\n${BUTTONS_OFF}`;
+  const ok = await plain(`${text}\n${pr.url}${why}`);
+  // Only a message that really went out counts as having told him.
+  if (ok && why) {
+    s.noButtonsTold = true;
+    await save();
+  }
+  return ok;
 };
 
 /** At the first look, the open ones are sent too, newest first, but no more than this. */
@@ -478,8 +504,9 @@ export async function prMergeAsk(prs: PR[], arg: string, plain: Plain) {
   ]];
   const messageId = await invoke<number>("telegram_buttons", { text, keyboard }).catch(() => null);
   if (messageId == null) {
-    // Remote control off: the buttons would have nobody to answer them.
-    return void plain(`${text}\n\nTlačítka nejdou, Wisp má vypnuté ovládání z telefonu. Zapni ho u Macu v nastavení Telegramu.`);
+    // Remote control off: the buttons would have nobody to answer them. This one says so
+    // every time, because without them `/mergni` itself has no way to finish.
+    return void plain(`${text}\n\n${BUTTONS_OFF}`);
   }
   pendingAll = { messageId, keys: ready.map(prKey) };
 }
