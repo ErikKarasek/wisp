@@ -330,6 +330,8 @@ export async function announcePrs(prs: PR[], now = Date.now(), plain?: Plain) {
       delete s.prNudgedAt![k];
       continue;
     }
+    // The opener hasn't gone out (budget spent or tell failed): ready and nudge would arrive without it.
+    if (!s.prSeen.includes(k)) continue;
     if (sent >= AT_ONCE) continue;
     const readyAt = s.prReadyAt![k];
     if (readyAt === undefined) {
