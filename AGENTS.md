@@ -89,6 +89,10 @@ Cargo treats a dylib it has already linked as fresh even when dyld cannot load i
 its recorded stderr, so the sweep (or deleting the artifacts) is what gets those relinked. Drop all
 of this once Apple fixes the linker: the wrapper leaves a build alone when the offsets are fine.
 
+## Language
+
+Everything that goes to GitHub is written in English, even when the task or the conversation is in Czech: commit messages, pull request titles and bodies, issue titles and bodies, comments, review replies, release notes, docs and code comments. Czech stays only where it is the product itself: app and site copy, and UI strings or messages quoted verbatim.
+
 ## Committing
 
 Commit messages and PR descriptions carry **no** `Co-Authored-By: Claude` and no "Generated with Claude Code" line. The repo shows Erik as the only author. A squash merge copies co-author trailers out of the branch commits, so they have to be gone before the PR is merged.
