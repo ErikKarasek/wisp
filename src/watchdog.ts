@@ -477,9 +477,10 @@ export async function prMessages(prs: PR[], arg: string, plain: Plain) {
 /**
  * What the "Ano, mergnout" button on a `/mergni` message stands for, so a tap merges
  * exactly the pull requests that message listed, not whatever happens to be green a
- * few minutes later. Keyed by the message, because the answer comes back with its id.
+ * few minutes later. Keyed by the message, because the answer comes back with its id, and
+ * a second `/mergni` must not make the first question forget its own list.
  */
-let pendingAll: { messageId: number; keys: string[] } | null = null;
+const pendingAll = new Map<number, string[]>();
 
 /**
  * `/mergni` from the phone: merge everything that is green in one go, after one
@@ -508,15 +509,15 @@ export async function prMergeAsk(prs: PR[], arg: string, plain: Plain) {
     // every time, because without them `/mergni` itself has no way to finish.
     return void plain(`${text}\n\n${BUTTONS_OFF}`);
   }
-  pendingAll = { messageId, keys: ready.map(prKey) };
+  pendingAll.set(messageId, ready.map(prKey));
 }
 
 /** The "Ano, mergnout" button under a `/mergni` message: merge them one after another. */
 async function mergeAll(messageId: number, prs: PR[], done: (text: string) => void) {
   const edit = (text: string, keyboard: object[] = []) => invoke("telegram_edit", { messageId, text, keyboard }).catch(() => {});
   // A restarted app forgets what the question stood for; then merge what stands green now and say so.
-  const asked = pendingAll?.messageId === messageId ? pendingAll.keys : null;
-  pendingAll = null;
+  const asked = pendingAll.get(messageId) ?? null;
+  pendingAll.delete(messageId);
   const picked = (asked ? asked.map((k) => prs.find((p) => prKey(p) === k)) : prs.filter(prReady)).filter(
     (p): p is PR => !!p && prReady(p),
   );
@@ -544,7 +545,7 @@ async function mergeAll(messageId: number, prs: PR[], done: (text: string) => vo
 /** A button under a pull request message: ask "really?" first, then merge or close. */
 export async function prButton(data: string, messageId: number, prs: PR[], done: (text: string) => void) {
   if (data === "pr:z") {
-    pendingAll = null;
+    pendingAll.delete(messageId);
     return void invoke("telegram_edit", { messageId, text: "Nechávám být. Až budeš chtít, napiš /mergni.", keyboard: [] }).catch(() => {});
   }
   if (data === "pr:A") return void mergeAll(messageId, prs, done);
