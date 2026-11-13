@@ -322,9 +322,18 @@ pub fn start_listening(app: &AppHandle) {
                     if from != Some(r.chat.clone()) {
                         // A message from a chat the settings do not point at was dropped without a
                         // word, and from the phone that is the same silence as a broken command.
+                        // The bot is public, so the sender is as likely a stranger as the owner on
+                        // another account. The note names them and never tells the owner to switch
+                        // chats outright: that chat would get to answer permission prompts.
                         if let Some(id) = from {
                             if told_chat.as_deref() != Some(id.as_str()) {
-                                let _ = send_quiet(&r.token, &r.chat, &format!("Psal jsi mi z chatu {id}, ale poslouchám jen {}. Přepni chat v nastavení Telegramu u Macu.", r.chat)).await;
+                                let who = match (m["from"]["first_name"].as_str(), m["from"]["username"].as_str()) {
+                                    (Some(n), Some(u)) => format!("{n} (@{u})"),
+                                    (Some(n), None) => n.to_string(),
+                                    (None, Some(u)) => format!("@{u}"),
+                                    (None, None) => "Někdo".to_string(),
+                                };
+                                let _ = send_quiet(&r.token, &r.chat, &format!("{who} mi napsal z chatu {id}. Neposlouchám ho, beru jen chat {}. Jestli jsi to nebyl ty, nic nedělej. Jestli to byl tvůj druhý účet, přepni chat v nastavení Telegramu u Macu.", r.chat)).await;
                                 told_chat = Some(id);
                             }
                         }
