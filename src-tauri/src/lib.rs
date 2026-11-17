@@ -15,6 +15,7 @@ mod notch;
 mod paperclip;
 mod relay;
 mod resume;
+mod say;
 mod snip;
 mod store;
 mod voice;
@@ -219,6 +220,7 @@ fn tray_menu(app: &AppHandle, lines: &[String]) -> tauri::Result<Menu<Wry>> {
     if !lines.is_empty() {
         menu.append(&PredefinedMenuItem::separator(app)?)?;
     }
+    menu.append(&MenuItem::with_id(app, "speak", "Přečíst stav nahlas", true, None::<&str>)?)?;
     menu.append(&MenuItem::with_id(app, "open", "Otevřít Wisp", true, None::<&str>)?)?;
     menu.append(&MenuItem::with_id(app, "quit", "Ukončit", true, None::<&str>)?)?;
     Ok(menu)
@@ -479,6 +481,12 @@ fn voice_key(app: &AppHandle, pressed: bool) {
     });
 }
 
+/// Says a sentence out loud in Czech; the main window builds it (say.ts).
+#[tauri::command]
+async fn speak(text: String) -> Result<(), String> {
+    blocking(move || say::speak(&text)).await?
+}
+
 #[tauri::command]
 async fn voice_remind(text: String, at: String) -> Result<String, String> {
     blocking(move || voice::remind(&text, &at)).await?
@@ -719,6 +727,11 @@ pub fn run() {
                 })
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => show_main(app),
+                    // The main window knows the crew; it builds the sentence and calls `speak`.
+                    "speak" => {
+                        let perms = claudecode::pending().len();
+                        let _ = tauri::Emitter::emit_to(app, "main", "speak-status", perms);
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 });
@@ -805,6 +818,7 @@ pub fn run() {
             resume_text,
             resume_open,
             voice_remind,
+            speak,
             voice_agent,
             run_cleanup,
             relay_push,

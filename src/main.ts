@@ -6,6 +6,7 @@ import { openReview, renderReviews } from "./reviews";
 import { focusAgent, renderChat } from "./chat";
 import { startPhone } from "./phone";
 import { startRelay } from "./relay";
+import { statusSentence } from "./say";
 
 /** Sidebar entries that replace the cards with a view of their own. */
 const VIEWS = ["settings", "tasks", "reviews", "chat"];
@@ -1694,6 +1695,11 @@ async function start() {
     toast: (t) => toast(t),
   });
   // A permission prompt, or its answer, goes to the phone at once, not at the next minute.
+  // The tray's „Přečíst stav nahlas“ (say.ts, say.rs). PRs stay out, like on the phone.
+  void listen<number>("speak-status", (e) => {
+    const text = statusSentence(allItems().filter((i) => i.group !== "prs"), e.payload);
+    void invoke("speak", { text }).catch((err) => toast(String(err)));
+  });
   void listen("cc-permission", () => void relay.push());
   void listen("cc-permission-done", () => void relay.push());
   void healCodex();
