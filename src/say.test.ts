@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { statusSentence, type SayItem } from "./say.ts";
+import { failureSentence, statusSentence, type SayItem } from "./say.ts";
 
 const it = (name: string, state: string): SayItem => ({ name, state });
 
@@ -28,4 +28,9 @@ test("several failures are named together", () => {
 
 test("a failed agent is not counted again as wanting something", () => {
   assert.equal(statusSentence([it("A", "bad"), it("B", "new")], 3), "3 povolení čekají na tebe, 1 agent chce něco vědět a selhal A.");
+});
+
+test("a failure said the moment it happens", () => {
+  assert.equal(failureSentence(["Hlídač závislostí"]), "Selhal Hlídač závislostí.");
+  assert.equal(failureSentence(["Scout", "Devlog"]), "Selhalo Scout a Devlog.");
 });

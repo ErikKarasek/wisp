@@ -61,6 +61,8 @@ export type Config = {
   githubRepos: string[] | null;
   notifications: boolean;
   sounds: boolean;
+  /** Say it out loud in Czech the moment something fails (say.ts). */
+  speakFailures: boolean;
   /** Characters' shapes move on their own (dots turn round a sun, ears twitch); unset is on. */
   shapeMotion?: boolean;
   /** Claude's and ChatGPT's limits as text next to the menu-bar icon. */
@@ -114,6 +116,7 @@ export function defaults(): Config {
     githubRepos: null,
     notifications: true,
     sounds: true,
+    speakFailures: true,
     trayLimits: false,
     notch: true,
     notchPrefs: defaultNotchPrefs(),

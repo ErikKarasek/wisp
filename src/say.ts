@@ -17,9 +17,20 @@ export function statusSentence(items: SayItem[], perms: number): string {
   if (run > 0) parts.push(`${run === 1 ? "pracuje" : run <= 4 ? "pracují" : "pracuje"} ${plural(run, "agent", "agenti", "agentů")}`);
   if (perms > 0) parts.push(`${plural(perms, "povolení čeká", "povolení čekají", "povolení čeká")} na tebe`);
   if (waiting.length) parts.push(`${plural(waiting.length, "agent chce", "agenti chtějí", "agentů chce")} něco vědět`);
-  if (bad.length) parts.push(`selhal${bad.length === 1 ? "" : "o"} ${bad.map((i) => i.name).join(" a ")}`);
+  if (bad.length) parts.push(failed(bad.map((i) => i.name)));
   if (!parts.length) return "Klid, nikdo nic nechce.";
   const last = parts.pop()!;
   const text = parts.length ? `${parts.join(", ")} a ${last}` : last;
+  return `${text[0].toUpperCase()}${text.slice(1)}.`;
+}
+
+/** "selhal Scout", "selhalo Scout a Devlog". */
+function failed(names: string[]): string {
+  return `selhal${names.length === 1 ? "" : "o"} ${names.join(" a ")}`;
+}
+
+/** Said unprompted the moment something fails: „Selhal Hlídač závislostí.“ */
+export function failureSentence(names: string[]): string {
+  const text = failed(names);
   return `${text[0].toUpperCase()}${text.slice(1)}.`;
 }
