@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 type Obj = Record<string, any>;
 type Engine = "claude_local" | "codex_local";
 
-const CHATGPT_MODELS = [
+export const CHATGPT_MODELS = [
   { id: "gpt-6-luna", label: "GPT-6 Luna (výchozí v Codexu)" },
   { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
   { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
@@ -32,7 +32,7 @@ const PATH_ENV = "/Users/erickos007/.local/bin:/opt/homebrew/bin:/usr/local/bin:
 const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 /** ChatGPT agents run on the Codex CLI engine: the default ACP engine sandboxes
  * them with no network and no writes outside their workspace. */
-async function codexConfig(): Promise<Obj> {
+export async function codexConfig(): Promise<Obj> {
   const command = await invoke<string | null>("codex_command").catch(() => null);
   return { engine: "cli", ...(command ? { command } : {}) };
 }
