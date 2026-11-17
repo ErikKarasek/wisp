@@ -6,7 +6,7 @@ import { openReview, renderReviews } from "./reviews";
 import { focusAgent, renderChat } from "./chat";
 import { startPhone } from "./phone";
 import { startRelay } from "./relay";
-import { statusSentence } from "./say";
+import { failureSentence, statusSentence } from "./say";
 
 /** Sidebar entries that replace the cards with a view of their own. */
 const VIEWS = ["settings", "tasks", "reviews", "chat"];
@@ -1162,6 +1162,11 @@ async function onChanges() {
   // A pull request gets its own message with merge and close buttons (announcePrs),
   // so here it only peeks out of the notch; a line of plain text would say it twice.
   const tell = alarming.filter((i) => !i.id.startsWith("pr:"));
+  // Said out loud once, on the change itself, so a failure that stays red stays quiet.
+  const failedNow = tell.filter((i) => i.state === "bad");
+  if (cfg.speakFailures !== false && failedNow.length) {
+    void invoke("speak", { text: failureSentence(failedNow.map((i) => i.name)) }).catch(() => {});
+  }
   if (!tell.length) return;
 
   const title = (i: Item) => (i.state === "bad" ? `${i.name}: selhal` : `${i.name} na tebe čeká`);

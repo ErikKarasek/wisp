@@ -166,6 +166,8 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
         Upozornit, když něco selže nebo na mě čeká</label>
       <label class="toggle"><input type="checkbox" data-f="sounds" ${ctx.cfg.sounds ? "checked" : ""}>
         Zvuky, když něco doběhne, selže nebo šťouchnu do postavičky</label>
+      <label class="toggle"><input type="checkbox" data-f="speakFailures" ${ctx.cfg.speakFailures !== false ? "checked" : ""}>
+        Říct nahlas, když něco selže</label>
       <label class="toggle"><input type="checkbox" data-f="shapeMotion" ${ctx.cfg.shapeMotion !== false ? "checked" : ""}>
         Postavičky se hýbou (sluníčku se točí kolečka, kočka cuká ušima, chobotnička vlní chapadly)</label>
       <label class="toggle"><input type="checkbox" data-f="trayLimits" ${ctx.cfg.trayLimits ? "checked" : ""}>
@@ -381,6 +383,11 @@ export async function renderSettings(el: HTMLElement, ctx: SettingsContext) {
   });
   el.querySelector<HTMLInputElement>('[data-f="sounds"]')!.addEventListener("change", async (e) => {
     ctx.cfg.sounds = (e.target as HTMLInputElement).checked;
+    await ctx.save();
+  });
+
+  el.querySelector<HTMLInputElement>('[data-f="speakFailures"]')!.addEventListener("change", async (e) => {
+    ctx.cfg.speakFailures = (e.target as HTMLInputElement).checked;
     await ctx.save();
   });
 
