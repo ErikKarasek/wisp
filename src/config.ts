@@ -1,6 +1,7 @@
 // The user's own setup, saved by the Rust side to config.json in the app's
 // config folder: characters, who wears which, renamed items, repos, switches.
 
+import type { Moved } from "./handoff";
 import { invoke } from "@tauri-apps/api/core";
 import type { MascotCharacter } from "./mascot/mascot";
 
@@ -63,6 +64,8 @@ export type Config = {
   sounds: boolean;
   /** Say it out loud in Czech the moment something fails (say.ts). */
   speakFailures: boolean;
+  /** Agents Wisp moved to another engine when their own ran short, keyed by agent id (handoff.ts). */
+  handoffs: Record<string, Moved>;
   /** Characters' shapes move on their own (dots turn round a sun, ears twitch); unset is on. */
   shapeMotion?: boolean;
   /** Claude's and ChatGPT's limits as text next to the menu-bar icon. */
@@ -117,6 +120,7 @@ export function defaults(): Config {
     notifications: true,
     sounds: true,
     speakFailures: true,
+    handoffs: {},
     trayLimits: false,
     notch: true,
     notchPrefs: defaultNotchPrefs(),

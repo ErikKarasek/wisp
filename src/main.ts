@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import { openAgentForm } from "./agentform";
-import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type QuotaWindow, type AgyWindow, type Snapshot, windowName, resetText } from "./broadcast";
+import { CHATGPT_MODELS, codexConfig, openAgentForm } from "./agentform";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { ADAPTER, handoffComment, handoffOffers, movedConfig, returnOffers, type Engine, type HandoffAgent, type HandoffIssue, type Pace } from "./handoff";
+import { EV_NOTCH_PREFS, EV_OPEN, EV_OPEN_SETTINGS, EV_REFRESH, EV_REQUEST, EV_STATE, type ClaudeUsage, type MiniItem, type QuotaWindow, type AgyWindow, type Snapshot, windowName, resetText, claudeResetMs, elapsedPercent } from "./broadcast";
 import { openReview, renderReviews } from "./reviews";
 import { focusAgent, renderChat } from "./chat";
 import { startPhone } from "./phone";
@@ -38,7 +40,7 @@ import {
 } from "./model";
 import type { PR } from "./pr";
 import { openJobForm } from "./jobform";
-import { latestRun, LiveRun, stepLine, voiceOf, type Step, type Voice } from "./live";
+import { latestRun, LiveRun, pc, stepLine, voiceOf, type Step, type Voice } from "./live";
 import { openRoutineForm } from "./routineform";
 import { renderTasks } from "./tasks";
 import { renderSettings } from "./settings";
@@ -781,6 +783,7 @@ function renderSide() {
   const gauge =
     claude +
     gpt +
+    handoffHtml() +
     gemini +
     grok +
     (neurons == null
@@ -810,6 +813,10 @@ function renderSide() {
     }),
   );
   side.querySelector('[data-act="studio"]')!.addEventListener("click", () => studio());
+  side.querySelectorAll<HTMLButtonElement>("button[data-handoff]").forEach((b) =>
+    b.addEventListener("click", () => void moveAgents(b.dataset.handoff as Engine, b)),
+  );
+  side.querySelector<HTMLButtonElement>("button[data-handback]")?.addEventListener("click", (e) => void moveBack(e.currentTarget as HTMLButtonElement));
 
   if (!legendEl) {
     legendEl = document.createElement("div");
@@ -824,6 +831,113 @@ function renderSide() {
     });
   }
   side.appendChild(legendEl);
+}
+
+// ---------- handing work to the engine that has room (handoff.ts, issue #27) ----------
+
+/** Claude's 5 h session and ChatGPT's first window, read the way the notch's rings read them. */
+function paces(): Partial<Record<Engine, Pace | null>> {
+  const ses = usage?.session;
+  const g = gptQuota[0];
+  return {
+    Claude: ses ? { percent: ses.percent, elapsed: elapsedPercent(claudeResetMs(ses.resets), 5 * 3600), resets: ses.resets } : null,
+    ChatGPT: g ? { percent: g.percent, elapsed: elapsedPercent(g.resetsAtMs, g.windowSecs), resets: resetText(g.resetsAtMs) } : null,
+  };
+}
+
+function crew(): { agents: HandoffAgent[]; issues: HandoffIssue[] } {
+  if (!paperclip?.online) return { agents: [], issues: [] };
+  return {
+    agents: paperclip.companies.flatMap((c) => c.agents) as HandoffAgent[],
+    issues: paperclip.companies.flatMap((c) => c.issues) as HandoffIssue[],
+  };
+}
+
+/** Under the limits: move work off an engine that runs short, or bring it back once it has room. */
+function handoffHtml(): string {
+  const { agents, issues } = crew();
+  if (!agents.length) return "";
+  const p = paces();
+  const offers = handoffOffers(p, agents, issues).map(
+    (o) =>
+      `<button data-handoff="${o.from}" title="${esc(`${o.from} je na ${o.pace.percent} % a dojde dřív, než se obnoví. ${o.to} má místo.`)}">Přesunout na ${o.to}<span>${o.agents.length}</span></button>`,
+  );
+  const back = returnOffers(p, agents, cfg.handoffs ?? {});
+  if (back.length) offers.push(`<button data-handback title="${esc(back.map((b) => `${b.agent.name} → ${b.back}`).join(", "))}">Vrátit agenty zpět<span>${back.length}</span></button>`);
+  return offers.join("");
+}
+
+const CLAUDE_MODEL = "claude-sonnet-5-5";
+
+/** Switch one agent's engine, keeping its env, instructions and skills. */
+async function switchEngine(agentId: string, to: Engine, model: string | null) {
+  const fresh = await pc<Record<string, any>>("GET", `/agents/${agentId}`);
+  const config = fresh.adapterConfig ?? {};
+  const target = model ?? (to === "ChatGPT" ? CHATGPT_MODELS[0].id : CLAUDE_MODEL);
+  const codex = to === "ChatGPT" ? await codexConfig() : {};
+  await pc("PATCH", `/agents/${agentId}`, { adapterType: ADAPTER[to], adapterConfig: movedConfig(config, to, target, codex) });
+  return { fromType: String(fresh.adapterType), fromModel: (config.model as string | undefined) ?? null };
+}
+
+async function moveAgents(from: Engine, button: HTMLButtonElement) {
+  const { agents, issues } = crew();
+  const offer = handoffOffers(paces(), agents, issues).find((o) => o.from === from);
+  if (!offer) return;
+  const names = offer.agents.map((x) => x.agent.name).join(", ");
+  const yes = await ask(
+    `${from} je na ${offer.pace.percent} % a dojde dřív, než se obnoví (${offer.pace.resets}). ${offer.to} má místo.\n\n` +
+      `Přesunout na ${offer.to}: ${names}?\n\nRozhovor v úkolu zůstane, další běh pojede na ${offer.to}. Až bude ${from} zase mít místo, nabídnu vrácení.`,
+    { title: "Přesunout práci", kind: "info", okLabel: "Přesunout", cancelLabel: "Nechat" },
+  ).catch(() => false);
+  if (!yes) return;
+  button.disabled = true;
+  cfg.handoffs ??= {};
+  const done: string[] = [];
+  for (const { agent, issue } of offer.agents) {
+    try {
+      const before = await switchEngine(agent.id, offer.to, null);
+      // The first move is the one to undo; a second one keeps the original engine.
+      cfg.handoffs[agent.id] ??= { ...before, at: Date.now() };
+      await pc("POST", `/issues/${issue.id}/comments`, { body: handoffComment(offer.from, offer.to, offer.pace) }).catch(() => {});
+      done.push(agent.name);
+    } catch (e) {
+      toast(`${agent.name}: ${e}`);
+    }
+  }
+  await saveConfig(cfg);
+  if (done.length) toast(`Na ${offer.to}: ${done.join(", ")}.`, true);
+  void refresh(true);
+}
+
+async function moveBack(button: HTMLButtonElement) {
+  const { agents, issues } = crew();
+  const back = returnOffers(paces(), agents, cfg.handoffs ?? {});
+  if (!back.length) return;
+  const yes = await ask(`Vrátit na původní engine: ${back.map((b) => `${b.agent.name} → ${b.back}`).join(", ")}?`, {
+    title: "Vrátit agenty",
+    kind: "info",
+    okLabel: "Vrátit",
+    cancelLabel: "Nechat",
+  }).catch(() => false);
+  if (!yes) return;
+  button.disabled = true;
+  const done: string[] = [];
+  for (const { agent, back: to } of back) {
+    try {
+      const was = cfg.handoffs[agent.id];
+      const from = agent.adapterType === "codex_local" ? "ChatGPT" : "Claude";
+      await switchEngine(agent.id, to, was.fromModel);
+      delete cfg.handoffs[agent.id];
+      const issue = issues.find((i) => i.assigneeAgentId === agent.id && ["todo", "in_progress"].includes(i.status));
+      if (issue) await pc("POST", `/issues/${issue.id}/comments`, { body: handoffComment(from, to, null) }).catch(() => {});
+      done.push(agent.name);
+    } catch (e) {
+      toast(`${agent.name}: ${e}`);
+    }
+  }
+  await saveConfig(cfg);
+  if (done.length) toast(`Zpátky: ${done.join(", ")}.`, true);
+  void refresh(true);
 }
 
 // ---------- studio ----------
