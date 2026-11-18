@@ -24,7 +24,24 @@ fn pick_czech(list: &str) -> Option<String> {
     })
 }
 
+/// `say` obeys embedded `[[slnc 500]]`-style directives, so drop them (and stray markers) from agent names.
+fn strip_directives(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("[[") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        rest = match after.find("]]") {
+            Some(end) => &after[end + 2..],
+            None => after,
+        };
+    }
+    out.push_str(rest);
+    out.replace("]]", "")
+}
+
 pub fn speak(text: &str) -> Result<(), String> {
+    let text = strip_directives(text);
     let voice = czech_voice().ok_or("Na Macu chybí český hlas. Přidej ho v Nastavení → Přístupnost → Mluvený obsah.")?;
     let mut now = SPEAKING.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(mut old) = now.take() {
@@ -32,7 +49,7 @@ pub fn speak(text: &str) -> Result<(), String> {
         let _ = old.wait();
     }
     let child = Command::new("/usr/bin/say")
-        .args(["-v", &voice, "--", text])
+        .args(["-v", &voice, "--", &text])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -43,7 +60,15 @@ pub fn speak(text: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::pick_czech;
+    use super::{pick_czech, strip_directives};
+
+    #[test]
+    fn strips_say_directives() {
+        assert_eq!(strip_directives("Selhal Scout."), "Selhal Scout.");
+        assert_eq!(strip_directives("Selhal A[[slnc 500]]B a [[emph +]]C."), "Selhal AB a C.");
+        assert_eq!(strip_directives("x [[rate 50 unterminated"), "x rate 50 unterminated");
+        assert_eq!(strip_directives("x ]] y"), "x  y");
+    }
 
     #[test]
     fn finds_the_czech_voice() {
