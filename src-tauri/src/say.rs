@@ -24,6 +24,12 @@ fn pick_czech(list: &str) -> Option<String> {
     })
 }
 
+/// `say` runs `[[slnc 500]]`-style embedded commands found in its input, and agent names come
+/// from Paperclip, so brackets and braces are dropped before anything is spoken.
+fn plain_speech(text: &str) -> String {
+    text.chars().map(|c| if matches!(c, '[' | ']' | '{' | '}') { ' ' } else { c }).collect()
+}
+
 pub fn speak(text: &str) -> Result<(), String> {
     let voice = czech_voice().ok_or("Na Macu chybí český hlas. Přidej ho v Nastavení → Přístupnost → Mluvený obsah.")?;
     let mut now = SPEAKING.lock().unwrap_or_else(|e| e.into_inner());
@@ -32,7 +38,7 @@ pub fn speak(text: &str) -> Result<(), String> {
         let _ = old.wait();
     }
     let child = Command::new("/usr/bin/say")
-        .args(["-v", &voice, "--", text])
+        .args(["-v", &voice, "--", &plain_speech(text)])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -43,7 +49,14 @@ pub fn speak(text: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::pick_czech;
+    use super::{pick_czech, plain_speech};
+
+    #[test]
+    fn drops_embedded_speech_commands() {
+        assert!(!plain_speech("Agent [[slnc 5000]] selhal").contains("[["));
+        assert!(!plain_speech("[[[volm 0.0]]] {x}").contains(['[', ']', '{', '}']));
+        assert_eq!(plain_speech("Dispečer selhal"), "Dispečer selhal");
+    }
 
     #[test]
     fn finds_the_czech_voice() {
