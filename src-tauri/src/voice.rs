@@ -12,10 +12,6 @@ use std::time::{Duration, Instant, SystemTime};
 
 static RECORDING: Mutex<Option<(Child, PathBuf, Instant)>> = Mutex::new(None);
 
-fn home() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_default())
-}
-
 fn ffmpeg() -> Option<PathBuf> {
     ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].iter().map(PathBuf::from).find(|p| p.exists())
 }
@@ -119,8 +115,7 @@ pub struct Heard {
 
 pub fn understand(rec: Recording, agents: &[String]) -> Result<Heard, String> {
     let path = rec.path().to_string_lossy().into_owned();
-    let agy = home().join(".local/bin/agy");
-    if !agy.exists() {
+    if !crate::agy::bin().exists() {
         return Err("Chybí Antigravity CLI (agy).".into());
     }
     let dir = rec.path().parent().ok_or("Nahrávka není.")?.to_path_buf();
@@ -149,12 +144,9 @@ pub fn understand(rec: Recording, agents: &[String]) -> Result<Heard, String> {
     );
     // Once more if Gemini comes back empty-handed (it now and then does).
     for _ in 0..2 {
-        let out = Command::new(&agy)
-            .args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "90s", "--add-dir"])
-            .arg(&dir)
-            .current_dir(&dir)
-            .output()
-            .map_err(|e| e.to_string())?;
+        let mut cmd = crate::agy::command();
+        cmd.args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "90s", "--add-dir"]).arg(&dir).current_dir(&dir);
+        let out = crate::agy::output(cmd)?;
         let raw = String::from_utf8_lossy(&out.stdout);
         let v: serde_json::Value = raw.find('{').and_then(|i| serde_json::from_str(&raw[i..]).ok()).unwrap_or_default();
         let answer = v["response"].as_str().unwrap_or_default();

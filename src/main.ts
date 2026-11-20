@@ -72,6 +72,13 @@ let gptQuota: QuotaWindow[] = [];
 let geminiQuota: AgyWindow[] = [];
 /** Antigravity takes ~10 s to answer, so Gemini is read less often. */
 const GEMINI_MS = 2 * 60_000;
+/** With agy logged out, a read is only worth trying once an hour, or on a manual refresh. */
+const GEMINI_LOGIN_MS = 60 * 60_000;
+/** What `gemini_usage` answers when agy's Google login has run out (`agy::LOGIN_NEEDED`). */
+const AGY_LOGIN = "Antigravity je odhlášený";
+let geminiLogin = false;
+/** Reads the Gemini limits now; set once the app has started. */
+let loadGeminiNow: () => void = () => {};
 /** How often both limits are read: often enough to watch them move while agents work. */
 const USAGE_MS = 60_000;
 
@@ -770,6 +777,9 @@ function renderSide() {
       })
       .join("");
   const gemini =
+    (geminiLogin
+      ? `<h6 title="Google AI Pro v Antigravity">Limit Gemini</h6><div class="gauge" title="Po přihlášení klikni na obnovit."><small>Antigravity je odhlášený. Spusť v terminálu <code>agy</code> a přihlas se.</small></div>`
+      : "") +
     (gemRows.length ? `<h6 title="Google AI Pro v Antigravity">Limit Gemini</h6>${gauges(gemRows)}` : "") +
     (proRows.length ? `<h6 title="Claude a GPT modely v Antigravity, zvlášť od tvého předplatného Claude">Claude v AI Pro</h6>${gauges(proRows)}` : "");
   // Grok Bot reports one weekly number, not a window per model.
@@ -1738,16 +1748,35 @@ async function start() {
   };
   void loadUsage();
   setInterval(() => void loadUsage(), USAGE_MS);
+  // Each read schedules the next. While agy is logged out every read would only ask
+  // for a login again, so it waits an hour (or a manual refresh) instead of two minutes.
+  let geminiBusy = false;
+  let geminiTimer: ReturnType<typeof setTimeout> | undefined;
   const loadGemini = async () => {
-    const got = await invoke<AgyWindow[]>("gemini_usage").catch(() => null);
-    if (!got) return;
-    geminiQuota = got;
-    render();
-    broadcast();
-    void invoke("set_tray_title", { title: trayTitle() });
+    if (geminiBusy) return;
+    geminiBusy = true;
+    clearTimeout(geminiTimer);
+    try {
+      let login = false;
+      const got = await invoke<AgyWindow[]>("gemini_usage").catch((e) => {
+        login = String(e).startsWith(AGY_LOGIN);
+        return null;
+      });
+      if (got || login !== geminiLogin) {
+        geminiLogin = login;
+        if (got) geminiQuota = got;
+        else if (login) geminiQuota = [];
+        render();
+        broadcast();
+        void invoke("set_tray_title", { title: trayTitle() });
+      }
+    } finally {
+      geminiBusy = false;
+      geminiTimer = setTimeout(() => void loadGemini(), geminiLogin ? GEMINI_LOGIN_MS : GEMINI_MS);
+    }
   };
+  loadGeminiNow = () => void loadGemini();
   void loadGemini();
-  setInterval(() => void loadGemini(), GEMINI_MS);
   window.addEventListener("dispecink-tray", () => void invoke("set_tray_title", { title: trayTitle() }));
   setInterval(() => void morning(), 60_000);
   const relay = startRelay({
@@ -1849,11 +1878,17 @@ async function start() {
   setInterval(() => void refresh(true), CLOUD_MS);
 }
 
-$("refresh").addEventListener("click", () => void refresh(true));
+/** A manual refresh also checks whether agy has been logged back in. */
+function refreshByHand(): void {
+  void refresh(true);
+  if (geminiLogin) loadGeminiNow();
+}
+
+$("refresh").addEventListener("click", refreshByHand);
 document.addEventListener("keydown", (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === "r") {
     e.preventDefault();
-    void refresh(true);
+    refreshByHand();
   } else if (e.key === "Escape") {
     select(null);
   }
