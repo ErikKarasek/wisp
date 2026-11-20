@@ -138,18 +138,14 @@ pub struct AgyWindow {
 /// "Gemini Models<TAB>Five Hour Limit Remaining<TAB>100%<TAB>2026-10-01T00:16:21Z".
 /// It asks no model, so it costs nothing; it takes ~10 s, hence its own pace.
 pub fn gemini_usage() -> Result<Vec<AgyWindow>, String> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let bin = PathBuf::from(format!("{home}/.local/bin/agy"));
-    if !bin.exists() {
+    if !crate::agy::bin().exists() {
         return Err("Antigravity CLI není nainstalovaný.".into());
     }
     let dir = std::env::temp_dir().join("dispecink-usage");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let out = Command::new(bin)
-        .args(["-p", "/usage", "--print-timeout", "60s"])
-        .current_dir(&dir)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut cmd = crate::agy::command();
+    cmd.args(["-p", "/usage", "--print-timeout", "60s"]).current_dir(&dir);
+    let out = crate::agy::output(cmd)?;
     let text = String::from_utf8_lossy(&out.stdout);
     let windows: Vec<AgyWindow> = text
         .lines()

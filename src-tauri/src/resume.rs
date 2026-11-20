@@ -161,8 +161,7 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
 
 /// Gemini's two sentences: where it stopped, and what's next. None when it can't answer.
 fn gemini(conv: &Conversation, git_line: &str) -> Option<(String, String)> {
-    let agy = home().join(".local/bin/agy");
-    if !agy.exists() {
+    if !crate::agy::bin().exists() {
         return None;
     }
     let asks = conv.asks.iter().map(|a| format!("- {}", a.replace('\n', " "))).collect::<Vec<_>>().join("\n");
@@ -177,11 +176,9 @@ fn gemini(conv: &Conversation, git_line: &str) -> Option<(String, String)> {
     );
     let dir = std::env::temp_dir().join("dispecink-ask");
     std::fs::create_dir_all(&dir).ok()?;
-    let out = Command::new(agy)
-        .args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "90s"])
-        .current_dir(&dir)
-        .output()
-        .ok()?;
+    let mut cmd = crate::agy::command();
+    cmd.args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "90s"]).current_dir(&dir);
+    let out = crate::agy::output(cmd).ok()?;
     let raw = String::from_utf8_lossy(&out.stdout);
     let v: Value = raw.find('{').and_then(|i| serde_json::from_str(&raw[i..]).ok())?;
     let answer = v["response"].as_str()?;

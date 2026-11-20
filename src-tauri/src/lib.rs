@@ -1,3 +1,4 @@
+mod agy;
 mod ask;
 mod awake;
 mod botwatch;

@@ -5,9 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn ask_file(path: &str, question: &str) -> Result<String, String> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let agy = PathBuf::from(format!("{home}/.local/bin/agy"));
-    if !agy.exists() {
+    if !crate::agy::bin().exists() {
         return Err("Chybí Antigravity CLI (agy).".into());
     }
     let file = Path::new(path);
@@ -19,12 +17,9 @@ pub fn ask_file(path: &str, question: &str) -> Result<String, String> {
         "Soubor: {path}\n\nOtázka: {question}\n\nPřečti si ten soubor a odpověz na otázku česky, stručně a přímo, \
          jako v chatu: bez nadpisů, nanejvýš pár vět nebo krátký seznam. Nic neměň, nic nespouštěj, jen čti."
     );
-    let out = Command::new(agy)
-        .args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--print-timeout", "3m", "--add-dir"])
-        .arg(dir)
-        .current_dir(dir)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut cmd = crate::agy::command();
+    cmd.args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--print-timeout", "3m", "--add-dir"]).arg(dir).current_dir(dir);
+    let out = crate::agy::output(cmd)?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if text.is_empty() {
         let err = String::from_utf8_lossy(&out.stderr);
@@ -37,23 +32,19 @@ pub fn ask_file(path: &str, question: &str) -> Result<String, String> {
 /// the conversation so far go in, Gemini answers. It may read files under
 /// ~/Developer to answer, but runs nothing and changes nothing.
 pub fn ask_report(report: &str, thread: &str, question: &str) -> Result<String, String> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let agy = PathBuf::from(format!("{home}/.local/bin/agy"));
-    if !agy.exists() {
+    if !crate::agy::bin().exists() {
         return Err("Chybí Antigravity CLI (agy).".into());
     }
-    let dev = PathBuf::from(format!("{home}/Developer"));
+    let dev = PathBuf::from(format!("{}/Developer", std::env::var("HOME").unwrap_or_default()));
     let prompt = format!(
         "Tohle je týdenní report, který Erik dostal:\n\n{report}\n\n---\nDosavadní rozhovor o něm:\n{thread}\n\n---\n\
          Erikova otázka: {question}\n\nOdpověz česky, prostě a konkrétně, jako v chatu (žádné nadpisy). \
          Když se ptá, jak něco opravit, dej přesné kroky nebo příkazy. Projekty jsou v ~/Developer; \
          smíš je číst, ale nic nespouštěj a nic neměň."
     );
-    let out = Command::new(agy)
-        .args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "4m"])
-        .current_dir(&dev)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut cmd = crate::agy::command();
+    cmd.args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "4m"]).current_dir(&dev);
+    let out = crate::agy::output(cmd)?;
     let text = String::from_utf8_lossy(&out.stdout);
     let v: serde_json::Value = text.find('{').and_then(|i| serde_json::from_str(&text[i..]).ok()).unwrap_or_default();
     match v.get("response").and_then(|r| r.as_str()).map(str::trim) {
@@ -64,9 +55,7 @@ pub fn ask_report(report: &str, thread: &str, question: &str) -> Result<String, 
 
 /// A quick question from the shortcut, with whatever was copied as its context.
 pub fn ask_quick(question: &str, context: &str) -> Result<String, String> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let agy = PathBuf::from(format!("{home}/.local/bin/agy"));
-    if !agy.exists() {
+    if !crate::agy::bin().exists() {
         return Err("Chybí Antigravity CLI (agy).".into());
     }
     let prompt = if context.trim().is_empty() {
@@ -79,11 +68,9 @@ pub fn ask_quick(question: &str, context: &str) -> Result<String, String> {
     };
     let dir = std::env::temp_dir().join("dispecink-ask");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let out = Command::new(agy)
-        .args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "2m"])
-        .current_dir(&dir)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut cmd = crate::agy::command();
+    cmd.args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "2m"]).current_dir(&dir);
+    let out = crate::agy::output(cmd)?;
     let text = String::from_utf8_lossy(&out.stdout);
     let v: serde_json::Value = text.find('{').and_then(|i| serde_json::from_str(&text[i..]).ok()).unwrap_or_default();
     match v.get("response").and_then(|r| r.as_str()).map(str::trim) {

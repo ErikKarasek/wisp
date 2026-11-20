@@ -92,8 +92,7 @@ pub struct Reading {
 
 /// Gemini looks at the picture: what it is, and where it came from.
 pub fn read(path: &str, app: &str, title: &str) -> Result<Reading, String> {
-    let agy = home().join(".local/bin/agy");
-    if !agy.exists() {
+    if !crate::agy::bin().exists() {
         return Err("Chybí Antigravity CLI (agy).".into());
     }
     let file = Path::new(path);
@@ -114,14 +113,13 @@ pub fn read(path: &str, app: &str, title: &str) -> Result<Reading, String> {
          \"cause\": \"česky jednou dvěma větami, čím to asi je\"}}",
         if title.is_empty() { String::new() } else { format!(" · {title}") }
     );
-    let out = Command::new(agy)
-        .args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "3m", "--add-dir"])
+    let mut cmd = crate::agy::command();
+    cmd.args(["-p", &prompt, "--model", "gemini-3.8-flash-medium", "--output-format", "json", "--print-timeout", "3m", "--add-dir"])
         .arg(dir)
         .arg("--add-dir")
         .arg(developer())
-        .current_dir(dir)
-        .output()
-        .map_err(|e| e.to_string())?;
+        .current_dir(dir);
+    let out = crate::agy::output(cmd)?;
     let raw = String::from_utf8_lossy(&out.stdout);
     let v: serde_json::Value = raw.find('{').and_then(|i| serde_json::from_str(&raw[i..]).ok()).unwrap_or_default();
     let answer = v.get("response").and_then(|r| r.as_str()).unwrap_or_default();
