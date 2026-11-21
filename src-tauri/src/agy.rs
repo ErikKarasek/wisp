@@ -23,7 +23,8 @@ pub fn bin() -> PathBuf {
     PathBuf::from(format!("{}/.local/bin/agy", std::env::var("HOME").unwrap_or_default()))
 }
 
-/// agy's own words when it wants a login (stdout or stderr).
+/// agy's own words when it wants a login. It prints them on stderr; stdout holds
+/// the model's answer, which may quote the same words.
 fn wants_login(line: &str) -> bool {
     line.contains("Authentication required") || line.contains("authentication timed out")
 }
@@ -59,13 +60,13 @@ fn without_browser(mut cmd: Command) -> Command {
 pub fn output(mut cmd: Command) -> Result<Output, String> {
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
     let (tx, rx) = mpsc::channel::<()>();
-    let reader = |pipe: Box<dyn Read + Send>, tx: mpsc::Sender<()>| {
+    let reader = |pipe: Box<dyn Read + Send>, tx: mpsc::Sender<()>, watch: bool| {
         thread::spawn(move || {
             let mut all = Vec::new();
             let mut line = Vec::new();
             let mut r = BufReader::new(pipe);
             while matches!(r.read_until(b'\n', &mut line), Ok(n) if n > 0) {
-                if wants_login(&String::from_utf8_lossy(&line)) {
+                if watch && wants_login(&String::from_utf8_lossy(&line)) {
                     let _ = tx.send(());
                 }
                 all.append(&mut line);
@@ -73,8 +74,8 @@ pub fn output(mut cmd: Command) -> Result<Output, String> {
             all
         })
     };
-    let out = reader(Box::new(child.stdout.take().ok_or("agy bez výstupu")?), tx.clone());
-    let err = reader(Box::new(child.stderr.take().ok_or("agy bez výstupu")?), tx);
+    let out = reader(Box::new(child.stdout.take().ok_or("agy bez výstupu")?), tx.clone(), false);
+    let err = reader(Box::new(child.stderr.take().ok_or("agy bez výstupu")?), tx, true);
     // Ok: a reader saw the login prompt. Err: both pipes closed, the run is over.
     if rx.recv().is_ok() {
         // SIGTERM lets agy end its wait for the login cleanly ("authentication interrupted").
@@ -108,7 +109,7 @@ mod tests {
         let fake = dir.join("agy");
         let which = dir.join("which-open");
         let script = format!(
-            "#!/bin/sh\ncommand -v open > {}\necho 'Authentication required. Please visit the URL to log in:'\nsleep 30\n",
+            "#!/bin/sh\ncommand -v open > {}\necho 'Authentication required. Please visit the URL to log in:' >&2\nsleep 30\n",
             which.display()
         );
         std::fs::write(&fake, script).unwrap();
@@ -120,6 +121,21 @@ mod tests {
         assert!(started.elapsed().as_secs() < 10, "the run was not stopped at the prompt");
         let open = std::fs::read_to_string(&which).unwrap();
         assert!(open.trim().ends_with("dispecink-agy-noopen/open"), "agy would call {open}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An answer that quotes the login prompt is an answer, not a login request.
+    #[test]
+    fn ignores_the_prompt_quoted_in_an_answer() {
+        let dir = std::env::temp_dir().join(format!("dispecink-agy-quote-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("agy");
+        let script = "#!/bin/sh\necho '{\"response\":\"The error says Authentication required, authentication timed out.\"}'\n";
+        std::fs::write(&fake, script).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let got = output(without_browser(Command::new(&fake))).unwrap();
+        assert!(String::from_utf8_lossy(&got.stdout).contains("Authentication required"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
