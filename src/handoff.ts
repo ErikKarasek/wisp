@@ -31,7 +31,7 @@ export function inFlight(agentId: string, issues: HandoffIssue[]): HandoffIssue 
 
 export type Offer = { from: Engine; to: Engine; pace: Pace; agents: { agent: HandoffAgent; issue: HandoffIssue }[] };
 
-/** Which agents to offer moving, per engine that runs short while the other has room. */
+/** Which agents to offer moving, per engine that runs short while the other has room. Running agents wait for their run to end. */
 export function handoffOffers(paces: Partial<Record<Engine, Pace | null>>, agents: HandoffAgent[], issues: HandoffIssue[]): Offer[] {
   const out: Offer[] = [];
   for (const [from, to] of [["Claude", "ChatGPT"], ["ChatGPT", "Claude"]] as [Engine, Engine][]) {
@@ -39,7 +39,7 @@ export function handoffOffers(paces: Partial<Record<Engine, Pace | null>>, agent
     const q = paces[to];
     if (!p || !q || !tight(p) || !roomy(q)) continue;
     const busy = agents
-      .filter((a) => a.status !== "terminated" && engineOf(a.adapterType) === from)
+      .filter((a) => a.status !== "terminated" && a.status !== "running" && engineOf(a.adapterType) === from)
       .map((agent) => ({ agent, issue: inFlight(agent.id, issues) }))
       .filter((x): x is { agent: HandoffAgent; issue: HandoffIssue } => !!x.issue);
     if (busy.length) out.push({ from, to, pace: p, agents: busy });
@@ -47,10 +47,10 @@ export function handoffOffers(paces: Partial<Record<Engine, Pace | null>>, agent
   return out;
 }
 
-/** Agents moved earlier whose own engine has room again. */
+/** Agents moved earlier whose own engine has room again. A running agent waits: its config is not touched mid-run. */
 export function returnOffers(paces: Partial<Record<Engine, Pace | null>>, agents: HandoffAgent[], moved: Record<string, Moved>): { agent: HandoffAgent; back: Engine }[] {
   return agents
-    .filter((a) => moved[a.id] && a.status !== "terminated")
+    .filter((a) => moved[a.id] && a.status !== "terminated" && a.status !== "running")
     .map((agent) => ({ agent, back: engineOf(moved[agent.id].fromType) }))
     .filter(({ agent, back }) => back !== engineOf(agent.adapterType) && !!paces[back] && roomy(paces[back]!));
 }

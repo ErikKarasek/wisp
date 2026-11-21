@@ -879,9 +879,10 @@ function handoffHtml(): string {
 
 const CLAUDE_MODEL = "claude-sonnet-5-5";
 
-/** Switch one agent's engine, keeping its env, instructions and skills. */
+/** Switch one agent's engine, keeping its env, instructions and skills. Refuses while it is mid-run. */
 async function switchEngine(agentId: string, to: Engine, model: string | null) {
   const fresh = await pc<Record<string, any>>("GET", `/agents/${agentId}`);
+  if (fresh.status === "running") throw new Error("právě běží, přesunu ho, až doběhne");
   const config = fresh.adapterConfig ?? {};
   const target = model ?? (to === "ChatGPT" ? CHATGPT_MODELS[0].id : CLAUDE_MODEL);
   const codex = to === "ChatGPT" ? await codexConfig() : {};

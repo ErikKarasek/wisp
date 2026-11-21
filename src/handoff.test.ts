@@ -35,6 +35,17 @@ test("an offer needs a short engine, one with room, and work in flight", () => {
   assert.deepEqual(handoffOffers({ Claude: pace(40), ChatGPT: pace(20) }, agents, issues), []);
 });
 
+test("an agent in the middle of a run is not offered, its run would be cut off", () => {
+  const agents = [{ ...agent("w"), status: "running" }, { ...agent("s"), status: "idle" }];
+  const issues = [issue("1", "w", "in_progress"), issue("2", "s", "in_progress")];
+  const offers = handoffOffers({ Claude: pace(80), ChatGPT: pace(20) }, agents, issues);
+  assert.deepEqual(offers[0].agents.map((x) => x.agent.id), ["s"]);
+  assert.deepEqual(handoffOffers({ Claude: pace(80), ChatGPT: pace(20) }, [agents[0]], issues), []);
+  const moved = { w: { fromType: "claude_local", fromModel: null, at: 0 } };
+  assert.deepEqual(returnOffers({ Claude: pace(10) }, [{ ...agent("w", "codex_local"), status: "running" }], moved), []);
+  assert.deepEqual(returnOffers({ Claude: pace(10) }, [{ ...agent("w", "codex_local"), status: "idle" }], moved).map((x) => x.back), ["Claude"]);
+});
+
 test("a moved agent is offered back once its own engine has room", () => {
   const moved = { w: { fromType: "claude_local", fromModel: "claude-sonnet-5-5", at: 0 } };
   const agents = [agent("w", "codex_local")];
