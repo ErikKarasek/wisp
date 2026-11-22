@@ -145,6 +145,21 @@ pub fn remote(app: &AppHandle) -> Option<Remote> {
     Some(Remote { token: crate::store::secret_get("telegram")?, chat })
 }
 
+/// Permission prompts on the phone, by message id, so a reply to one answers that one.
+static PERM_MESSAGES: std::sync::Mutex<Vec<(i64, String)>> = std::sync::Mutex::new(Vec::new());
+
+pub fn remember_perm(message_id: i64, perm_id: &str) {
+    PERM_MESSAGES.lock().unwrap_or_else(|e| e.into_inner()).push((message_id, perm_id.to_string()));
+}
+
+pub fn forget_perm(message_id: i64) {
+    PERM_MESSAGES.lock().unwrap_or_else(|e| e.into_inner()).retain(|(m, _)| *m != message_id);
+}
+
+fn perm_for(message_id: i64) -> Option<String> {
+    PERM_MESSAGES.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(m, _)| *m == message_id).map(|(_, p)| p.clone())
+}
+
 /// A message with buttons; returns its id so it can be edited later.
 pub async fn send_buttons(r: &Remote, text: &str, buttons: &[(&str, String)]) -> Result<i64, String> {
     let row: Vec<Value> = buttons.iter().map(|(label, data)| json!({ "text": label, "callback_data": data })).collect();
@@ -341,6 +356,13 @@ pub fn start_listening(app: &AppHandle) {
                     }
                     let text = m["text"].as_str().unwrap_or("").trim().to_string();
                     if text.is_empty() {
+                        continue;
+                    }
+                    // A reply to a permission prompt: declines it and tells Claude why (issue #26).
+                    if let Some(perm) = m["reply_to_message"]["message_id"].as_i64().and_then(perm_for) {
+                        if !crate::claudecode::decide(&perm, &format!("deny:{text}")) {
+                            let _ = send_quiet(&r.token, &r.chat, "Tohle povolení už je vyřízené.").await;
+                        }
                         continue;
                     }
                     let _ = app.emit_to(

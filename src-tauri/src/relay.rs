@@ -62,7 +62,7 @@ pub fn start(app: &AppHandle) {
                     Some("perm") => {
                         let id = cmd["permId"].as_str().unwrap_or("");
                         let answer = cmd["answer"].as_str().unwrap_or("");
-                        if ["allow", "always", "deny", "terminal"].contains(&answer) {
+                        if ["allow", "always", "deny", "terminal"].contains(&answer) || answer.starts_with("deny:") {
                             crate::claudecode::decide(id, answer);
                         }
                     }

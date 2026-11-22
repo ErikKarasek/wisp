@@ -765,18 +765,26 @@ export async function startNotch() {
         <button data-a="terminal" title="Nech to na terminálu">Terminál</button>
         <button data-a="always" title="Povolit i příště: ${escHtml(p.rule)}">Vždy</button>
         <button data-a="allow" class="go">Povolit</button>
-      </div>`;
-    steps.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) =>
-      b.addEventListener("click", () => {
-        // false means nobody is waiting for that request any more; the card closes either way,
-        // but celebrating a permission that never arrived anywhere would be confusing.
-        void invoke<boolean>("cc_decide", { id: p.id, answer: b.dataset.a }).then((heard) => {
-          if (heard && (b.dataset.a === "allow" || b.dataset.a === "always")) wink();
-        });
-        perms = perms.filter((x) => x.id !== p.id);
-        redraw();
-      }),
-    );
+      </div>
+      <div class="answer why"><input type="text" placeholder="Nebo napiš, co má udělat místo toho…" spellcheck="false"><button>Poslat</button></div>`;
+    const answer = (a: string) => {
+      // false means nobody is waiting for that request any more; the card closes either way,
+      // but celebrating a permission that never arrived anywhere would be confusing.
+      void invoke<boolean>("cc_decide", { id: p.id, answer: a }).then((heard) => {
+        if (heard && (a === "allow" || a === "always")) wink();
+      });
+      perms = perms.filter((x) => x.id !== p.id);
+      redraw();
+    };
+    steps.querySelectorAll<HTMLButtonElement>("[data-a]").forEach((b) => b.addEventListener("click", () => answer(b.dataset.a!)));
+    // A typed reply declines this request and hands Claude the text, so it can try another way
+    // instead of stopping (issue #26). Empty, it is the plain Zamítnout.
+    const why = steps.querySelector<HTMLInputElement>(".why input")!;
+    const deny = () => answer(why.value.trim() ? `deny:${why.value.trim()}` : "deny");
+    steps.querySelector(".why button")!.addEventListener("click", deny);
+    why.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") deny();
+    });
   }
 
   // ----- AskUserQuestion: Claude's own question, answered on buttons in the notch -----

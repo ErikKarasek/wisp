@@ -306,6 +306,24 @@ async function main() {
   check("povolení pod jinou kartou: karta ji opravdu přepsala", prekryto.includes("OKNO"), prekryto);
   check("povolení pod jinou kartou: po překreslení jde odkliknout", kliknuto7 && odpoved?.args?.id === "perm3" && odpoved?.args?.answer === "allow", `kliknuto=${kliknuto7} ${JSON.stringify(odpoved)}`);
 
+  // ---- 7b. A typed reply declines the request and carries the text (#26) -----
+  await open();
+  await fire("notch-open", true);
+  await fire("dispecink-state", snapshot());
+  await fire("cc-permission", { ...perm, id: "perm-why" });
+  await settle();
+  const pole = page.locator(".steps .why input");
+  const polePritomno = (await pole.count()) === 1;
+  if (polePritomno) {
+    await pole.fill("radši spusť jen testy");
+    await pole.press("Enter");
+    await settle();
+  }
+  const proc = await page.evaluate(() => window.__calls.filter((c) => c.cmd === "cc_decide").pop());
+  const zavreno = await page.evaluate(() => !document.querySelector(".steps .why"));
+  check("povolení slovy: odpověď zamítne s textem", polePritomno && proc?.args?.id === "perm-why" && proc?.args?.answer === "deny:radši spusť jen testy", JSON.stringify(proc));
+  check("povolení slovy: karta po odeslání zmizí", zavreno);
+
   // ---- 8. A prompt over a quick question clears away with its answer -------
   // A quick question owns the card until it is closed, and a permission prompt paints over it.
   // Answering the prompt has to give the card back; it used to stay on screen, because the
