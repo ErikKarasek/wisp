@@ -245,6 +245,13 @@ fn project(v: &Value) -> String {
     file_name(cwd)
 }
 
+/// The agent's name for a prompt from one of Paperclip's agents, so the card says who asks.
+fn agent_name(v: &Value) -> Option<String> {
+    let id = agent_workspace(v.get("cwd").and_then(Value::as_str).unwrap_or(""))?.to_string();
+    let all = tauri::async_runtime::block_on(crate::voice::agents());
+    Some(all.into_iter().find(|(_, a, _)| *a == id).map(|(name, _, _)| name).unwrap_or_else(|| "Agent".into()))
+}
+
 /// The agent id when this Claude session is one of Paperclip's agents, not Erik in a terminal.
 fn agent_workspace(cwd: &str) -> Option<&str> {
     let (_, rest) = cwd.split_once("/.paperclip/")?;
@@ -312,11 +319,8 @@ fn respond(req: tiny_http::Request, body: String) {
 }
 
 fn permission(app: &AppHandle, v: &Value) -> String {
-    // An agent's own Claude decides by its own permission mode; asking Erik in the notch would
-    // only hold the agent up for a minute on every step.
-    if agent_workspace(v.get("cwd").and_then(Value::as_str).unwrap_or("")).is_some() {
-        return String::new();
-    }
+    // An agent's Claude asks only when its permission mode in Wisp says so (issue #26); in full
+    // access it never gets here. With nobody at the terminal, Erik is the one to ask.
     let tool = v.get("tool_name").and_then(Value::as_str).unwrap_or("").to_string();
     // AskUserQuestion has nothing to permit: the question itself is the prompt, and the
     // `/cc/ask` hook already put it in the notch (or left it to the terminal). A permission
@@ -333,7 +337,7 @@ fn permission(app: &AppHandle, v: &Value) -> String {
     let ask = CcPermission {
         id: id.clone(),
         session: v.get("session_id").and_then(Value::as_str).unwrap_or("").to_string(),
-        project: project(v),
+        project: agent_name(v).unwrap_or_else(|| project(v)),
         detail: detail(&tool, &input),
         rule: rule(&tool, &input),
         tool,
