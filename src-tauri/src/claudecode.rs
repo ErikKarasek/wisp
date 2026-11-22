@@ -351,15 +351,21 @@ fn permission(app: &AppHandle, v: &Value) -> String {
             ("Vždy", format!("cc:always:{id}")),
             ("Zamítnout", format!("cc:deny:{id}")),
         ];
-        tauri::async_runtime::block_on(crate::telegram::send_buttons(&r, &text, &buttons)).ok().map(|m| (r, m, text))
+        let hint = format!("{text}\n\nNebo odpověz na tuhle zprávu, co má udělat místo toho.");
+        let sent = tauri::async_runtime::block_on(crate::telegram::send_buttons(&r, &hint, &buttons)).ok();
+        sent.inspect(|m| crate::telegram::remember_perm(*m, &id)).map(|m| (r, m, text))
     });
     let answer = rx.recv_timeout(if phone.is_some() { HOLD_AWAY } else { HOLD }).unwrap_or_default();
     if let Some((r, m, text)) = phone {
+        crate::telegram::forget_perm(m);
         let what = match answer.as_str() {
-            "allow" => "✓ povoleno",
-            "always" => "✓ povoleno i příště",
-            "deny" => "✗ zamítnuto",
-            _ => "→ zeptá se terminál",
+            "allow" => "✓ povoleno".to_string(),
+            "always" => "✓ povoleno i příště".to_string(),
+            "deny" => "✗ zamítnuto".to_string(),
+            a => match a.strip_prefix("deny:") {
+                Some(why) => format!("✗ zamítnuto: {}", why.trim()),
+                None => "→ zeptá se terminál".to_string(),
+            },
         };
         tauri::async_runtime::block_on(crate::telegram::edit(&r, m, &format!("{text}\n\n{what}")));
     }
@@ -367,14 +373,32 @@ fn permission(app: &AppHandle, v: &Value) -> String {
     ASKS.lock().unwrap().retain(|a| a.id != id);
     let _ = app.emit("cc-permission-done", id);
     crate::notch::release();
-    let decision = match answer.as_str() {
-        "allow" => json!({ "behavior": "allow" }),
-        "always" => json!({ "behavior": "allow", "addPermissionRules": [ask.rule] }),
-        "deny" => json!({ "behavior": "deny", "message": "Zamítnuto ve Wispu." }),
+    match decision(&answer, &ask.rule) {
+        Some(decision) => json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": decision } }).to_string(),
         // "terminal" or no answer: Claude Code asks in the terminal.
-        _ => return String::new(),
-    };
-    json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": decision } }).to_string()
+        None => String::new(),
+    }
+}
+
+/// How long a typed reason may be. Enough for a few sentences, not a pasted log.
+const REASON_MAX: usize = 1000;
+
+/// What Claude Code gets for an answer. `deny:<text>` declines this one request and hands the
+/// text to Claude as feedback, so it can take the hint and try another way instead of stopping
+/// (issue #26). Other pending prompts are not touched: one reply answers one request.
+fn decision(answer: &str, rule: &str) -> Option<Value> {
+    match answer {
+        "allow" => Some(json!({ "behavior": "allow" })),
+        "always" => Some(json!({ "behavior": "allow", "addPermissionRules": [rule] })),
+        "deny" => Some(json!({ "behavior": "deny", "message": "Zamítnuto ve Wispu." })),
+        a => {
+            let why: String = a.strip_prefix("deny:")?.trim().chars().take(REASON_MAX).collect();
+            if why.is_empty() {
+                return Some(json!({ "behavior": "deny", "message": "Zamítnuto ve Wispu." }));
+            }
+            Some(json!({ "behavior": "deny", "message": format!("Erik to zamítl a napsal: {why}") }))
+        }
+    }
 }
 
 // ---------- AskUserQuestion: Claude's own question, answered in the notch ----------
@@ -863,6 +887,33 @@ mod ask_tests {
 
     fn input(questions: Value) -> Value {
         json!({ "questions": questions })
+    }
+
+    #[test]
+    fn a_reply_denies_with_the_text_as_feedback() {
+        let d = super::decision("deny: radši spusť jen testy ", "Bash(rm *)").unwrap();
+        assert_eq!(d["behavior"], "deny");
+        assert_eq!(d["message"], "Erik to zamítl a napsal: radši spusť jen testy");
+        assert!(d.get("interrupt").is_none());
+    }
+
+    #[test]
+    fn an_empty_reply_is_a_plain_deny() {
+        assert_eq!(super::decision("deny:   ", "").unwrap(), json!({ "behavior": "deny", "message": "Zamítnuto ve Wispu." }));
+    }
+
+    #[test]
+    fn buttons_and_the_terminal_keep_their_meaning() {
+        assert_eq!(super::decision("always", "Bash(git push *)").unwrap()["addPermissionRules"][0], "Bash(git push *)");
+        assert_eq!(super::decision("allow", "").unwrap()["behavior"], "allow");
+        assert!(super::decision("terminal", "").is_none());
+        assert!(super::decision("", "").is_none());
+    }
+
+    #[test]
+    fn a_long_reply_is_cut() {
+        let d = super::decision(&format!("deny:{}", "á".repeat(5000)), "").unwrap();
+        assert!(d["message"].as_str().unwrap().chars().count() < 1100);
     }
 
     #[test]
