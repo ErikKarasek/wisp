@@ -2,6 +2,7 @@
 // name, role, boss, model, budget, waking on its own, skills and instructions.
 
 import { invoke } from "@tauri-apps/api/core";
+import { MODES, carryMode, modeConfig, modeOf, supported, type PermMode } from "./permmode";
 
 type Obj = Record<string, any>;
 type Engine = "claude_local" | "codex_local";
@@ -130,6 +131,10 @@ export async function openAgentForm(o: AgentFormOptions) {
   const cfg = agent?.adapterConfig ?? {};
   let engine: Engine = agent?.adapterType === "codex_local" ? "codex_local" : "claude_local";
   const startEngine = engine;
+  /** How much it may do without asking (issue #26). Its prompts come to the notch and Telegram. */
+  let mode: PermMode = modeOf(engine, cfg);
+  const startMode = mode;
+  const modeOptions = (e: Engine, m: PermMode) => MODES[e].map((x) => `<option value="${x.id}" ${x.id === supported(e, m) ? "selected" : ""}>${esc(x.label)}</option>`).join("");
   const model = cfg.model ?? (engine === "codex_local" ? models.codex_local[0]?.id : "claude-sonnet-5-5") ?? "";
   if (model && !models[engine].some((m) => m.id === model)) models[engine].unshift({ id: model, label: model });
   const modelOptions = (e: Engine, current: string) =>
@@ -154,6 +159,7 @@ export async function openAgentForm(o: AgentFormOptions) {
       <option value="codex_local" ${engine === "codex_local" ? "selected" : ""}>ChatGPT (tvoje předplatné ChatGPT, přes Codex)</option>
     </select></label>
     <label class="row">Model<select data-f="model">${modelOptions(engine, model)}</select></label>
+    <label class="row">Povolení<select data-f="mode">${modeOptions(engine, mode)}</select></label>
     <label class="row">Rozpočet<span class="inline"><input type="number" data-f="budget" min="0" step="1" value="${Math.round((agent?.budgetMonthlyCents ?? 500) / 100)}"> $ měsíčně, pak se sám pozastaví</span></label>
     <div class="row"><span>Probouzení</span><span class="inline"><label class="check"><input type="checkbox" data-f="hb" ${heartbeat.enabled ? "checked" : ""}> samo každých</label>
       <input type="number" data-f="hbMin" min="5" step="5" value="${Math.max(5, Math.round((heartbeat.intervalSec ?? 3600) / 60))}"> min <small>jinak jen když dostane úkol</small></span></div>
@@ -175,7 +181,9 @@ export async function openAgentForm(o: AgentFormOptions) {
   q('[data-f="engine"]').addEventListener("change", (e) => {
     engine = (e.target as HTMLSelectElement).value as Engine;
     q<HTMLSelectElement>('[data-f="model"]').innerHTML = modelOptions(engine, engine === startEngine ? model : models[engine][0]?.id ?? "");
+    q<HTMLSelectElement>('[data-f="mode"]').innerHTML = modeOptions(engine, mode);
   });
+  q('[data-f="mode"]').addEventListener("change", (e) => (mode = (e.target as HTMLSelectElement).value as PermMode));
   q<HTMLTextAreaElement>('[data-f="instructions"]').value = agent ? instructions : starterInstructions("", "");
   if (!agent) {
     // Keep the starter text in step with the name until the user edits it.
@@ -274,10 +282,13 @@ export async function openAgentForm(o: AgentFormOptions) {
           // A new engine: Paperclip starts the adapter config afresh but keeps env.
           // Everything else (instructions path, env) is carried over explicitly.
           const { engine: _e, command: _c, ...rest } = cfg;
-          await request("PATCH", `/agents/${agent.id}`, { ...common, adapterType: engine, adapterConfig: { ...rest, ...codex, model, paperclipSkillSync: { desiredSkills } } });
+          const moved = carryMode(startEngine, engine, rest);
+          await request("PATCH", `/agents/${agent.id}`, { ...common, adapterType: engine, adapterConfig: { ...moved, ...modeConfig(engine, moved, supported(engine, mode)), ...codex, model, paperclipSkillSync: { desiredSkills } } });
         } else {
-          // adapterConfig is merged key by key, so env and the rest stay as they are.
-          await request("PATCH", `/agents/${agent.id}`, { ...common, adapterConfig: { ...codex, model, paperclipSkillSync: { desiredSkills } } });
+          // adapterConfig is merged key by key, so env and the rest stay as they are. The mode
+          // is only written when it changed, so an agent's own extra args are left alone.
+          const perm = mode !== startMode ? modeConfig(engine, cfg, mode) : {};
+          await request("PATCH", `/agents/${agent.id}`, { ...common, adapterConfig: { ...codex, ...perm, model, paperclipSkillSync: { desiredSkills } } });
         }
         if (text !== instructions) await request("PUT", `/agents/${agent.id}/instructions-bundle/file`, { path: "AGENTS.md", content: text });
         await setToken(agent.id, name);
@@ -290,6 +301,7 @@ export async function openAgentForm(o: AgentFormOptions) {
           adapterType: engine,
           adapterConfig: {
             ...(engine === "codex_local" ? await codexConfig() : {}),
+            ...modeConfig(engine, {}, supported(engine, mode)),
             model,
             paperclipSkillSync: { desiredSkills },
             // So gh and claude from ~/.local/bin are found, like the other agents.

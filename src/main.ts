@@ -9,6 +9,7 @@ import { focusAgent, renderChat } from "./chat";
 import { startPhone } from "./phone";
 import { startRelay } from "./relay";
 import { failureSentence, statusSentence } from "./say";
+import { carryMode } from "./permmode";
 
 /** Sidebar entries that replace the cards with a view of their own. */
 const VIEWS = ["settings", "tasks", "reviews", "chat"];
@@ -886,7 +887,9 @@ async function switchEngine(agentId: string, to: Engine, model: string | null) {
   const config = fresh.adapterConfig ?? {};
   const target = model ?? (to === "ChatGPT" ? CHATGPT_MODELS[0].id : CLAUDE_MODEL);
   const codex = to === "ChatGPT" ? await codexConfig() : {};
-  await pc("PATCH", `/agents/${agentId}`, { adapterType: ADAPTER[to], adapterConfig: movedConfig(config, to, target, codex) });
+  // The permission mode travels too, as close as the new engine allows (issue #26).
+  const adapterConfig = carryMode(String(fresh.adapterType), ADAPTER[to], movedConfig(config, to, target, codex));
+  await pc("PATCH", `/agents/${agentId}`, { adapterType: ADAPTER[to], adapterConfig });
   return { fromType: String(fresh.adapterType), fromModel: (config.model as string | undefined) ?? null };
 }
 
